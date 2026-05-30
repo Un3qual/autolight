@@ -118,13 +118,14 @@ Window {
                     height: parent.height
                     color: index % 2 === 0 ? "#171a20" : "#14171d"
                     border.color: "#2f333d"
+                    property real pixelsPerSecond: 96
 
                     Repeater {
-                        model: markerCount
+                        model: markerSpans
                         Rectangle {
-                            width: 8
+                            width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * parent.pixelsPerSecond)
                             height: parent.height - 18
-                            x: 24 + index * 48
+                            x: Math.max(0, Math.min(parent.width - width, 24 + modelData.timestamp * parent.pixelsPerSecond))
                             y: 9
                             radius: 2
                             color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"

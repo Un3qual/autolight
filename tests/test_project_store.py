@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autolight.project.models import ProjectDocument, ResultState, Track, TrackType
+from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import (
     ProjectStore,
     add_generated_track,
@@ -159,6 +159,84 @@ class ProjectStoreTest(unittest.TestCase):
 
         self.assertEqual(edit.result_state, ResultState.COMPLETE)
         self.assertEqual(pitch.result_state, ResultState.STALE)
+
+    def test_editable_track_clones_selected_source_markers(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+        beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
+        project.markers.append(
+            Marker(
+                id="marker_1",
+                track_id=beat.id,
+                timestamp=1.25,
+                duration=0.5,
+                label="Beat",
+                category="timing",
+                confidence=0.8,
+                tags=["strong"],
+                source_transform="markers.beats",
+                metadata={"energy": "high"},
+            )
+        )
+
+        edit = create_editable_track_from_markers(project, beat.id, "Edited Beats", ["marker_1"])
+
+        copied = [marker for marker in project.markers if marker.track_id == edit.id]
+        self.assertEqual(len(copied), 1)
+        self.assertEqual(copied[0].timestamp, 1.25)
+        self.assertEqual(copied[0].duration, 0.5)
+        self.assertEqual(copied[0].label, "Beat")
+        self.assertEqual(copied[0].category, "timing")
+        self.assertEqual(copied[0].confidence, 0.8)
+        self.assertEqual(copied[0].tags, ["strong"])
+        self.assertEqual(copied[0].source_transform, "markers.beats")
+        self.assertEqual(copied[0].source_marker_ids, ["marker_1"])
+        self.assertEqual(copied[0].metadata, {"energy": "high"})
+
+    def test_editable_track_rejects_missing_or_foreign_source_markers(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+        beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
+        pitch = add_generated_track(project, beat.id, "Pitch", "pitch.basic", {}, "1", "markers.v1", "h2")
+        project.markers.append(Marker(id="marker_pitch", track_id=pitch.id, timestamp=2.0))
+
+        with self.assertRaisesRegex(ValueError, "source marker not found"):
+            create_editable_track_from_markers(project, beat.id, "Edited Beats", ["missing"])
+
+        with self.assertRaisesRegex(ValueError, "source marker not found"):
+            create_editable_track_from_markers(project, beat.id, "Edited Beats", ["marker_pitch"])
+
+        self.assertEqual([track for track in project.tracks if track.type == TrackType.EDITABLE], [])
+
+    def test_graph_validation_rejects_orphan_markers_jobs_and_cache_refs(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+
+        project.markers.append(Marker(id="marker_orphan", track_id="missing", timestamp=0.0))
+        with self.assertRaisesRegex(ValueError, "marker references missing track"):
+            validate_graph(project)
+        project.markers.clear()
+
+        project.job_runs.append(JobRun(id="job_orphan", track_id="missing", transform_id="x", parameters_hash="h"))
+        with self.assertRaisesRegex(ValueError, "job run references missing track"):
+            validate_graph(project)
+        project.job_runs.clear()
+
+        source.cache_refs.append("entry_missing")
+        with self.assertRaisesRegex(ValueError, "track cache ref not found"):
+            validate_graph(project)
+
+        project.cache_entries.append(
+            CacheEntry(
+                id="entry_missing",
+                dependency_hash="dep",
+                artifact_kind="stem",
+                path="stem/entry_missing.bin",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        validate_graph(project)
 
 
 def import_audio_asset_from_bytes(project, payload: bytes):

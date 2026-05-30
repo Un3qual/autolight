@@ -222,6 +222,7 @@ class LocalJobQueueTest(unittest.TestCase):
         def assert_artifact_dir_exists(context, params):
             if not context.artifact_dir.is_dir():
                 raise AssertionError(f"missing artifact dir: {context.artifact_dir}")
+            (context.artifact_dir / "output.json").write_text("{}", encoding="utf-8")
             return TransformResult(artifacts={"output": str(context.artifact_dir / "output.json")})
 
         registry = TransformRegistry()
@@ -249,6 +250,62 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual(track.result_state, ResultState.COMPLETE)
         self.assertEqual(run.state, ResultState.COMPLETE)
         self.assertNotEqual(track.cache_refs, [])
+        self.assertEqual(track.cache_refs, run.produced_cache_refs)
+        self.assertEqual(track.cache_refs, [entry.id for entry in project.cache_entries])
+        self.assertFalse(Path(track.cache_refs[0]).is_absolute())
+
+    def test_artifact_job_records_cache_entry_and_can_mark_missing_artifact_stale(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp),
+                "stems.vocals_stand_in",
+                {"label": "vocals"},
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+            track = next(track for track in project.tracks if track.id == track_id)
+            self.assertEqual(track.result_state, ResultState.COMPLETE)
+            self.assertEqual(len(project.cache_entries), 1)
+            self.assertEqual(track.cache_refs, [project.cache_entries[0].id])
+            self.assertEqual(project.cache_entries[0].artifact_kind, "stem")
+            cached_path = queue.cache_store.artifact_path(project.cache_entries[0])
+            self.assertTrue(cached_path.is_file())
+            self.assertEqual(cached_path.read_text(encoding="utf-8"), '{"samples": [], "stem": "vocals"}')
+
+            cached_path.unlink()
+            invalid_refs = queue.refresh_cache_validity(project)
+
+            self.assertEqual(invalid_refs, [project.cache_entries[0].id])
+            self.assertEqual(track.result_state, ResultState.STALE)
+            self.assertIn("cache artifact", track.error)
+
+    def test_track_change_callback_fires_for_running_and_complete_states(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp), "markers.fixed_interval", {"duration": 1.0, "interval": 0.5}
+            )
+            changed_track_ids = []
+            queue = LocalJobQueue(
+                registry,
+                artifact_root=Path(tmp) / "artifacts",
+                on_track_changed=changed_track_ids.append,
+            )
+
+            job_id = queue.submit(project, track_id)
+            queue.wait(job_id, timeout=2)
+
+        self.assertEqual(changed_track_ids[0], track_id)
+        self.assertEqual(changed_track_ids[-1], track_id)
+        self.assertGreaterEqual(len(changed_track_ids), 2)
 
     def test_malformed_marker_output_leaves_no_partial_markers(self):
         def malformed_markers(context, params):

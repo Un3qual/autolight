@@ -101,6 +101,14 @@ def create_editable_track_from_markers(
     if find_track(project, source_track_id) is None:
         raise ValueError(f"source track not found: {source_track_id}")
 
+    source_markers = {marker.id: marker for marker in project.markers if marker.track_id == source_track_id}
+    selected_markers = []
+    for marker_id in source_marker_ids:
+        try:
+            selected_markers.append(source_markers[marker_id])
+        except KeyError as exc:
+            raise ValueError(f"source marker not found on track {source_track_id}: {marker_id}") from exc
+
     track = Track(
         id=new_id("track"),
         type=TrackType.EDITABLE,
@@ -110,6 +118,22 @@ def create_editable_track_from_markers(
         provenance={"source_track_id": source_track_id, "source_marker_ids": list(source_marker_ids)},
     )
     project.tracks.append(track)
+    for source_marker in selected_markers:
+        project.markers.append(
+            Marker(
+                id=new_id("marker"),
+                track_id=track.id,
+                timestamp=source_marker.timestamp,
+                duration=source_marker.duration,
+                label=source_marker.label,
+                category=source_marker.category,
+                confidence=source_marker.confidence,
+                tags=list(source_marker.tags),
+                source_transform=source_marker.source_transform,
+                source_marker_ids=[source_marker.id],
+                metadata=dict(source_marker.metadata),
+            )
+        )
     return track
 
 
@@ -121,6 +145,11 @@ def validate_graph(project: ProjectDocument) -> None:
     track_ids = {track.id for track in project.tracks}
     if len(track_ids) != len(project.tracks):
         raise ValueError("duplicate track id")
+    cache_entry_ids = {entry.id for entry in project.cache_entries}
+    if len(cache_entry_ids) != len(project.cache_entries):
+        raise ValueError("duplicate cache entry id")
+    if len({marker.id for marker in project.markers}) != len(project.markers):
+        raise ValueError("duplicate marker id")
 
     for track in project.tracks:
         if track.type == TrackType.SOURCE and track.input_track_ids:
@@ -130,6 +159,20 @@ def validate_graph(project: ProjectDocument) -> None:
         for input_id in track.input_track_ids:
             if input_id not in track_ids:
                 raise ValueError(f"missing input track: {input_id}")
+        for cache_ref in track.cache_refs:
+            if cache_ref not in cache_entry_ids:
+                raise ValueError(f"track cache ref not found: {cache_ref}")
+
+    for marker in project.markers:
+        if marker.track_id not in track_ids:
+            raise ValueError(f"marker references missing track: {marker.track_id}")
+
+    for run in project.job_runs:
+        if run.track_id not in track_ids:
+            raise ValueError(f"job run references missing track: {run.track_id}")
+        for cache_ref in run.produced_cache_refs:
+            if cache_ref not in cache_entry_ids:
+                raise ValueError(f"job run cache ref not found: {cache_ref}")
 
     _validate_acyclic(project)
 

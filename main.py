@@ -16,14 +16,15 @@ def main(argv: list[str] | None = None) -> int:
     engine.rootContext().setContextProperty("appController", controller)
     engine.addImportPath(sys.path[0])
     engine.loadFromModule("UI", "Main")
-    if not engine.rootObjects():
-        return -1
-    if "--smoke" in args:
+    try:
+        if not engine.rootObjects():
+            return -1
+        if "--smoke" in args:
+            return 0
+        return app.exec()
+    finally:
         del engine
-        return 0
-    exit_code = app.exec()
-    del engine
-    return exit_code
+        controller.cleanup()
 
 
 if __name__ == "__main__":

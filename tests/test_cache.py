@@ -124,6 +124,12 @@ class CacheTest(unittest.TestCase):
 
             self.assertFalse(store.is_entry_valid(entry))
 
+    def test_is_entry_valid_returns_false_for_invalid_persisted_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CacheStore(Path(tmp))
+
+            self.assertFalse(store.is_entry_valid(cache_entry("../markers.bin")))
+
 
 def cache_entry(path: str) -> CacheEntry:
     return CacheEntry(

@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock
-from typing import Any
+from typing import Any, Callable
 
 from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
-from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track
+from autolight.cache.store import CacheStore
+from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track
 from autolight.project.store import find_track, new_id
 
 
@@ -23,10 +24,19 @@ class _JobSnapshot:
 
 
 class LocalJobQueue:
-    def __init__(self, registry: TransformRegistry, artifact_root: Path):
+    def __init__(
+        self,
+        registry: TransformRegistry,
+        artifact_root: Path,
+        on_track_changed: Callable[[str], None] | None = None,
+    ):
         self.registry = registry
         self.artifact_root = artifact_root
         self.artifact_root.mkdir(parents=True, exist_ok=True)
+        self.cache_store = CacheStore(self.artifact_root / "cache")
+        self._work_root = self.artifact_root / "work"
+        self._work_root.mkdir(parents=True, exist_ok=True)
+        self._on_track_changed = on_track_changed
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._lock = Lock()
         self._futures: dict[str, Future] = {}
@@ -73,7 +83,8 @@ class LocalJobQueue:
             future = self._executor.submit(self._run, project, track, run, cancel_event, snapshot)
             self._futures[job_id] = future
             self._cancel_events[job_id] = cancel_event
-            return job_id
+        self._notify_track_changed(track_id)
+        return job_id
 
     def cancel(self, job_id: str) -> None:
         with self._lock:
@@ -95,6 +106,36 @@ class LocalJobQueue:
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True)
 
+    def refresh_cache_validity(self, project: ProjectDocument) -> list[str]:
+        invalid_refs: list[str] = []
+        changed_track_ids: list[str] = []
+        with self._lock:
+            entries_by_id = {entry.id: entry for entry in project.cache_entries}
+            for entry in project.cache_entries:
+                if self.cache_store.is_entry_valid(entry):
+                    entry.validation_status = "valid"
+                else:
+                    entry.validation_status = "invalid"
+
+            for track in project.tracks:
+                track_invalid_refs = [
+                    cache_ref
+                    for cache_ref in track.cache_refs
+                    if cache_ref not in entries_by_id
+                    or entries_by_id[cache_ref].validation_status != "valid"
+                ]
+                if not track_invalid_refs:
+                    continue
+                invalid_refs.extend(track_invalid_refs)
+                if track.result_state == ResultState.COMPLETE:
+                    track.result_state = ResultState.STALE
+                track.error = f"cache artifact missing or invalid: {track_invalid_refs[0]}"
+                changed_track_ids.append(track.id)
+
+        for changed_track_id in changed_track_ids:
+            self._notify_track_changed(changed_track_id)
+        return invalid_refs
+
     def _run(
         self,
         project: ProjectDocument,
@@ -103,7 +144,7 @@ class LocalJobQueue:
         cancel_event: Event,
         snapshot: _JobSnapshot,
     ) -> None:
-        artifact_dir = self.artifact_root / run.id
+        artifact_dir = self._work_root / run.id
 
         def progress(value: float) -> None:
             with self._lock:
@@ -125,7 +166,8 @@ class LocalJobQueue:
                 self._marker_from_result(snapshot.track_id, snapshot.transform_id, item)
                 for item in result.markers
             ]
-            cache_refs = list(result.artifacts.values())
+            cache_entries = self._cache_entries_from_artifacts(result.artifacts, snapshot)
+            cache_refs = [entry.id for entry in cache_entries]
             with self._lock:
                 if cancel_event.is_set():
                     self._mark_finished_locked(track, run, ResultState.CANCELLED, snapshot)
@@ -134,6 +176,7 @@ class LocalJobQueue:
                     run.state = ResultState.COMPLETE
                     run.progress = 1.0
                     run.produced_cache_refs = cache_refs
+                    self._upsert_cache_entries_locked(project, cache_entries)
                     project.markers[:] = [
                         marker for marker in project.markers if marker.track_id != track.id
                     ]
@@ -152,6 +195,7 @@ class LocalJobQueue:
                 run.completed_at = datetime.now(timezone.utc).isoformat()
                 if self._active_job_by_track.get(track.id) == run.id:
                     self._active_job_by_track.pop(track.id, None)
+            self._notify_track_changed(track.id)
 
     def _mark_finished(
         self,
@@ -237,3 +281,46 @@ class LocalJobQueue:
             source_marker_ids=[str(marker_id) for marker_id in source_marker_ids],
             metadata=dict(metadata),
         )
+
+    def _cache_entries_from_artifacts(
+        self,
+        artifacts: dict[str, str],
+        snapshot: _JobSnapshot,
+    ) -> list[CacheEntry]:
+        cache_entries: list[CacheEntry] = []
+        for artifact_kind, artifact_path in artifacts.items():
+            source_path = Path(artifact_path)
+            payload = source_path.read_bytes()
+            cache_entries.append(
+                self.cache_store.write_bytes(
+                    artifact_kind,
+                    snapshot.dependency_hash,
+                    payload,
+                    snapshot.transform_version,
+                )
+            )
+        return cache_entries
+
+    def _upsert_cache_entries_locked(
+        self,
+        project: ProjectDocument,
+        cache_entries: list[CacheEntry],
+    ) -> None:
+        if not cache_entries:
+            return
+        entry_indexes = {entry.id: index for index, entry in enumerate(project.cache_entries)}
+        for entry in cache_entries:
+            existing_index = entry_indexes.get(entry.id)
+            if existing_index is None:
+                entry_indexes[entry.id] = len(project.cache_entries)
+                project.cache_entries.append(entry)
+            else:
+                project.cache_entries[existing_index] = entry
+
+    def _notify_track_changed(self, track_id: str) -> None:
+        if self._on_track_changed is None:
+            return
+        try:
+            self._on_track_changed(track_id)
+        except Exception:
+            pass

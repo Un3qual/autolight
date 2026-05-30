@@ -47,7 +47,7 @@ class CacheStore:
         try:
             path = self.artifact_path(entry)
             return path.is_file() and path.stat().st_size == entry.size_bytes
-        except OSError:
+        except (OSError, ValueError):
             return False
 
     def _validate_artifact_kind(self, artifact_kind: str) -> None:

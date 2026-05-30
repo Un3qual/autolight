@@ -33,6 +33,7 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("trackType"): b"trackType",
                     model.role_for_name("resultState"): b"resultState",
                     model.role_for_name("markerCount"): b"markerCount",
+                    model.role_for_name("markerSpans"): b"markerSpans",
                     model.role_for_name("error"): b"error",
                 },
             )
@@ -41,9 +42,58 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual(model.data(index, model.role_for_name("name")), "Beats")
             self.assertEqual(model.data(index, model.role_for_name("trackType")), "generated")
             self.assertEqual(model.data(index, model.role_for_name("markerCount")), 1)
+            self.assertEqual(
+                model.data(index, model.role_for_name("markerSpans")),
+                [
+                    {
+                        "id": "marker_1",
+                        "timestamp": 0.5,
+                        "duration": 0.0,
+                        "label": "",
+                        "category": "",
+                    }
+                ],
+            )
             self.assertEqual(model.data(index, model.role_for_name("resultState")), "complete")
             self.assertEqual(model.data(index, model.role_for_name("error")), "analysis failed")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
+
+    def test_marker_spans_are_sorted_by_timestamp_for_timeline_projection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, _source, generated = self._project_with_generated_track(Path(tmp))
+            project.markers.extend(
+                [
+                    Marker(id="marker_late", track_id=generated.id, timestamp=3.0, duration=0.25, label="Late"),
+                    Marker(id="marker_early", track_id=generated.id, timestamp=0.75, label="Early"),
+                ]
+            )
+            model = TimelineTrackModel()
+            model.set_project(project)
+
+            spans = model.data(model.index(1, 0), model.role_for_name("markerSpans"))
+
+            self.assertEqual([span["id"] for span in spans], ["marker_early", "marker_late"])
+            self.assertEqual([span["timestamp"] for span in spans], [0.75, 3.0])
+            self.assertEqual([span["duration"] for span in spans], [0.0, 0.25])
+
+    def test_refresh_track_emits_data_changed_for_existing_track(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, _source, generated = self._project_with_generated_track(Path(tmp))
+            model = TimelineTrackModel()
+            model.set_project(project)
+            emissions = []
+            model.dataChanged.connect(
+                lambda top_left, bottom_right, roles: emissions.append(
+                    (top_left.row(), bottom_right.row(), roles)
+                )
+            )
+
+            model.refresh_track(generated.id)
+
+            self.assertEqual(len(emissions), 1)
+            self.assertEqual(emissions[0][0:2], (1, 1))
+            self.assertIn(model.role_for_name("resultState"), emissions[0][2])
+            self.assertIn(model.role_for_name("markerSpans"), emissions[0][2])
 
     def test_role_names_returns_copy(self):
         model = TimelineTrackModel()

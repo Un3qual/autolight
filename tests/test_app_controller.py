@@ -55,7 +55,7 @@ class AppControllerTest(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
     def test_controller_loads_demo_project_into_timeline_model(self):
-        controller = AppController()
+        controller = self._controller()
 
         controller.load_demo_project()
 
@@ -63,7 +63,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.projectName, "Autolight Demo")
 
     def test_controller_emits_project_name_changed_when_demo_loads(self):
-        controller = AppController()
+        controller = self._controller()
         project_names = []
         controller.projectNameChanged.connect(lambda: project_names.append(controller.projectName))
 
@@ -72,12 +72,12 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(project_names, ["Autolight Demo"])
 
     def test_controller_parents_track_model(self):
-        controller = AppController()
+        controller = self._controller()
 
         self.assertIs(controller.trackModel.parent(), controller)
 
     def test_controller_demo_project_exposes_expected_track_roles(self):
-        controller = AppController()
+        controller = self._controller()
 
         controller.load_demo_project()
 
@@ -100,13 +100,13 @@ class AppControllerTest(unittest.TestCase):
                     "name": "Editable Cues",
                     "trackType": "editable",
                     "resultState": "complete",
-                    "markerCount": 0,
+                    "markerCount": 2,
                 },
             ],
         )
 
     def test_controller_uses_unique_demo_audio_paths(self):
-        controller = AppController()
+        controller = self._controller()
 
         controller.load_demo_project()
         first_path = controller._project.audio_assets[0].path
@@ -149,6 +149,9 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(qml.count("ListView {"), 1)
         self.assertIn("id: timelineRows", qml)
+        self.assertIn("model: markerSpans", qml)
+        self.assertIn("modelData.timestamp", qml)
+        self.assertNotIn("model: markerCount", qml)
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)
 
@@ -166,6 +169,11 @@ class AppControllerTest(unittest.TestCase):
         else:
             values["name"] = name
         return values
+
+    def _controller(self):
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        return controller
 
 
 if __name__ == "__main__":
