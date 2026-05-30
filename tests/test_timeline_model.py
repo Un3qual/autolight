@@ -131,6 +131,13 @@ class TimelineTrackModelTest(unittest.TestCase):
 
         self.assertEqual(model.roleNames()[model.role_for_name("name")], b"name")
 
+    def test_role_lookup_uses_cached_reverse_map(self):
+        model = TimelineTrackModel()
+        name_role = model.role_for_name("name")
+        model.ROLE_NAMES = RaisingRoleNames(model.ROLE_NAMES)
+
+        self.assertEqual(model.role_for_name("name"), name_role)
+
     def test_invalid_indexes_return_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, _source, _generated = self._project_with_generated_track(Path(tmp))
@@ -199,6 +206,11 @@ class TimelineTrackModelTest(unittest.TestCase):
 class RaisingMarkerList(list):
     def __iter__(self):
         raise AssertionError("marker list should not be scanned")
+
+
+class RaisingRoleNames(dict):
+    def items(self):
+        raise AssertionError("role names should not be scanned")
 
 
 if __name__ == "__main__":

@@ -165,20 +165,23 @@ class ProjectStoreTest(unittest.TestCase):
             with self.assertRaisesRegex(IsADirectoryError, "not a file"):
                 import_audio_asset(new_project("Demo"), Path(tmp))
 
-    def test_stale_propagation_marks_generated_descendants_only(self):
+    def test_stale_propagation_marks_dependent_tracks_without_overwriting_markers(self):
         project = new_project("Demo")
         source = import_audio_asset_from_bytes(project, b"audio")
         beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
-        edit = create_editable_track_from_markers(project, beat.id, "Edited Beats", [])
+        project.markers.append(Marker(id="marker_beat", track_id=beat.id, timestamp=1.0))
+        edit = create_editable_track_from_markers(project, beat.id, "Edited Beats", ["marker_beat"])
         pitch = add_generated_track(project, beat.id, "Pitch", "pitch.basic", {}, "1", "markers.v1", "h2")
         beat.result_state = ResultState.COMPLETE
         edit.result_state = ResultState.COMPLETE
         pitch.result_state = ResultState.COMPLETE
+        editable_marker_ids = [marker.id for marker in project.markers if marker.track_id == edit.id]
 
         mark_dependents_stale(project, beat.id)
 
-        self.assertEqual(edit.result_state, ResultState.COMPLETE)
+        self.assertEqual(edit.result_state, ResultState.STALE)
         self.assertEqual(pitch.result_state, ResultState.STALE)
+        self.assertEqual([marker.id for marker in project.markers if marker.track_id == edit.id], editable_marker_ids)
 
     def test_editable_track_clones_selected_source_markers(self):
         project = new_project("Demo")

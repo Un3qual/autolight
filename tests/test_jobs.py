@@ -13,7 +13,12 @@ from autolight.analysis.registry import (
 )
 from autolight.jobs.queue import LocalJobQueue
 from autolight.project.models import Marker, ResultState
-from autolight.project.store import add_generated_track, import_audio_asset, new_project
+from autolight.project.store import (
+    add_generated_track,
+    create_editable_track_from_markers,
+    import_audio_asset,
+    new_project,
+)
 
 
 class LocalJobQueueTest(unittest.TestCase):
@@ -323,7 +328,7 @@ class LocalJobQueueTest(unittest.TestCase):
             self.assertEqual(len(artifact_dirs), 1)
             self.assertFalse(artifact_dirs[0].exists())
 
-    def test_successful_job_marks_generated_descendants_stale(self):
+    def test_successful_job_marks_dependent_tracks_stale(self):
         def marker_transform(context, params):
             return TransformResult(markers=[{"timestamp": params["timestamp"]}])
 
@@ -345,6 +350,8 @@ class LocalJobQueueTest(unittest.TestCase):
                 "dep_downstream",
             )
             downstream.result_state = ResultState.COMPLETE
+            editable = create_editable_track_from_markers(project, upstream_id, "Edited Beats", [])
+            editable.result_state = ResultState.COMPLETE
             queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
             job_id = queue.submit(project, upstream_id)
 
@@ -353,6 +360,7 @@ class LocalJobQueueTest(unittest.TestCase):
         upstream = next(track for track in project.tracks if track.id == upstream_id)
         self.assertEqual(upstream.result_state, ResultState.COMPLETE)
         self.assertEqual(downstream.result_state, ResultState.STALE)
+        self.assertEqual(editable.result_state, ResultState.STALE)
 
     def test_artifact_job_records_cache_entry_and_can_mark_missing_artifact_stale(self):
         registry = TransformRegistry()

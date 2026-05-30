@@ -41,6 +41,9 @@ class EndToEndFlowTest(unittest.TestCase):
             self.addCleanup(queue.shutdown)
             job_id = queue.submit(project, generated.id)
             queue.wait(job_id, timeout=2)
+            job_run = next(run for run in project.job_runs if run.id == job_id)
+            self.assertEqual(generated.result_state, ResultState.COMPLETE)
+            self.assertEqual(job_run.state, ResultState.COMPLETE)
 
             source_marker_ids = [marker.id for marker in project.markers if marker.track_id == generated.id]
             editable = create_editable_track_from_markers(project, generated.id, "Editable Cues", source_marker_ids)

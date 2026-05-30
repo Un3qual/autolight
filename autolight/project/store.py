@@ -196,7 +196,7 @@ def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> No
     while changed:
         changed = False
         for track in project.tracks:
-            if track.type != TrackType.GENERATED:
+            if track.type == TrackType.SOURCE:
                 continue
             if track.id in stale_ids:
                 continue

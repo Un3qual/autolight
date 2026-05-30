@@ -35,7 +35,7 @@ The central abstraction is `TrackGraph`. A project contains imported audio asset
 
 Each track stores `input_track_ids` as a list. The first implementation validates that generated tracks have one input, but the project schema stays compatible with future DAG transforms.
 
-Generated tracks are read-only and reproducible. Rerunning a generated transform can replace its generated output. Editable tracks are not overwritten by reruns. They keep provenance back to source generated markers plus their own user edits.
+Generated tracks are read-only and reproducible. Rerunning a generated transform can replace its generated output. Editable tracks are not overwritten by reruns. They keep provenance back to source-generated markers plus their own user edits.
 
 ## Components
 
@@ -72,7 +72,7 @@ Adding a transform track records the parent input, transform ID, parameters, out
 
 Completed jobs write artifacts to the cache and write result references back into the project. The timeline model publishes the new state to QML. Failed jobs preserve the track and expose actionable errors.
 
-Changing a parent track, transform version, or transform parameters invalidates dependent generated tracks. Stale tracks keep previous output visible when available, but they are clearly marked stale. The user can rerun or delete them. Editable tracks remain stable and keep provenance even if their generated source becomes stale.
+Changing a parent track, transform version, or transform parameters invalidates dependent tracks. Stale tracks keep previous output visible when available, but they are clearly marked stale. The user can rerun or delete them. Editable track markers remain embedded and are not overwritten when their generated source changes.
 
 ## MVP Transform Set
 

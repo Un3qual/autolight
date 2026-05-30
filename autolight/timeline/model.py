@@ -22,6 +22,9 @@ class TimelineTrackModel(QAbstractListModel):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
         self._markers_by_track: dict[str, list[Marker]] = {}
+        self._role_by_name = {
+            role_name.decode("utf-8"): role for role, role_name in self.ROLE_NAMES.items()
+        }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
 
@@ -100,11 +103,7 @@ class TimelineTrackModel(QAbstractListModel):
             self.dataChanged.emit(model_index, model_index, list(self.ROLE_NAMES))
 
     def role_for_name(self, name: str) -> int:
-        encoded = name.encode("utf-8")
-        for role, role_name in self.ROLE_NAMES.items():
-            if role_name == encoded:
-                return role
-        raise KeyError(name)
+        return self._role_by_name[name]
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])
