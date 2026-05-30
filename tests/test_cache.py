@@ -69,6 +69,24 @@ class CacheTest(unittest.TestCase):
             self.assertTrue(store.is_entry_valid(entry))
             self.assertEqual(entry.artifact_kind, "markers")
 
+    def test_cache_store_rejects_same_size_corrupted_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CacheStore(Path(tmp))
+            entry = store.write_bytes("markers", "dep_hash", b"[]", "1")
+
+            store.artifact_path(entry).write_bytes(b"{}")
+
+            self.assertFalse(store.is_entry_valid(entry))
+
+    def test_cache_store_write_bytes_avoids_direct_final_path_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CacheStore(Path(tmp))
+
+            with patch.object(Path, "write_bytes", side_effect=AssertionError("direct write")):
+                entry = store.write_bytes("markers", "dep_hash", b"[]", "1")
+
+            self.assertTrue(store.is_entry_valid(entry))
+
     def test_cache_store_writes_file_without_reading_entire_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -82,6 +100,29 @@ class CacheTest(unittest.TestCase):
             self.assertEqual(store.artifact_path(entry).read_bytes(), b"stream me")
             self.assertTrue(store.is_entry_valid(entry))
             self.assertEqual(entry.artifact_kind, "stem")
+
+    def test_cache_store_write_file_reads_source_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "stem.wav"
+            source.write_bytes(b"stream me once")
+            store = CacheStore(root / "cache")
+            original_open = Path.open
+            source_read_opens = 0
+
+            def counting_open(path_self, *args, **kwargs):
+                nonlocal source_read_opens
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path_self == source and "r" in mode and "b" in mode:
+                    source_read_opens += 1
+                return original_open(path_self, *args, **kwargs)
+
+            with patch.object(Path, "open", counting_open):
+                entry = store.write_file("stem", "dep_hash", source, "1")
+
+            self.assertEqual(source_read_opens, 1)
+            self.assertEqual(store.artifact_path(entry).read_bytes(), b"stream me once")
+            self.assertTrue(store.is_entry_valid(entry))
 
     def test_cache_store_rejects_invalid_artifact_kind(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -76,6 +76,34 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual([span["timestamp"] for span in spans], [0.75, 3.0])
             self.assertEqual([span["duration"] for span in spans], [0.0, 0.25])
 
+    def test_marker_roles_use_cached_track_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, _source, generated = self._project_with_generated_track(Path(tmp))
+            project.markers.append(Marker(id="marker_1", track_id=generated.id, timestamp=0.5))
+            model = TimelineTrackModel()
+            model.set_project(project)
+            project.markers = RaisingMarkerList(project.markers)
+            index = model.index(1, 0)
+
+            self.assertEqual(model.data(index, model.role_for_name("markerCount")), 1)
+            self.assertEqual(
+                [span["id"] for span in model.data(index, model.role_for_name("markerSpans"))],
+                ["marker_1"],
+            )
+
+    def test_refresh_track_rebuilds_cached_marker_index_for_track(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, _source, generated = self._project_with_generated_track(Path(tmp))
+            model = TimelineTrackModel()
+            model.set_project(project)
+            index = model.index(1, 0)
+            self.assertEqual(model.data(index, model.role_for_name("markerCount")), 0)
+
+            project.markers.append(Marker(id="marker_1", track_id=generated.id, timestamp=0.5))
+            model.refresh_track(generated.id)
+
+            self.assertEqual(model.data(index, model.role_for_name("markerCount")), 1)
+
     def test_refresh_track_emits_data_changed_for_existing_track(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, _source, generated = self._project_with_generated_track(Path(tmp))
@@ -166,6 +194,11 @@ class TimelineTrackModelTest(unittest.TestCase):
             "dep",
         )
         return project, source, generated
+
+
+class RaisingMarkerList(list):
+    def __iter__(self):
+        raise AssertionError("marker list should not be scanned")
 
 
 if __name__ == "__main__":

@@ -256,6 +256,14 @@ class ProjectStoreTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source track references missing audio asset"):
             validate_graph(project)
 
+    def test_graph_validation_rejects_source_tracks_with_malformed_provenance(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+        source.provenance = []
+
+        with self.assertRaisesRegex(ValueError, "source track provenance"):
+            validate_graph(project)
+
     def test_graph_validation_rejects_duplicate_audio_asset_ids(self):
         project = new_project("Demo")
         import_audio_asset_from_bytes(project, b"audio")
@@ -271,6 +279,19 @@ class ProjectStoreTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "duplicate audio asset id"):
+            validate_graph(project)
+
+    def test_graph_validation_rejects_duplicate_job_run_ids(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+        project.job_runs.extend(
+            [
+                JobRun(id="job_duplicate", track_id=source.id, transform_id="x", parameters_hash="h1"),
+                JobRun(id="job_duplicate", track_id=source.id, transform_id="x", parameters_hash="h2"),
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate job run id"):
             validate_graph(project)
 
 

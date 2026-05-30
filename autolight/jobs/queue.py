@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,7 +12,7 @@ from typing import Any, Callable
 from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
 from autolight.cache.store import CacheStore
 from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track
-from autolight.project.store import find_track, new_id
+from autolight.project.store import find_track, mark_dependents_stale, new_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,11 @@ class LocalJobQueue:
             future = self._executor.submit(self._run, project, track, run, cancel_event, snapshot)
             self._futures[job_id] = future
             self._cancel_events[job_id] = cancel_event
+
+        def cleanup_completed(completed_future: Future, completed_job_id: str = job_id) -> None:
+            self._cleanup_job(completed_job_id, completed_future)
+
+        future.add_done_callback(cleanup_completed)
         self._notify_track_changed(track_id)
         return job_id
 
@@ -94,14 +100,14 @@ class LocalJobQueue:
 
     def wait(self, job_id: str, timeout: float | None = None) -> None:
         with self._lock:
-            future = self._futures[job_id]
+            future = self._futures.get(job_id)
+        if future is None:
+            return
         try:
             future.result(timeout=timeout)
         finally:
             if future.done():
-                with self._lock:
-                    self._futures.pop(job_id, None)
-                    self._cancel_events.pop(job_id, None)
+                self._cleanup_job(job_id, future)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True)
@@ -145,6 +151,7 @@ class LocalJobQueue:
         snapshot: _JobSnapshot,
     ) -> None:
         artifact_dir = self._work_root / run.id
+        additional_changed_track_ids: list[str] = []
 
         def progress(value: float) -> None:
             with self._lock:
@@ -177,13 +184,23 @@ class LocalJobQueue:
                     run.progress = 1.0
                     run.produced_cache_refs = cache_refs
                     self._upsert_cache_entries_locked(project, cache_entries)
-                    project.markers[:] = [
+                    replacement_markers = [
                         marker for marker in project.markers if marker.track_id != track.id
                     ]
-                    project.markers.extend(markers)
+                    replacement_markers.extend(markers)
+                    project.markers[:] = replacement_markers
                     track.cache_refs = cache_refs
                     track.result_state = ResultState.COMPLETE
                     track.error = ""
+                    previous_states = {
+                        candidate.id: candidate.result_state for candidate in project.tracks
+                    }
+                    mark_dependents_stale(project, track.id)
+                    additional_changed_track_ids = [
+                        candidate.id
+                        for candidate in project.tracks
+                        if candidate.id != track.id and candidate.result_state != previous_states[candidate.id]
+                    ]
                 else:
                     self._mark_stale_run_locked(run)
         except TransformCancelled:
@@ -195,7 +212,13 @@ class LocalJobQueue:
                 run.completed_at = datetime.now(timezone.utc).isoformat()
                 if self._active_job_by_track.get(track.id) == run.id:
                     self._active_job_by_track.pop(track.id, None)
+            shutil.rmtree(artifact_dir, ignore_errors=True)
+            notified_track_ids = {track.id}
             self._notify_track_changed(track.id)
+            for changed_track_id in additional_changed_track_ids:
+                if changed_track_id not in notified_track_ids:
+                    notified_track_ids.add(changed_track_id)
+                    self._notify_track_changed(changed_track_id)
 
     def _mark_finished(
         self,
@@ -322,3 +345,11 @@ class LocalJobQueue:
             self._on_track_changed(track_id)
         except Exception:
             pass
+
+    def _cleanup_job(self, job_id: str, future: Future) -> None:
+        if not future.done():
+            return
+        with self._lock:
+            if self._futures.get(job_id) is future:
+                self._futures.pop(job_id, None)
+                self._cancel_events.pop(job_id, None)

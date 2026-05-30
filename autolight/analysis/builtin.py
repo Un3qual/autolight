@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from autolight.analysis.registry import (
     TransformResult,
     TransformSpec,
 )
+
+MAX_FIXED_INTERVAL_MARKERS = 100_000
 
 
 def register_builtin_transforms(registry: TransformRegistry) -> None:
@@ -41,8 +44,16 @@ def register_builtin_transforms(registry: TransformRegistry) -> None:
 def _fixed_interval_markers(context: TransformContext, params: dict) -> TransformResult:
     duration = float(params.get("duration", 0.0))
     interval = float(params.get("interval", 1.0))
+    if not math.isfinite(duration) or not math.isfinite(interval):
+        raise ValueError("duration and interval must be finite")
     if interval <= 0:
         raise ValueError("interval must be greater than zero")
+    if duration < 0:
+        raise ValueError("duration must be greater than or equal to zero")
+
+    marker_count = math.floor((duration + 1e-9) / interval) + 1
+    if marker_count > MAX_FIXED_INTERVAL_MARKERS:
+        raise ValueError(f"too many markers requested: {marker_count}")
 
     markers = []
     current = 0.0

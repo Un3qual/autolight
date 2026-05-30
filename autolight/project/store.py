@@ -153,11 +153,15 @@ def validate_graph(project: ProjectDocument) -> None:
         raise ValueError("duplicate cache entry id")
     if len({marker.id for marker in project.markers}) != len(project.markers):
         raise ValueError("duplicate marker id")
+    if len({run.id for run in project.job_runs}) != len(project.job_runs):
+        raise ValueError("duplicate job run id")
 
     for track in project.tracks:
         if track.type == TrackType.SOURCE and track.input_track_ids:
             raise ValueError("source tracks cannot have inputs")
         if track.type == TrackType.SOURCE:
+            if not isinstance(track.provenance, dict):
+                raise ValueError(f"source track provenance must be a mapping: {track.id}")
             asset_id = track.provenance.get("asset_id")
             if not isinstance(asset_id, str) or asset_id not in audio_asset_ids:
                 raise ValueError(f"source track references missing audio asset: {track.id}")

@@ -41,23 +41,31 @@ class TransformSpec:
 
 class TransformRegistry:
     def __init__(self):
-        self._transforms: dict[str, TransformSpec] = {}
+        self._transforms: dict[str, dict[str, TransformSpec]] = {}
 
     def register(self, spec: TransformSpec) -> None:
-        if spec.id in self._transforms:
-            raise ValueError(f"duplicate transform id: {spec.id}")
-        self._transforms[spec.id] = spec
+        versions = self._transforms.setdefault(spec.id, {})
+        if spec.version in versions:
+            raise ValueError(f"duplicate transform id/version: {spec.id}@{spec.version}")
+        versions[spec.version] = spec
 
     def get(self, transform_id: str, version: str | None = None) -> TransformSpec:
         try:
-            spec = self._transforms[transform_id]
+            versions = self._transforms[transform_id]
         except KeyError as exc:
             raise KeyError(f"unknown transform id: {transform_id}") from exc
-        if version is not None and spec.version != version:
+
+        if version is None:
+            if len(versions) != 1:
+                raise ValueError(f"multiple versions registered for transform {transform_id}")
+            return next(iter(versions.values()))
+
+        try:
+            return versions[version]
+        except KeyError as exc:
             raise ValueError(
-                f"transform {transform_id} version mismatch: requested {version}, available {spec.version}"
-            )
-        return spec
+                f"transform {transform_id} version mismatch: requested {version}, available {sorted(versions)}"
+            ) from exc
 
     def ids(self) -> list[str]:
         return sorted(self._transforms)

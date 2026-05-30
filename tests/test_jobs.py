@@ -12,7 +12,7 @@ from autolight.analysis.registry import (
     TransformSpec,
 )
 from autolight.jobs.queue import LocalJobQueue
-from autolight.project.models import ResultState
+from autolight.project.models import Marker, ResultState
 from autolight.project.store import add_generated_track, import_audio_asset, new_project
 
 
@@ -41,6 +41,27 @@ class LocalJobQueueTest(unittest.TestCase):
             queue.wait(job_id, timeout=2)
 
         self.assertEqual(len([marker for marker in project.markers if marker.track_id == track_id]), 3)
+
+    def test_successful_job_replaces_track_markers_in_single_slice_commit(self):
+        def replacement_markers(context, params):
+            return TransformResult(markers=[{"timestamp": 2.0, "label": "new"}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.marker_replacement", replacement_markers))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.marker_replacement", {})
+            project.markers = ObservingMarkerList(
+                [Marker(id="marker_old", track_id=track_id, timestamp=1.0)],
+                observed_track_id=track_id,
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+        self.assertFalse(project.markers.saw_depleted_track_markers)
+        self.assertEqual([marker.timestamp for marker in project.markers if marker.track_id == track_id], [2.0])
 
     def test_failed_job_keeps_track_and_records_error(self):
         registry = TransformRegistry()
@@ -90,6 +111,31 @@ class LocalJobQueueTest(unittest.TestCase):
                 queue.wait(job_id, timeout=2)
                 if second_job_id is not None:
                     queue.wait(second_job_id, timeout=2)
+
+    def test_finished_job_bookkeeping_is_cleaned_without_wait(self):
+        started = Event()
+        release = Event()
+
+        def controlled_transform(context, params):
+            started.set()
+            release.wait(timeout=1)
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.cleanup", controlled_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.cleanup", {})
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+            self.assertTrue(started.wait(timeout=1))
+            future = queue._futures[job_id]
+
+            release.set()
+            future.result(timeout=2)
+
+            self.assertNotIn(job_id, queue._futures)
+            self.assertNotIn(job_id, queue._cancel_events)
 
     def test_running_job_does_not_commit_after_track_transform_inputs_change(self):
         started = Event()
@@ -254,6 +300,59 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual(track.cache_refs, run.produced_cache_refs)
         self.assertEqual(track.cache_refs, [entry.id for entry in project.cache_entries])
         self.assertFalse(Path(track.cache_refs[0]).is_absolute())
+
+    def test_job_removes_artifact_work_dir_after_completion(self):
+        artifact_dirs = []
+
+        def writes_artifact(context, params):
+            artifact_dirs.append(context.artifact_dir)
+            artifact = context.artifact_dir / "output.json"
+            artifact.write_text("{}", encoding="utf-8")
+            return TransformResult(artifacts={"output": str(artifact)})
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.work_dir_cleanup", writes_artifact))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.work_dir_cleanup", {})
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+            self.assertEqual(len(artifact_dirs), 1)
+            self.assertFalse(artifact_dirs[0].exists())
+
+    def test_successful_job_marks_generated_descendants_stale(self):
+        def marker_transform(context, params):
+            return TransformResult(markers=[{"timestamp": params["timestamp"]}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.upstream", marker_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, upstream_id = project_with_generated_track(
+                Path(tmp), "test.upstream", {"timestamp": 1.0}
+            )
+            downstream = add_generated_track(
+                project,
+                upstream_id,
+                "Pitch",
+                "test.downstream",
+                {},
+                "1",
+                "markers.v1",
+                "dep_downstream",
+            )
+            downstream.result_state = ResultState.COMPLETE
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, upstream_id)
+
+            queue.wait(job_id, timeout=2)
+
+        upstream = next(track for track in project.tracks if track.id == upstream_id)
+        self.assertEqual(upstream.result_state, ResultState.COMPLETE)
+        self.assertEqual(downstream.result_state, ResultState.STALE)
 
     def test_artifact_job_records_cache_entry_and_can_mark_missing_artifact_stale(self):
         registry = TransformRegistry()
@@ -422,6 +521,20 @@ def test_transform(transform_id: str, run):
         estimated_cost="light",
         run=run,
     )
+
+
+class ObservingMarkerList(list):
+    def __init__(self, values, observed_track_id):
+        super().__init__(values)
+        self.observed_track_id = observed_track_id
+        self.saw_depleted_track_markers = False
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if isinstance(key, slice) and not any(
+            marker.track_id == self.observed_track_id for marker in self
+        ):
+            self.saw_depleted_track_markers = True
 
 
 if __name__ == "__main__":

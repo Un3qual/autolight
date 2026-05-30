@@ -21,12 +21,14 @@ class TimelineTrackModel(QAbstractListModel):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
+        self._markers_by_track: dict[str, list[Marker]] = {}
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
 
     def set_project(self, project: ProjectDocument) -> None:
         self.beginResetModel()
         self._project = project
+        self._rebuild_marker_index()
         self._generation += 1
         self.endResetModel()
 
@@ -71,7 +73,7 @@ class TimelineTrackModel(QAbstractListModel):
         if role == self.role_for_name("resultState"):
             return track.result_state.value
         if role == self.role_for_name("markerCount"):
-            return len([marker for marker in self._project.markers if marker.track_id == track.id])
+            return len(self._markers_by_track.get(track.id, []))
         if role == self.role_for_name("markerSpans"):
             return [self._marker_span(marker) for marker in self._markers_for_track(track.id)]
         if role == self.role_for_name("error"):
@@ -90,7 +92,9 @@ class TimelineTrackModel(QAbstractListModel):
             None,
         )
         if row is None:
+            self._markers_by_track.pop(track_id, None)
             return
+        self._rebuild_marker_index_for_track(track_id)
         model_index = self.index(row, 0)
         if model_index.isValid():
             self.dataChanged.emit(model_index, model_index, list(self.ROLE_NAMES))
@@ -103,12 +107,7 @@ class TimelineTrackModel(QAbstractListModel):
         raise KeyError(name)
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
-        if self._project is None:
-            return []
-        return sorted(
-            (marker for marker in self._project.markers if marker.track_id == track_id),
-            key=lambda marker: (marker.timestamp, marker.id),
-        )
+        return self._markers_by_track.get(track_id, [])
 
     def _marker_span(self, marker: Marker) -> dict[str, str | float]:
         return {
@@ -118,3 +117,21 @@ class TimelineTrackModel(QAbstractListModel):
             "label": marker.label,
             "category": marker.category,
         }
+
+    def _rebuild_marker_index(self) -> None:
+        self._markers_by_track = {}
+        if self._project is None:
+            return
+        for marker in self._project.markers:
+            self._markers_by_track.setdefault(marker.track_id, []).append(marker)
+        for markers in self._markers_by_track.values():
+            markers.sort(key=lambda marker: (marker.timestamp, marker.id))
+
+    def _rebuild_marker_index_for_track(self, track_id: str) -> None:
+        if self._project is None:
+            self._markers_by_track = {}
+            return
+        self._markers_by_track[track_id] = sorted(
+            (marker for marker in self._project.markers if marker.track_id == track_id),
+            key=lambda marker: (marker.timestamp, marker.id),
+        )

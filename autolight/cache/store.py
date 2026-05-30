@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
-import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,7 +37,7 @@ class CacheStore:
             len(payload),
         )
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(payload)
+        self._atomic_write_bytes(target, payload)
         return entry
 
     def write_file(
@@ -48,24 +49,23 @@ class CacheStore:
     ) -> CacheEntry:
         self._validate_artifact_kind(artifact_kind)
         source = Path(source_path)
-        digest = hashlib.sha256()
-        size_bytes = 0
-        with source.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                size_bytes += len(chunk)
-                digest.update(chunk)
+        payload_digest, size_bytes, temp_path = self._copy_source_to_temp(source)
 
-        entry, target = self._entry_and_target(
-            artifact_kind,
-            dependency_hash,
-            digest.hexdigest(),
-            transform_version,
-            size_bytes,
-        )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with source.open("rb") as input_file, target.open("wb") as output_file:
-            shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
-        return entry
+        try:
+            entry, target = self._entry_and_target(
+                artifact_kind,
+                dependency_hash,
+                payload_digest,
+                transform_version,
+                size_bytes,
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(temp_path, target)
+            temp_path = None
+            return entry
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     def _entry_and_target(
         self,
@@ -88,6 +88,7 @@ class CacheStore:
             created_at=datetime.now(timezone.utc).isoformat(),
             transform_version=transform_version,
             size_bytes=size_bytes,
+            payload_digest=payload_digest,
         ), target
 
     def artifact_path(self, entry: CacheEntry) -> Path:
@@ -96,7 +97,19 @@ class CacheStore:
     def is_entry_valid(self, entry: CacheEntry) -> bool:
         try:
             path = self.artifact_path(entry)
-            return path.is_file() and path.stat().st_size == entry.size_bytes
+            if not entry.payload_digest or not path.is_file():
+                return False
+            if path.stat().st_size != entry.size_bytes:
+                return False
+            payload_digest = self._hash_file(path)
+            expected_id = canonical_hash(
+                {
+                    "kind": entry.artifact_kind,
+                    "dependency": entry.dependency_hash,
+                    "payload_digest": payload_digest,
+                }
+            )[:16]
+            return payload_digest == entry.payload_digest and entry.id == expected_id
         except (OSError, ValueError):
             return False
 
@@ -116,3 +129,44 @@ class CacheStore:
         except ValueError as error:
             raise ValueError(f"cache artifact path escapes cache root: {relative_path}") from error
         return resolved_path
+
+    def _atomic_write_bytes(self, target: Path, payload: bytes) -> None:
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=target.parent,
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+            os.replace(temp_path, target)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    def _copy_source_to_temp(self, source: Path) -> tuple[str, int, Path]:
+        temp_dir = self.root / ".tmp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        descriptor, temp_name = tempfile.mkstemp(prefix="artifact-", suffix=".tmp", dir=temp_dir)
+        temp_path = Path(temp_name)
+        digest = hashlib.sha256()
+        size_bytes = 0
+        try:
+            with os.fdopen(descriptor, "wb") as output_file, source.open("rb") as input_file:
+                for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                    size_bytes += len(chunk)
+                    digest.update(chunk)
+                    output_file.write(chunk)
+            return digest.hexdigest(), size_bytes, temp_path
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+    def _hash_file(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from autolight.analysis import TransformCancelled
 from autolight.analysis.builtin import register_builtin_transforms
-from autolight.analysis.registry import TransformContext, TransformRegistry
+from autolight.analysis.registry import TransformContext, TransformRegistry, TransformSpec
 
 
 class CancelOnCall:
@@ -35,6 +35,36 @@ class AnalysisRegistryTest(unittest.TestCase):
         self.assertEqual(transform.version, "1")
         with self.assertRaises(ValueError):
             registry.get("markers.fixed_interval", version="2")
+
+    def test_registry_supports_side_by_side_transform_versions(self):
+        registry = TransformRegistry()
+        version_1 = TransformSpec(
+            id="markers.example",
+            version="1",
+            name="Example v1",
+            input_schema="audio.v1",
+            output_schema="markers.v1",
+            estimated_cost="light",
+            run=lambda context, params: None,
+        )
+        version_2 = TransformSpec(
+            id="markers.example",
+            version="2",
+            name="Example v2",
+            input_schema="audio.v1",
+            output_schema="markers.v1",
+            estimated_cost="light",
+            run=lambda context, params: None,
+        )
+
+        registry.register(version_1)
+        registry.register(version_2)
+
+        self.assertIs(registry.get("markers.example", version="1"), version_1)
+        self.assertIs(registry.get("markers.example", version="2"), version_2)
+        self.assertEqual(registry.ids(), ["markers.example"])
+        with self.assertRaisesRegex(ValueError, "multiple versions"):
+            registry.get("markers.example")
 
     def test_fixed_interval_transform_returns_markers(self):
         registry = TransformRegistry()
@@ -91,6 +121,44 @@ class AnalysisRegistryTest(unittest.TestCase):
                         progress=lambda value: None,
                     ),
                     {"duration": 2.0, "interval": 0.5},
+                )
+
+    def test_fixed_interval_rejects_non_finite_values_before_looping(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("markers.fixed_interval")
+
+        for params in [
+            {"duration": float("nan"), "interval": 0.5},
+            {"duration": 1.0, "interval": float("inf")},
+            {"duration": float("inf"), "interval": 0.5},
+        ]:
+            with self.subTest(params=params):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(ValueError, "finite"):
+                        transform.run(
+                            TransformContext(
+                                artifact_dir=Path(tmp),
+                                cancel_requested=CancelOnCall(1),
+                                progress=lambda value: None,
+                            ),
+                            params,
+                        )
+
+    def test_fixed_interval_rejects_unbounded_marker_generation_before_looping(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("markers.fixed_interval")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "too many markers"):
+                transform.run(
+                    TransformContext(
+                        artifact_dir=Path(tmp),
+                        cancel_requested=CancelOnCall(1),
+                        progress=lambda value: None,
+                    ),
+                    {"duration": 1_000_000.0, "interval": 0.001},
                 )
 
     def test_vocal_stand_in_writes_artifact(self):

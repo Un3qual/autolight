@@ -91,6 +91,7 @@ class CacheEntry:
     created_at: str
     transform_version: str
     size_bytes: int = 0
+    payload_digest: str = ""
     validation_status: str = "valid"
 
 
