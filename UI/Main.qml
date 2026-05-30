@@ -39,24 +39,54 @@ Window {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 42
             spacing: 0
 
-            ListView {
-                id: trackList
+            Rectangle {
                 Layout.preferredWidth: 280
                 Layout.fillHeight: true
-                model: appController.trackModel
-                clip: true
+                color: "#1c1f26"
+                border.color: "#2f333d"
+            }
 
-                onContentYChanged: {
-                    if (timelineList.contentY !== contentY)
-                        timelineList.contentY = contentY
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#1c1f26"
+
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    spacing: 48
+
+                    Repeater {
+                        model: 9
+                        Text {
+                            text: index + "s"
+                            color: "#a1a1aa"
+                            font.pixelSize: 12
+                        }
+                    }
                 }
+            }
+        }
 
-                delegate: Rectangle {
-                    width: trackList.width
-                    height: 74
+        ListView {
+            id: timelineRows
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: appController.trackModel
+            clip: true
+
+            delegate: Row {
+                width: timelineRows.width
+                height: 74
+                spacing: 0
+
+                Rectangle {
+                    width: 280
+                    height: parent.height
                     color: index % 2 === 0 ? "#23262d" : "#1f2229"
                     border.color: "#343842"
 
@@ -82,68 +112,22 @@ Window {
                         }
                     }
                 }
-            }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                color: "#111318"
+                Rectangle {
+                    width: Math.max(0, parent.width - 280)
+                    height: parent.height
+                    color: index % 2 === 0 ? "#171a20" : "#14171d"
+                    border.color: "#2f333d"
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 42
-                        color: "#1c1f26"
-
-                        Row {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 16
-                            spacing: 48
-
-                            Repeater {
-                                model: 9
-                                Text {
-                                    text: index + "s"
-                                    color: "#a1a1aa"
-                                    font.pixelSize: 12
-                                }
-                            }
-                        }
-                    }
-
-                    ListView {
-                        id: timelineList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        model: appController.trackModel
-                        clip: true
-
-                        onContentYChanged: {
-                            if (trackList.contentY !== contentY)
-                                trackList.contentY = contentY
-                        }
-
-                        delegate: Rectangle {
-                            width: ListView.view.width
-                            height: 74
-                            color: index % 2 === 0 ? "#171a20" : "#14171d"
-                            border.color: "#2f333d"
-
-                            Repeater {
-                                model: markerCount
-                                Rectangle {
-                                    width: 8
-                                    height: parent.height - 18
-                                    x: 24 + index * 48
-                                    y: 9
-                                    radius: 2
-                                    color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
-                                }
-                            }
+                    Repeater {
+                        model: markerCount
+                        Rectangle {
+                            width: 8
+                            height: parent.height - 18
+                            x: 24 + index * 48
+                            y: 9
+                            radius: 2
+                            color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
@@ -142,6 +143,14 @@ class AppControllerTest(unittest.TestCase):
             exit_code = app_entry.main(["main.py", "--smoke"])
 
         self.assertEqual(exit_code, -1)
+
+    def test_qml_timeline_shell_uses_one_row_oriented_list(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertEqual(qml.count("ListView {"), 1)
+        self.assertIn("id: timelineRows", qml)
+        self.assertNotIn("onContentYChanged", qml)
+        self.assertNotIn("contentY =", qml)
 
     def _track_role_values(self, controller: AppController, row: int):
         model = controller.trackModel
