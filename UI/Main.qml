@@ -49,6 +49,11 @@ Window {
                 model: appController.trackModel
                 clip: true
 
+                onContentYChanged: {
+                    if (timelineList.contentY !== contentY)
+                        timelineList.contentY = contentY
+                }
+
                 delegate: Rectangle {
                     width: trackList.width
                     height: 74
@@ -111,10 +116,16 @@ Window {
                     }
 
                     ListView {
+                        id: timelineList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: appController.trackModel
                         clip: true
+
+                        onContentYChanged: {
+                            if (trackList.contentY !== contentY)
+                                trackList.contentY = contentY
+                        }
 
                         delegate: Rectangle {
                             width: ListView.view.width

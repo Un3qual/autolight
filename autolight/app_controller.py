@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import tempfile
-from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from autolight.project.models import Marker, ResultState
 from autolight.project.store import add_generated_track, create_editable_track_from_markers, import_audio_asset, new_project
@@ -11,26 +10,31 @@ from autolight.timeline.model import TimelineTrackModel
 
 
 class AppController(QObject):
+    projectNameChanged = Signal()
+
     def __init__(self):
         super().__init__()
         self._project = new_project("Untitled")
-        self._track_model = TimelineTrackModel()
+        self._track_model = TimelineTrackModel(parent=self)
         self._track_model.set_project(self._project)
 
     @Property(QObject, constant=True)
     def trackModel(self):
         return self._track_model
 
-    @Property(str)
+    @Property(str, notify=projectNameChanged)
     def projectName(self) -> str:
         return self._project.name
 
     @Slot()
     def load_demo_project(self) -> None:
-        tmp = Path(tempfile.gettempdir()) / "autolight-demo-song.wav"
-        tmp.write_bytes(b"demo audio")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav", prefix="autolight-demo-") as demo_audio:
+            demo_audio.write(b"demo audio")
+            demo_audio_path = demo_audio.name
+
         self._project = new_project("Autolight Demo")
-        source = import_audio_asset(self._project, tmp)
+        self.projectNameChanged.emit()
+        source = import_audio_asset(self._project, demo_audio_path)
         beats = add_generated_track(
             self._project,
             parent_track_id=source.id,
