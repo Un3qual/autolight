@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import asdict, is_dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -210,7 +212,21 @@ class ProjectStore:
         validate_graph(project)
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(_to_json(project), indent=2, sort_keys=True), encoding="utf-8")
+        payload = json.dumps(_to_json(project), indent=2, sort_keys=True)
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=target.parent,
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            os.replace(temp_path, target)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     @staticmethod
     def load(path: str | Path) -> ProjectDocument:

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from autolight.project.models import (
     AudioAsset,
@@ -48,6 +49,16 @@ class ProjectStoreTest(unittest.TestCase):
             loaded = ProjectStore.load(project_path)
 
             self.assertEqual(loaded, project)
+
+    def test_save_writes_project_file_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp) / "show.autolight"
+            project = new_project("Demo")
+
+            with patch.object(Path, "write_text", side_effect=AssertionError("direct write")):
+                ProjectStore.save(project, project_path)
+
+            self.assertEqual(ProjectStore.load(project_path), project)
 
     def test_load_rejects_persisted_project_with_invalid_graph(self):
         with tempfile.TemporaryDirectory() as tmp:
