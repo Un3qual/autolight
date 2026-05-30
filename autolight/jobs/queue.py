@@ -254,6 +254,7 @@ class LocalJobQueue:
     def _can_commit_locked(self, track: Track, run: JobRun, snapshot: _JobSnapshot) -> bool:
         return (
             self._active_job_by_track.get(track.id) == run.id
+            and track.result_state == ResultState.RUNNING
             and track.transform_id == snapshot.transform_id
             and track.transform_version == snapshot.transform_version
             and track.transform_params == snapshot.transform_params

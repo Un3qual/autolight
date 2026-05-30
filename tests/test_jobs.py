@@ -362,6 +362,53 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual(downstream.result_state, ResultState.STALE)
         self.assertEqual(editable.result_state, ResultState.STALE)
 
+    def test_running_dependent_job_does_not_commit_after_upstream_stales_it(self):
+        downstream_started = Event()
+        downstream_release = Event()
+
+        def upstream_transform(context, params):
+            return TransformResult(markers=[{"timestamp": 1.0, "label": "upstream"}])
+
+        def downstream_transform(context, params):
+            downstream_started.set()
+            downstream_release.wait(timeout=1)
+            return TransformResult(markers=[{"timestamp": 9.0, "label": "stale downstream"}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.upstream_stales_running_dependent", upstream_transform))
+        registry.register(test_transform("test.running_dependent", downstream_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, upstream_id = project_with_generated_track(
+                Path(tmp), "test.upstream_stales_running_dependent", {}
+            )
+            downstream = add_generated_track(
+                project,
+                upstream_id,
+                "Dependent",
+                "test.running_dependent",
+                {},
+                "1",
+                "markers.v1",
+                "dep_downstream",
+            )
+            downstream.result_state = ResultState.COMPLETE
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+
+            downstream_job_id = queue.submit(project, downstream.id)
+            self.assertTrue(downstream_started.wait(timeout=1))
+            upstream_job_id = queue.submit(project, upstream_id)
+            queue.wait(upstream_job_id, timeout=2)
+            self.assertEqual(downstream.result_state, ResultState.STALE)
+
+            downstream_release.set()
+            queue.wait(downstream_job_id, timeout=2)
+
+        downstream_run = next(run for run in project.job_runs if run.id == downstream_job_id)
+        self.assertEqual(downstream.result_state, ResultState.STALE)
+        self.assertEqual(downstream_run.state, ResultState.STALE)
+        self.assertEqual([marker for marker in project.markers if marker.track_id == downstream.id], [])
+
     def test_artifact_job_records_cache_entry_and_can_mark_missing_artifact_stale(self):
         registry = TransformRegistry()
         register_builtin_transforms(registry)
