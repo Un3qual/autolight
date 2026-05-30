@@ -18,10 +18,12 @@ class TimelineTrackModel(QAbstractListModel):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
+        self._generation = 0
 
     def set_project(self, project: ProjectDocument) -> None:
         self.beginResetModel()
         self._project = project
+        self._generation += 1
         self.endResetModel()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
@@ -29,12 +31,24 @@ class TimelineTrackModel(QAbstractListModel):
             return 0
         return len(self._project.tracks)
 
+    def index(self, row: int, column: int, parent: QModelIndex = QModelIndex()) -> QModelIndex:
+        if (
+            self._project is None
+            or parent.isValid()
+            or column != 0
+            or row < 0
+            or row >= len(self._project.tracks)
+        ):
+            return QModelIndex()
+        return self.createIndex(row, column, self._generation)
+
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if (
             self._project is None
             or not index.isValid()
             or index.model() is not self
             or index.column() != 0
+            or index.internalId() != self._generation
         ):
             return None
         row = index.row()

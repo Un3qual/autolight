@@ -71,6 +71,27 @@ class TimelineTrackModelTest(unittest.TestCase):
             model.set_project(new_project("Empty"))
             self.assertIsNone(model.data(stale_index, model.role_for_name("name")))
 
+    def test_same_row_stale_index_after_reset_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_a, _source_a, _generated_a = self._project_with_generated_track(
+                Path(tmp) / "project_a",
+                generated_name="Beats A",
+            )
+            project_b, _source_b, _generated_b = self._project_with_generated_track(
+                Path(tmp) / "project_b",
+                generated_name="Beats B",
+            )
+            model = TimelineTrackModel()
+            name_role = model.role_for_name("name")
+
+            model.set_project(project_a)
+            stale_index = model.index(1, 0)
+
+            model.set_project(project_b)
+
+            self.assertIsNone(model.data(stale_index, name_role))
+            self.assertEqual(model.data(model.index(1, 0), name_role), "Beats B")
+
     def test_constructor_accepts_optional_parent(self):
         parent = QCoreApplication.instance()
 
@@ -78,7 +99,8 @@ class TimelineTrackModelTest(unittest.TestCase):
 
         self.assertIs(model.parent(), parent)
 
-    def _project_with_generated_track(self, tmp: Path):
+    def _project_with_generated_track(self, tmp: Path, generated_name: str = "Beats"):
+        tmp.mkdir(parents=True, exist_ok=True)
         audio_path = tmp / "song.wav"
         audio_path.write_bytes(b"audio")
         project = new_project("Demo")
@@ -86,7 +108,7 @@ class TimelineTrackModelTest(unittest.TestCase):
         generated = add_generated_track(
             project,
             source.id,
-            "Beats",
+            generated_name,
             "markers.fixed_interval",
             {},
             "1",
