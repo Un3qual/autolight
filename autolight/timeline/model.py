@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt
 
 from autolight.project.models import ProjectDocument
 
@@ -15,8 +15,8 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 6: b"error",
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
         self._project: ProjectDocument | None = None
 
     def set_project(self, project: ProjectDocument) -> None:
@@ -30,9 +30,18 @@ class TimelineTrackModel(QAbstractListModel):
         return len(self._project.tracks)
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if self._project is None or not index.isValid():
+        if (
+            self._project is None
+            or not index.isValid()
+            or index.model() is not self
+            or index.column() != 0
+        ):
             return None
-        track = self._project.tracks[index.row()]
+        row = index.row()
+        if row < 0 or row >= len(self._project.tracks):
+            return None
+
+        track = self._project.tracks[row]
         if role == Qt.ItemDataRole.DisplayRole:
             return track.name
         if role == self.role_for_name("trackId"):
@@ -50,7 +59,7 @@ class TimelineTrackModel(QAbstractListModel):
         return None
 
     def roleNames(self):
-        return self.ROLE_NAMES
+        return dict(self.ROLE_NAMES)
 
     def role_for_name(self, name: str) -> int:
         encoded = name.encode("utf-8")
