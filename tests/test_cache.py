@@ -114,6 +114,16 @@ class CacheTest(unittest.TestCase):
             path.write_bytes(b"[123]")
             self.assertFalse(store.is_entry_valid(entry))
 
+    def test_is_entry_valid_rejects_directory_artifact_with_matching_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CacheStore(Path(tmp))
+            artifact_dir = Path(tmp) / "markers"
+            artifact_dir.mkdir()
+            entry = cache_entry("markers")
+            entry.size_bytes = artifact_dir.stat().st_size
+
+            self.assertFalse(store.is_entry_valid(entry))
+
 
 def cache_entry(path: str) -> CacheEntry:
     return CacheEntry(

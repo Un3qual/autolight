@@ -44,8 +44,11 @@ class CacheStore:
         return self._path_under_root(Path(entry.path))
 
     def is_entry_valid(self, entry: CacheEntry) -> bool:
-        path = self.artifact_path(entry)
-        return path.exists() and path.stat().st_size == entry.size_bytes
+        try:
+            path = self.artifact_path(entry)
+            return path.is_file() and path.stat().st_size == entry.size_bytes
+        except OSError:
+            return False
 
     def _validate_artifact_kind(self, artifact_kind: str) -> None:
         if not ARTIFACT_KIND_PATTERN.fullmatch(artifact_kind):
