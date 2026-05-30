@@ -11,3 +11,6 @@ wheels/
 
 # Test audio files
 audiofiles/
+
+# Local brainstorming companion files
+.superpowers/
