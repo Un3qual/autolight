@@ -10,6 +10,10 @@ CancelPredicate = Callable[[], bool]
 TransformRunner = Callable[["TransformContext", dict[str, Any]], "TransformResult"]
 
 
+class TransformCancelled(Exception):
+    """Raised when a transform stops because cancellation was requested."""
+
+
 @dataclass(slots=True)
 class TransformContext:
     artifact_dir: Path
@@ -44,11 +48,16 @@ class TransformRegistry:
             raise ValueError(f"duplicate transform id: {spec.id}")
         self._transforms[spec.id] = spec
 
-    def get(self, transform_id: str) -> TransformSpec:
+    def get(self, transform_id: str, version: str | None = None) -> TransformSpec:
         try:
-            return self._transforms[transform_id]
+            spec = self._transforms[transform_id]
         except KeyError as exc:
             raise KeyError(f"unknown transform id: {transform_id}") from exc
+        if version is not None and spec.version != version:
+            raise ValueError(
+                f"transform {transform_id} version mismatch: requested {version}, available {spec.version}"
+            )
+        return spec
 
     def ids(self) -> list[str]:
         return sorted(self._transforms)

@@ -4,7 +4,13 @@ import json
 import time
 from pathlib import Path
 
-from autolight.analysis.registry import TransformContext, TransformRegistry, TransformResult, TransformSpec
+from autolight.analysis.registry import (
+    TransformCancelled,
+    TransformContext,
+    TransformRegistry,
+    TransformResult,
+    TransformSpec,
+)
 
 
 def register_builtin_transforms(registry: TransformRegistry) -> None:
@@ -42,7 +48,7 @@ def _fixed_interval_markers(context: TransformContext, params: dict) -> Transfor
     current = 0.0
     while current <= duration + 1e-9:
         if context.cancel_requested():
-            raise RuntimeError("cancelled")
+            raise TransformCancelled("cancelled")
         markers.append(
             {
                 "timestamp": round(current, 6),
@@ -52,6 +58,9 @@ def _fixed_interval_markers(context: TransformContext, params: dict) -> Transfor
                 "metadata": {"interval": interval},
             }
         )
+        next_current = current + interval
+        if duration > 0 and next_current < duration - 1e-9:
+            context.progress(min(max(next_current / duration, 0.0), 1.0))
         current += interval
     context.progress(1.0)
     return TransformResult(markers=markers)
@@ -62,11 +71,15 @@ def _vocals_stand_in(context: TransformContext, params: dict) -> TransformResult
     context.artifact_dir.mkdir(parents=True, exist_ok=True)
     for step in range(1, 4):
         if context.cancel_requested():
-            raise RuntimeError("cancelled")
+            raise TransformCancelled("cancelled")
         context.progress(step / 4)
         time.sleep(0.01)
 
-    artifact = Path(context.artifact_dir) / f"{label}.json"
+    if context.cancel_requested():
+        raise TransformCancelled("cancelled")
+
+    artifact = Path(context.artifact_dir) / "stem.json"
+    artifact.resolve().relative_to(Path(context.artifact_dir).resolve())
     artifact.write_text(json.dumps({"stem": label, "samples": []}, sort_keys=True), encoding="utf-8")
     context.progress(1.0)
     return TransformResult(artifacts={"stem": str(artifact)}, metadata={"stem": label})
