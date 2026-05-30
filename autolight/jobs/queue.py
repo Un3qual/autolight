@@ -95,8 +95,8 @@ class LocalJobQueue:
     def cancel(self, job_id: str) -> None:
         with self._lock:
             event = self._cancel_events.get(job_id)
-        if event is not None:
-            event.set()
+            if event is not None:
+                event.set()
 
     def wait(self, job_id: str, timeout: float | None = None) -> None:
         with self._lock:

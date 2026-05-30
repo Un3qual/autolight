@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock, Thread
 from unittest.mock import patch
 
 from autolight.analysis.builtin import register_builtin_transforms
@@ -239,6 +239,46 @@ class LocalJobQueueTest(unittest.TestCase):
             queue.cancel(job_id)
             release.set()
             queue.wait(job_id, timeout=2)
+
+        track = next(track for track in project.tracks if track.id == track_id)
+        run = next(run for run in project.job_runs if run.id == job_id)
+        self.assertEqual(track.result_state, ResultState.CANCELLED)
+        self.assertEqual(run.state, ResultState.CANCELLED)
+        self.assertEqual([marker for marker in project.markers if marker.track_id == track_id], [])
+
+    def test_cancel_race_cannot_commit_complete_after_cancel_starts(self):
+        started = Event()
+        release = Event()
+        cancel_events = []
+
+        def delayed_event_factory():
+            event = CommitWindowCancelEvent()
+            cancel_events.append(event)
+            return event
+
+        def cancellable_transform(context, params):
+            started.set()
+            release.wait(timeout=1)
+            return TransformResult(markers=[{"timestamp": 0.0}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.cancel_commit_race", cancellable_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.cancel_commit_race", {})
+            with patch("autolight.jobs.queue.Event", side_effect=delayed_event_factory):
+                queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+                job_id = queue.submit(project, track_id)
+                self.assertTrue(started.wait(timeout=1))
+                cancel_event = cancel_events[0]
+
+                cancel_thread = Thread(target=queue.cancel, args=(job_id,))
+                cancel_thread.start()
+                self.assertTrue(cancel_event.set_started.wait(timeout=1))
+                release.set()
+                cancel_thread.join(timeout=1)
+                self.assertFalse(cancel_thread.is_alive())
+                queue.wait(job_id, timeout=2)
 
         track = next(track for track in project.tracks if track.id == track_id)
         run = next(run for run in project.job_runs if run.id == job_id)
@@ -590,6 +630,28 @@ class ObservingMarkerList(list):
             marker.track_id == self.observed_track_id for marker in self
         ):
             self.saw_depleted_track_markers = True
+
+
+class CommitWindowCancelEvent:
+    def __init__(self):
+        self._event = Event()
+        self._lock = Lock()
+        self._pending_checks = 0
+        self.set_started = Event()
+        self.commit_window_checked = Event()
+
+    def set(self):
+        self.set_started.set()
+        self.commit_window_checked.wait(timeout=0.2)
+        self._event.set()
+
+    def is_set(self):
+        if self.set_started.is_set() and not self._event.is_set():
+            with self._lock:
+                self._pending_checks += 1
+                if self._pending_checks >= 2:
+                    self.commit_window_checked.set()
+        return self._event.is_set()
 
 
 if __name__ == "__main__":
