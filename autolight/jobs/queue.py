@@ -57,14 +57,15 @@ class LocalJobQueue:
         self._executor.shutdown(wait=True)
 
     def _run(self, project: ProjectDocument, track: Track, run: JobRun, cancel_event: Event) -> None:
-        transform = self.registry.get(track.transform_id, version=track.transform_version)
         artifact_dir = self.artifact_root / run.id
 
         def progress(value: float) -> None:
             run.progress = max(0.0, min(1.0, value))
 
-        context = TransformContext(artifact_dir=artifact_dir, cancel_requested=cancel_event.is_set, progress=progress)
         try:
+            transform = self.registry.get(track.transform_id, version=track.transform_version)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            context = TransformContext(artifact_dir=artifact_dir, cancel_requested=cancel_event.is_set, progress=progress)
             result = transform.run(context, track.transform_params)
             if cancel_event.is_set():
                 track.result_state = ResultState.CANCELLED
