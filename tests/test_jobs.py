@@ -115,6 +115,8 @@ class LocalJobQueueTest(unittest.TestCase):
             track = next(track for track in project.tracks if track.id == track_id)
             track.transform_params["timestamp"] = 2.0
             track.dependency_hash = "changed"
+            track.result_state = ResultState.STALE
+            track.error = "new transform inputs"
             release.set()
             queue.wait(job_id, timeout=2)
 
@@ -122,6 +124,44 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual(observed_timestamps, [1.0])
         self.assertEqual(run.state, ResultState.STALE)
         self.assertEqual(track.result_state, ResultState.STALE)
+        self.assertEqual(track.error, "new transform inputs")
+        self.assertEqual([marker for marker in project.markers if marker.track_id == track_id], [])
+        self.assertEqual(track.cache_refs, [])
+
+    def test_failed_stale_job_does_not_mark_changed_track_failed(self):
+        started = Event()
+        release = Event()
+
+        def failing_transform(context, params):
+            started.set()
+            release.wait(timeout=1)
+            raise ValueError("old job failed")
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.stale_failure", failing_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp), "test.stale_failure", {"timestamp": 1.0}
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+            self.assertTrue(started.wait(timeout=1))
+
+            track = next(track for track in project.tracks if track.id == track_id)
+            track.transform_params["timestamp"] = 2.0
+            track.dependency_hash = "changed"
+            track.result_state = ResultState.STALE
+            track.error = "new transform inputs"
+            release.set()
+            queue.wait(job_id, timeout=2)
+
+        run = next(run for run in project.job_runs if run.id == job_id)
+        self.assertEqual(run.state, ResultState.STALE)
+        self.assertIn("track changed", run.error)
+        self.assertNotEqual(track.result_state, ResultState.FAILED)
+        self.assertEqual(track.result_state, ResultState.STALE)
+        self.assertEqual(track.error, "new transform inputs")
         self.assertEqual([marker for marker in project.markers if marker.track_id == track_id], [])
         self.assertEqual(track.cache_refs, [])
 

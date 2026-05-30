@@ -119,7 +119,7 @@ class LocalJobQueue:
             )
             result = transform.run(context, snapshot.transform_params)
             if cancel_event.is_set():
-                self._mark_finished(track, run, ResultState.CANCELLED)
+                self._mark_finished(track, run, ResultState.CANCELLED, snapshot)
                 return
             markers = [
                 self._marker_from_result(snapshot.track_id, snapshot.transform_id, item)
@@ -128,7 +128,7 @@ class LocalJobQueue:
             cache_refs = list(result.artifacts.values())
             with self._lock:
                 if cancel_event.is_set():
-                    self._mark_finished_locked(track, run, ResultState.CANCELLED)
+                    self._mark_finished_locked(track, run, ResultState.CANCELLED, snapshot)
                     return
                 if self._can_commit_locked(track, run, snapshot):
                     run.state = ResultState.COMPLETE
@@ -142,16 +142,11 @@ class LocalJobQueue:
                     track.result_state = ResultState.COMPLETE
                     track.error = ""
                 else:
-                    self._mark_finished_locked(
-                        track,
-                        run,
-                        ResultState.STALE,
-                        error="track changed while job was running",
-                    )
+                    self._mark_stale_run_locked(run)
         except TransformCancelled:
-            self._mark_finished(track, run, ResultState.CANCELLED)
+            self._mark_finished(track, run, ResultState.CANCELLED, snapshot)
         except Exception as exc:
-            self._mark_finished(track, run, ResultState.FAILED, error=str(exc))
+            self._mark_finished(track, run, ResultState.FAILED, snapshot, error=str(exc))
         finally:
             with self._lock:
                 run.completed_at = datetime.now(timezone.utc).isoformat()
@@ -159,19 +154,35 @@ class LocalJobQueue:
                     self._active_job_by_track.pop(track.id, None)
 
     def _mark_finished(
-        self, track: Track, run: JobRun, state: ResultState, error: str = ""
+        self,
+        track: Track,
+        run: JobRun,
+        state: ResultState,
+        snapshot: _JobSnapshot,
+        error: str = "",
     ) -> None:
         with self._lock:
-            self._mark_finished_locked(track, run, state, error=error)
+            self._mark_finished_locked(track, run, state, snapshot, error=error)
 
     def _mark_finished_locked(
-        self, track: Track, run: JobRun, state: ResultState, error: str = ""
+        self,
+        track: Track,
+        run: JobRun,
+        state: ResultState,
+        snapshot: _JobSnapshot,
+        error: str = "",
     ) -> None:
-        run.state = state
-        run.error = error
-        if self._active_job_by_track.get(track.id) == run.id:
+        if self._can_commit_locked(track, run, snapshot):
+            run.state = state
+            run.error = error
             track.result_state = state
             track.error = error
+        else:
+            self._mark_stale_run_locked(run)
+
+    def _mark_stale_run_locked(self, run: JobRun) -> None:
+        run.state = ResultState.STALE
+        run.error = "track changed while job was running"
 
     def _can_commit_locked(self, track: Track, run: JobRun, snapshot: _JobSnapshot) -> bool:
         return (
