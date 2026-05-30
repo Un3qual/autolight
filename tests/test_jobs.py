@@ -90,6 +90,41 @@ class LocalJobQueueTest(unittest.TestCase):
                 if second_job_id is not None:
                     queue.wait(second_job_id, timeout=2)
 
+    def test_running_job_does_not_commit_after_track_transform_inputs_change(self):
+        started = Event()
+        release = Event()
+        observed_timestamps = []
+
+        def blocking_marker_transform(context, params):
+            started.set()
+            release.wait(timeout=1)
+            observed_timestamps.append(params["timestamp"])
+            return TransformResult(markers=[{"timestamp": params["timestamp"], "label": "old"}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.stale_commit", blocking_marker_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp), "test.stale_commit", {"timestamp": 1.0}
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            job_id = queue.submit(project, track_id)
+            self.assertTrue(started.wait(timeout=1))
+
+            track = next(track for track in project.tracks if track.id == track_id)
+            track.transform_params["timestamp"] = 2.0
+            track.dependency_hash = "changed"
+            release.set()
+            queue.wait(job_id, timeout=2)
+
+        run = next(run for run in project.job_runs if run.id == job_id)
+        self.assertEqual(observed_timestamps, [1.0])
+        self.assertEqual(run.state, ResultState.STALE)
+        self.assertEqual(track.result_state, ResultState.STALE)
+        self.assertEqual([marker for marker in project.markers if marker.track_id == track_id], [])
+        self.assertEqual(track.cache_refs, [])
+
     def test_cancelled_job_marks_track_and_run_cancelled(self):
         started = Event()
         release = Event()
