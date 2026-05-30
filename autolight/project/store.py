@@ -142,6 +142,9 @@ def find_track(project: ProjectDocument, track_id: str) -> Track | None:
 
 
 def validate_graph(project: ProjectDocument) -> None:
+    audio_asset_ids = {asset.id for asset in project.audio_assets}
+    if len(audio_asset_ids) != len(project.audio_assets):
+        raise ValueError("duplicate audio asset id")
     track_ids = {track.id for track in project.tracks}
     if len(track_ids) != len(project.tracks):
         raise ValueError("duplicate track id")
@@ -154,6 +157,10 @@ def validate_graph(project: ProjectDocument) -> None:
     for track in project.tracks:
         if track.type == TrackType.SOURCE and track.input_track_ids:
             raise ValueError("source tracks cannot have inputs")
+        if track.type == TrackType.SOURCE:
+            asset_id = track.provenance.get("asset_id")
+            if not isinstance(asset_id, str) or asset_id not in audio_asset_ids:
+                raise ValueError(f"source track references missing audio asset: {track.id}")
         if track.type == TrackType.GENERATED and len(track.input_track_ids) != 1:
             raise ValueError("generated tracks must have exactly one input")
         for input_id in track.input_track_ids:

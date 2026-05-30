@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from autolight.cache.keys import canonical_hash, track_dependency_hash
 from autolight.cache.store import CacheStore
@@ -67,6 +68,20 @@ class CacheTest(unittest.TestCase):
             self.assertTrue(store.artifact_path(entry).exists())
             self.assertTrue(store.is_entry_valid(entry))
             self.assertEqual(entry.artifact_kind, "markers")
+
+    def test_cache_store_writes_file_without_reading_entire_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "stem.wav"
+            source.write_bytes(b"stream me")
+            store = CacheStore(root / "cache")
+
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")):
+                entry = store.write_file("stem", "dep_hash", source, "1")
+
+            self.assertEqual(store.artifact_path(entry).read_bytes(), b"stream me")
+            self.assertTrue(store.is_entry_valid(entry))
+            self.assertEqual(entry.artifact_kind, "stem")
 
     def test_cache_store_rejects_invalid_artifact_kind(self):
         with tempfile.TemporaryDirectory() as tmp:

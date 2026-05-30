@@ -289,13 +289,11 @@ class LocalJobQueue:
     ) -> list[CacheEntry]:
         cache_entries: list[CacheEntry] = []
         for artifact_kind, artifact_path in artifacts.items():
-            source_path = Path(artifact_path)
-            payload = source_path.read_bytes()
             cache_entries.append(
-                self.cache_store.write_bytes(
+                self.cache_store.write_file(
                     artifact_kind,
                     snapshot.dependency_hash,
-                    payload,
+                    artifact_path,
                     snapshot.transform_version,
                 )
             )

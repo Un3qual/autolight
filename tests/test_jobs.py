@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from threading import Event
+from unittest.mock import patch
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import (
@@ -284,6 +285,27 @@ class LocalJobQueueTest(unittest.TestCase):
             self.assertEqual(invalid_refs, [project.cache_entries[0].id])
             self.assertEqual(track.result_state, ResultState.STALE)
             self.assertIn("cache artifact", track.error)
+
+    def test_artifact_job_streams_artifact_into_cache(self):
+        def writes_artifact(context, params):
+            artifact = context.artifact_dir / "large-stem.wav"
+            artifact.write_bytes(b"large artifact placeholder")
+            return TransformResult(artifacts={"stem": str(artifact)})
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.streaming_artifact", writes_artifact))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.streaming_artifact", {})
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")):
+                job_id = queue.submit(project, track_id)
+                queue.wait(job_id, timeout=2)
+
+        track = next(track for track in project.tracks if track.id == track_id)
+        self.assertEqual(track.result_state, ResultState.COMPLETE)
+        self.assertEqual(len(project.cache_entries), 1)
+        self.assertEqual(track.cache_refs, [project.cache_entries[0].id])
 
     def test_track_change_callback_fires_for_running_and_complete_states(self):
         registry = TransformRegistry()

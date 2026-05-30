@@ -3,11 +3,14 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Window {
+    id: root
     width: 1120
     height: 720
     visible: true
     title: appController.projectName
     color: "#181a1f"
+    readonly property real timelinePixelsPerSecond: 96
+    readonly property real timelineLeftPadding: 24
 
     ColumnLayout {
         anchors.fill: parent
@@ -57,8 +60,8 @@ Window {
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.leftMargin: 16
-                    spacing: 48
+                    anchors.leftMargin: root.timelineLeftPadding
+                    spacing: root.timelinePixelsPerSecond
 
                     Repeater {
                         model: 9
@@ -118,14 +121,13 @@ Window {
                     height: parent.height
                     color: index % 2 === 0 ? "#171a20" : "#14171d"
                     border.color: "#2f333d"
-                    property real pixelsPerSecond: 96
 
                     Repeater {
                         model: markerSpans
                         Rectangle {
-                            width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * parent.pixelsPerSecond)
+                            width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
                             height: parent.height - 18
-                            x: Math.max(0, Math.min(parent.width - width, 24 + modelData.timestamp * parent.pixelsPerSecond))
+                            x: Math.max(0, Math.min(parent.width - width, root.timelineLeftPadding + modelData.timestamp * root.timelinePixelsPerSecond))
                             y: 9
                             radius: 2
                             color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"

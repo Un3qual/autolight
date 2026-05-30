@@ -3,7 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
+from autolight.project.models import (
+    AudioAsset,
+    CacheEntry,
+    JobRun,
+    Marker,
+    ProjectDocument,
+    ResultState,
+    Track,
+    TrackType,
+)
 from autolight.project.store import (
     ProjectStore,
     add_generated_track,
@@ -237,6 +246,32 @@ class ProjectStoreTest(unittest.TestCase):
             )
         )
         validate_graph(project)
+
+    def test_graph_validation_rejects_source_tracks_without_audio_asset(self):
+        project = new_project("Demo")
+        source = import_audio_asset_from_bytes(project, b"audio")
+
+        source.provenance["asset_id"] = "missing_asset"
+
+        with self.assertRaisesRegex(ValueError, "source track references missing audio asset"):
+            validate_graph(project)
+
+    def test_graph_validation_rejects_duplicate_audio_asset_ids(self):
+        project = new_project("Demo")
+        import_audio_asset_from_bytes(project, b"audio")
+        project.audio_assets.append(
+            AudioAsset(
+                id=project.audio_assets[0].id,
+                path="/music/duplicate.wav",
+                duration=0.0,
+                sample_rate=0,
+                channels=0,
+                fingerprint="duplicate",
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate audio asset id"):
+            validate_graph(project)
 
 
 def import_audio_asset_from_bytes(project, payload: bytes):
