@@ -15,6 +15,7 @@ from autolight.project.models import (
     Marker,
     ProjectDocument,
     ResultState,
+    SCHEMA_VERSION,
     Track,
     TrackType,
 )
@@ -38,7 +39,9 @@ def fingerprint_file(path: Path) -> str:
 
 def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
     audio_path = Path(path)
-    if not audio_path.exists():
+    if audio_path.exists() and not audio_path.is_file():
+        raise IsADirectoryError(f"audio asset path is not a file: {audio_path}")
+    if not audio_path.is_file():
         raise FileNotFoundError(str(audio_path))
 
     asset = AudioAsset(
@@ -70,9 +73,8 @@ def add_generated_track(
     transform_version: str,
     output_schema: str,
     dependency_hash: str,
-    validate_parent: bool = True,
 ) -> Track:
-    if validate_parent and find_track(project, parent_track_id) is None:
+    if find_track(project, parent_track_id) is None:
         raise ValueError(f"parent track not found: {parent_track_id}")
 
     track = Track(
@@ -86,8 +88,7 @@ def add_generated_track(
         output_schema=output_schema,
         dependency_hash=dependency_hash,
     )
-    if validate_parent:
-        project.tracks.append(track)
+    project.tracks.append(track)
     return track
 
 
@@ -130,6 +131,8 @@ def validate_graph(project: ProjectDocument) -> None:
             if input_id not in track_ids:
                 raise ValueError(f"missing input track: {input_id}")
 
+    _validate_acyclic(project)
+
 
 def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> None:
     changed = True
@@ -158,7 +161,12 @@ class ProjectStore:
     @staticmethod
     def load(path: str | Path) -> ProjectDocument:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return _project_from_json(raw)
+        if raw.get("schema_version") != SCHEMA_VERSION:
+            raise ValueError(f"unsupported schema version: {raw.get('schema_version')}")
+
+        project = _project_from_json(raw)
+        validate_graph(project)
+        return project
 
 
 def _to_json(value: Any) -> Any:
@@ -171,6 +179,27 @@ def _to_json(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _to_json(item) for key, item in value.items()}
     return value
+
+
+def _validate_acyclic(project: ProjectDocument) -> None:
+    track_by_id = {track.id: track for track in project.tracks}
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(track_id: str) -> None:
+        if track_id in visiting:
+            raise ValueError(f"cycle detected in track graph: {track_id}")
+        if track_id in visited:
+            return
+
+        visiting.add(track_id)
+        for input_id in track_by_id[track_id].input_track_ids:
+            visit(input_id)
+        visiting.remove(track_id)
+        visited.add(track_id)
+
+    for track in project.tracks:
+        visit(track.id)
 
 
 def _project_from_json(raw: dict[str, Any]) -> ProjectDocument:
