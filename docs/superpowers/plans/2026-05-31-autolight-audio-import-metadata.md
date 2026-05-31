@@ -211,7 +211,7 @@ Run:
 uv run python -m unittest tests.test_audio_import_metadata tests.test_project_store -v
 ```
 
-Expected: PASS. Update existing project store tests that write fake `.wav` bytes by importing this file's `write_wav` helper and replacing `audio_path.write_bytes(b"fake audio bytes")` with `write_wav(audio_path)`, so imports use decodable audio.
+Expected: PASS. Update every test or fixture that imports audio from a `.wav` path to write decodable audio with this file's `write_wav` helper instead of placeholder bytes. This includes the existing project-store, end-to-end, timeline-model, jobs, and app-controller workflow tests, plus `AppController.load_demo_project`; replace fake writes such as `audio_path.write_bytes(b"fake audio bytes")`, `audio_path.write_bytes(b"audio")`, and `demo_audio_path.write_bytes(b"demo audio")` with `write_wav(...)`.
 
 - [ ] **Step 5: Commit import metadata**
 
@@ -256,7 +256,7 @@ Add these tests to `AudioImportMetadataTest`:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             old_path = root / "old.wav"
-            new_path = root / "new.wav"
+            new_path = root / "old-copy.wav"
             write_wav(old_path)
             payload = old_path.read_bytes()
             project = new_project("Demo")
@@ -272,6 +272,39 @@ Add these tests to `AudioImportMetadataTest`:
         self.assertEqual(project.audio_assets[0].path, str(new_path))
         self.assertEqual(project.audio_assets[0].import_status, "online")
         self.assertEqual(project.audio_assets[0].relink_hint, "")
+
+    def test_relink_candidate_hashes_only_name_prefix_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_path = root / "song.wav"
+            unrelated_path = root / "unrelated.wav"
+            replacement_path = root / "song-remastered.wav"
+            write_wav(old_path)
+            payload = old_path.read_bytes()
+            write_wav(unrelated_path)
+            project = new_project("Demo")
+            import_audio_asset(project, old_path)
+            old_path.unlink()
+            unrelated_path.write_bytes(payload)
+            replacement_path.write_bytes(payload)
+
+            from unittest.mock import patch
+            from autolight.project import store as project_store
+
+            checked_paths = []
+            original_fingerprint_file = project_store.fingerprint_file
+
+            def record_fingerprint(path):
+                checked_paths.append(Path(path))
+                return original_fingerprint_file(path)
+
+            with patch.object(project_store, "fingerprint_file", side_effect=record_fingerprint):
+                from autolight.project.store import refresh_audio_asset_status
+
+                refresh_audio_asset_status(project, search_dirs=[root])
+
+        self.assertIn(replacement_path, checked_paths)
+        self.assertNotIn(unrelated_path, checked_paths)
 ```
 
 - [ ] **Step 2: Run offline tests and verify failure**
@@ -279,7 +312,7 @@ Add these tests to `AudioImportMetadataTest`:
 Run:
 
 ```bash
-uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTest.test_refresh_audio_asset_status_marks_missing_files_offline tests.test_audio_import_metadata.AudioImportMetadataTest.test_refresh_audio_asset_status_relinks_matching_fingerprint -v
+uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTest.test_refresh_audio_asset_status_marks_missing_files_offline tests.test_audio_import_metadata.AudioImportMetadataTest.test_refresh_audio_asset_status_relinks_matching_fingerprint tests.test_audio_import_metadata.AudioImportMetadataTest.test_relink_candidate_hashes_only_name_prefix_matches -v
 ```
 
 Expected: FAIL because `refresh_audio_asset_status` is not defined.
@@ -302,7 +335,8 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
                 changed_asset_ids.append(asset.id)
             continue
 
-        replacement = _find_relink_candidate(asset.fingerprint, search_roots)
+        hint = asset_path.name
+        replacement = _find_relink_candidate(asset.fingerprint, search_roots, hint)
         if replacement is not None:
             asset.path = str(replacement)
             asset.import_status = "online"
@@ -310,7 +344,6 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
             changed_asset_ids.append(asset.id)
             continue
 
-        hint = asset_path.name
         if asset.import_status != "offline" or asset.relink_hint != hint:
             asset.import_status = "offline"
             asset.relink_hint = hint
@@ -319,12 +352,17 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
     return changed_asset_ids
 
 
-def _find_relink_candidate(fingerprint: str, search_roots: list[Path]) -> Path | None:
+def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
+    hinted_stem = Path(filename_hint).stem.casefold()
     for root in search_roots:
         if not root.is_dir():
             continue
         for candidate in root.rglob("*"):
-            if candidate.is_file() and fingerprint_file(candidate) == fingerprint:
+            if not candidate.is_file():
+                continue
+            if not candidate.stem.casefold().startswith(hinted_stem):
+                continue
+            if fingerprint_file(candidate) == fingerprint:
                 return candidate
     return None
 ```

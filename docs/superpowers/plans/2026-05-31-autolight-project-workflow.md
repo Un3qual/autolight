@@ -29,6 +29,18 @@ Append these imports near the top of `tests/test_app_controller.py`:
 
 ```python
 import tempfile
+import wave
+```
+
+Add this helper near the test class:
+
+```python
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
 ```
 
 Add these test methods to `AppControllerTest`:
@@ -50,7 +62,7 @@ Add these test methods to `AppControllerTest`:
 
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             track_id = controller.import_audio(str(audio_path))
 
         self.assertNotEqual(track_id, "")
@@ -73,7 +85,7 @@ Add these test methods to `AppControllerTest`:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             audio_path = root / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             project_path = root / "show.autolight"
             controller.import_audio(str(audio_path))
 
@@ -302,7 +314,7 @@ Add these test methods to `AppControllerTest`:
 
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             source_id = controller.import_audio(str(audio_path))
             generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
 
@@ -320,7 +332,7 @@ Add these test methods to `AppControllerTest`:
 
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             source_id = controller.import_audio(str(audio_path))
             job_id = controller.run_track(source_id)
 

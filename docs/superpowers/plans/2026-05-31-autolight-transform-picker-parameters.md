@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `TransformRegistry`, `TransformSpec`, and `track_dependency_hash`.
 
+**Prerequisite:** Complete `2026-05-31-autolight-project-workflow.md` first. This plan reuses selected-track state and controller helpers introduced there.
+
 ---
 
 ## File Structure
@@ -77,7 +79,7 @@ Create `autolight/timeline/transform_model.py`:
 ```python
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Slot
 
 from autolight.analysis.registry import TransformRegistry, TransformSpec
 
@@ -124,6 +126,12 @@ class TransformSpecModel(QAbstractListModel):
 
     def role_for_name(self, name: str) -> int:
         return self._role_by_name[name]
+
+    @Slot(int, result=str)
+    def version_at(self, row: int) -> str:
+        if row < 0 or row >= len(self._specs):
+            return ""
+        return self._specs[row].version
 ```
 
 - [ ] **Step 4: Run transform picker tests**
@@ -200,6 +208,8 @@ Add imports to `autolight/app_controller.py`:
 ```python
 import json
 
+from autolight.cache.keys import track_dependency_hash
+from autolight.project.store import find_track
 from autolight.timeline.transform_model import TransformSpecModel
 ```
 
@@ -289,6 +299,7 @@ Add this test:
         self.assertIn("model: appController.transformModel", qml)
         self.assertIn("textRole: \"name\"", qml)
         self.assertIn("appController.add_transform_track(", qml)
+        self.assertIn("appController.transformModel.version_at(transformPicker.currentIndex)", qml)
         self.assertIn("transformParamsField.text", qml)
 ```
 
@@ -328,7 +339,7 @@ Add these controls to the toolbar near `Add Markers`:
                     onClicked: appController.add_transform_track(
                         appController.selectedTrackId,
                         transformPicker.currentValue,
-                        "1",
+                        appController.transformModel.version_at(transformPicker.currentIndex),
                         transformParamsField.text
                     )
                 }

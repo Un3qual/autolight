@@ -8,12 +8,14 @@
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `CacheStore`, `LocalJobQueue`, `ProjectStore`, and `TimelineTrackModel`.
 
+**Prerequisite:** Complete `2026-05-31-autolight-project-workflow.md` and `2026-05-31-autolight-job-progress-controls.md` first. The workflow plan introduces `open_project`; the job-progress plan owns the canonical `rerun_track` slot and the single toolbar `Rerun` button. This plan only adds cache validation, stale styling, and the `Check Cache` action.
+
 ---
 
 ## File Structure
 
 - Modify `autolight/app_controller.py`: call cache validation on open and expose `refresh_cache_status`.
-- Modify `UI/Main.qml`: show stale/error text and a `Rerun` action for selected stale/failed generated tracks.
+- Modify `UI/Main.qml`: show stale/error text and a `Check Cache` action while reusing the existing `Rerun` action from the job-progress-controls plan.
 - Modify `tests/test_app_controller.py`: cover cache refresh behavior and QML wiring.
 - Modify `README.md`: document cache recovery behavior.
 
@@ -82,13 +84,12 @@ Add this slot to `autolight/app_controller.py`:
             return []
 ```
 
-Call it after opening a project, immediately before clearing errors:
+When integrating it into `open_project`, clear a successful file-open error before refreshing cache status, and do not clear `lastError` after `refresh_cache_status()`:
 
 ```python
+            self._set_last_error("")
             self.refresh_cache_status()
 ```
-
-Then keep the existing `self._set_last_error("")` so valid projects open without stale error text.
 
 - [ ] **Step 4: Run app controller tests**
 
@@ -139,7 +140,7 @@ Run:
 uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_exposes_cache_refresh_and_rerun_recovery -v
 ```
 
-Expected: FAIL until QML includes cache refresh and stale/failed rerun logic.
+Expected: FAIL until QML includes cache refresh and stale/failed styling. The `rerun_track` assertion verifies that the prerequisite job-progress plan's canonical `Rerun` button remains present; do not add a second `Rerun` button in this plan.
 
 - [ ] **Step 3: Add cache refresh and stale styling to QML**
 
@@ -156,16 +157,6 @@ Update the status text color expression in the track metadata area:
 
 ```qml
                             color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
-```
-
-Make the rerun button enabled only for selected tracks:
-
-```qml
-                Button {
-                    text: "Rerun"
-                    enabled: appController.selectedTrackId.length > 0
-                    onClicked: appController.rerun_track(appController.selectedTrackId)
-                }
 ```
 
 - [ ] **Step 4: Run QML recovery tests and smoke**

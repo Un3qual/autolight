@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `stems.vocals_stand_in`, `LocalJobQueue`, `CacheStore`, and `TimelineTrackModel`.
 
+**Prerequisite:** Complete `2026-05-31-autolight-project-workflow.md` first. This plan reuses `selectedTrackId`, `_set_selected_track_id`, and the selected-track QML wiring introduced there.
+
 ---
 
 ## File Structure
@@ -177,6 +179,13 @@ uv run python -m unittest tests.test_stem_artifact_workflow.StemArtifactWorkflow
 Expected: FAIL because `add_vocals_stem_track` is missing.
 
 - [ ] **Step 3: Implement stem track action**
+
+Add imports to `autolight/app_controller.py`:
+
+```python
+from autolight.cache.keys import track_dependency_hash
+from autolight.project.store import find_track
+```
 
 Add slot to `autolight/app_controller.py`:
 

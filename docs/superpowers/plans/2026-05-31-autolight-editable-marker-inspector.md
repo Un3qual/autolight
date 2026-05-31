@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `Marker`, `TrackType`, `ProjectStore`, and `TimelineTrackModel`.
 
+**Prerequisite:** Complete `2026-05-31-autolight-project-workflow.md` first. This plan reuses `selectedTrackId`, `_selected_track_id`, `_set_last_error`, and selected-row QML state from that workflow.
+
 ---
 
 ## File Structure
@@ -198,11 +200,37 @@ Expected: FAIL because `add_marker_to_selected_track` is missing.
 
 - [ ] **Step 3: Implement controller marker slots**
 
-Add imports:
+Extend imports:
 
 ```python
 from autolight.project.store import add_editable_marker, delete_editable_marker
 ```
+
+Add signal, property, and helper:
+
+```python
+    selectedTrackMarkersChanged = Signal()
+
+    @Property(list, notify=selectedTrackMarkersChanged)
+    def selectedTrackMarkers(self) -> list[dict]:
+        return self._marker_summary_for_track(self._selected_track_id)
+
+    def _marker_summary_for_track(self, track_id: str) -> list[dict]:
+        return [
+            {
+                "id": marker.id,
+                "timestamp": marker.timestamp,
+                "label": marker.label,
+                "category": marker.category,
+            }
+            for marker in sorted(
+                (marker for marker in self._project.markers if marker.track_id == track_id),
+                key=lambda marker: (marker.timestamp, marker.id),
+            )
+        ]
+```
+
+Update `_set_selected_track_id` so it emits `selectedTrackMarkersChanged` whenever the selected track changes.
 
 Add slots:
 
@@ -212,6 +240,7 @@ Add slots:
         try:
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
             self._track_model.refresh_track(self._selected_track_id)
+            self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             return marker.id
         except Exception as exc:
@@ -223,6 +252,7 @@ Add slots:
         try:
             deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
             self._track_model.refresh_track(self._selected_track_id)
+            self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             return deleted
         except Exception as exc:
@@ -268,8 +298,10 @@ Add this test:
         self.assertIn("id: inspectorPanel", qml)
         self.assertIn("markerTimestampField", qml)
         self.assertIn("markerLabelField", qml)
+        self.assertIn("appController.selectedTrackMarkers", qml)
+        self.assertIn("inspectorPanel.selectedMarkerId", qml)
         self.assertIn("appController.add_marker_to_selected_track", qml)
-        self.assertIn("appController.delete_marker_from_selected_track", qml)
+        self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
 ```
 
 - [ ] **Step 2: Run QML inspector test and verify failure**
@@ -293,6 +325,14 @@ Add a right-side `Rectangle` with this core content:
                 Layout.fillHeight: true
                 color: "#1c1f26"
                 border.color: "#2f333d"
+                property string selectedMarkerId: ""
+
+                Connections {
+                    target: appController
+                    function onSelectedTrackIdChanged() {
+                        inspectorPanel.selectedMarkerId = ""
+                    }
+                }
 
                 Column {
                     anchors.fill: parent
@@ -317,6 +357,33 @@ Add a right-side `Rectangle` with this core content:
                         text: "Cue"
                     }
 
+                    ListView {
+                        id: markerList
+                        width: parent.width
+                        height: 120
+                        clip: true
+                        model: appController.selectedTrackMarkers
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: markerList.width
+                            height: 28
+                            color: inspectorPanel.selectedMarkerId === modelData.id ? "#2f4366" : "transparent"
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
+                                color: "#f4f4f5"
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: inspectorPanel.selectedMarkerId = modelData.id
+                            }
+                        }
+                    }
+
                     Button {
                         text: "Add Cue"
                         enabled: appController.selectedTrackId.length > 0
@@ -328,8 +395,12 @@ Add a right-side `Rectangle` with this core content:
 
                     Button {
                         text: "Delete Cue"
-                        enabled: false
-                        onClicked: appController.delete_marker_from_selected_track("")
+                        enabled: inspectorPanel.selectedMarkerId.length > 0
+                        onClicked: {
+                            if (appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)) {
+                                inspectorPanel.selectedMarkerId = ""
+                            }
+                        }
                     }
                 }
             }

@@ -14,7 +14,8 @@
 
 - Create `autolight/analysis/waveform.py`: deterministic peak/RMS summary generation from local audio files.
 - Modify `autolight/analysis/builtin.py`: register `waveform.summary` transform.
-- Modify `autolight/timeline/model.py`: add `waveformSamples` role loaded from cache artifact metadata.
+- Modify `autolight/app_controller.py`: load completed waveform cache artifacts into track provenance when jobs finish.
+- Modify `autolight/timeline/model.py`: add `waveformSamples` role backed by the controller-loaded cache artifact samples.
 - Create `tests/test_waveform_summary.py`: waveform transform and model role coverage.
 - Modify `UI/Main.qml`: draw a simple waveform strip for tracks with summary samples.
 
@@ -259,6 +260,7 @@ Expected: commit succeeds.
 ## Task 3: Timeline Waveform Role And QML Strip
 
 **Files:**
+- Modify: `autolight/app_controller.py`
 - Modify: `autolight/timeline/model.py`
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_waveform_summary.py`
@@ -268,6 +270,40 @@ Expected: commit succeeds.
 Add this test to `WaveformSummaryTest`:
 
 ```python
+    def test_controller_loads_waveform_samples_after_job_completion(self):
+        from autolight.app_controller import AppController
+        from autolight.project.store import add_generated_track, import_audio_asset
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source = import_audio_asset(controller._project, audio_path)
+            track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Waveform",
+                transform_id="waveform.summary",
+                transform_params={"audio_path": str(audio_path), "buckets": 4},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-test",
+            )
+            controller.trackModel.set_project(controller._project)
+
+            job_id = controller.run_track(track.id)
+            controller._job_queue.wait(job_id, timeout=5)
+
+        model = controller.trackModel
+        waveform_role = model.role_for_name("waveformSamples")
+        row = next(index for index, item in enumerate(controller._project.tracks) if item.id == track.id)
+        samples = model.data(model.index(row, 0), waveform_role)
+
+        self.assertEqual(len(samples), 4)
+        self.assertIn("peak", samples[0])
+
     def test_qml_mentions_waveform_samples_role(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
         self.assertIn("waveformSamples", qml)
@@ -279,12 +315,50 @@ Add this test to `WaveformSummaryTest`:
 Run:
 
 ```bash
-uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_qml_mentions_waveform_samples_role -v
+uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_controller_loads_waveform_samples_after_job_completion tests.test_waveform_summary.WaveformSummaryTest.test_qml_mentions_waveform_samples_role -v
 ```
 
-Expected: FAIL because QML does not yet reference `waveformSamples`.
+Expected: FAIL because waveform jobs do not yet load cached JSON samples into the track model and QML does not yet reference `waveformSamples`.
 
-- [ ] **Step 3: Add waveform role and QML repeater**
+- [ ] **Step 3: Load waveform artifacts, add waveform role, and add QML repeater**
+
+Add imports to `autolight/app_controller.py`:
+
+```python
+import json
+
+from autolight.project.store import find_track
+```
+
+Change the `LocalJobQueue` setup so controller code sees completed track changes before the model refresh signal:
+
+```python
+            on_track_changed=self._handle_track_changed,
+```
+
+Add these helpers to `AppController`:
+
+```python
+    def _handle_track_changed(self, track_id: str) -> None:
+        self._load_waveform_samples(track_id)
+        self._track_model.trackChangedRequested.emit(track_id)
+
+    def _load_waveform_samples(self, track_id: str) -> None:
+        track = find_track(self._project, track_id)
+        if track is None or track.transform_id != "waveform.summary":
+            return
+        entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
+        for cache_ref in track.cache_refs:
+            entry = entries_by_id.get(cache_ref)
+            if entry is None or entry.artifact_kind != "waveform":
+                continue
+            artifact_path = self._job_queue.cache_store.artifact_path(entry)
+            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            samples = payload.get("samples", [])
+            if isinstance(samples, list):
+                track.provenance["waveform_samples"] = samples
+            return
+```
 
 Add a timeline model role:
 
@@ -292,7 +366,7 @@ Add a timeline model role:
         Qt.ItemDataRole.UserRole + 11: b"waveformSamples",
 ```
 
-Return the embedded waveform sample list that controller or transform work writes into track provenance:
+Return the waveform sample list that the controller loaded from the completed cache artifact:
 
 ```python
         if role == self.role_for_name("waveformSamples"):
