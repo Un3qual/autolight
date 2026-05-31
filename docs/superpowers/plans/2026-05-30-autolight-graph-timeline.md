@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Completed on `main` as of 2026-05-31. The full unit suite and headless QML smoke check pass for the graph-backed timeline foundation.
+
 **Goal:** Build the first graph-backed Autolight milestone: project persistence, generated/editable track semantics, local jobs, cache keys, a small transform registry, and a QML timeline shell.
 
 **Architecture:** Python owns project truth, analysis, jobs, cache metadata, and Qt-facing view models. QML renders a timeline projection over the Python model and never runs analysis directly. The first graph implementation validates single-parent generated tracks while storing inputs as a list for future DAG-compatible schema evolution.
@@ -40,7 +42,7 @@
 - Create: `autolight/project/models.py`
 - Test: `tests/test_project_models.py`
 
-- [ ] **Step 1: Write the failing model tests**
+- [x] **Step 1: Write the failing model tests**
 
 Create `tests/test_project_models.py`:
 
@@ -110,7 +112,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail because the package is missing**
+- [x] **Step 2: Run the tests and verify they fail because the package is missing**
 
 Run:
 
@@ -120,7 +122,7 @@ uv run python -m unittest tests.test_project_models -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight'`.
 
-- [ ] **Step 3: Create the package and domain models**
+- [x] **Step 3: Create the package and domain models**
 
 Create `autolight/__init__.py`:
 
@@ -266,7 +268,7 @@ class ProjectDocument:
     ui_state: dict[str, Any] = field(default_factory=dict)
 ```
 
-- [ ] **Step 4: Run the model tests and verify they pass**
+- [x] **Step 4: Run the model tests and verify they pass**
 
 Run:
 
@@ -276,7 +278,7 @@ uv run python -m unittest tests.test_project_models -v
 
 Expected: PASS with 4 tests.
 
-- [ ] **Step 5: Commit the domain models**
+- [x] **Step 5: Commit the domain models**
 
 Run:
 
@@ -294,7 +296,7 @@ Expected: commit succeeds.
 - Modify: `autolight/project/__init__.py`
 - Test: `tests/test_project_store.py`
 
-- [ ] **Step 1: Write failing store and graph tests**
+- [x] **Step 1: Write failing store and graph tests**
 
 Create `tests/test_project_store.py`:
 
@@ -390,7 +392,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the store tests and verify they fail because `store.py` is missing**
+- [x] **Step 2: Run the store tests and verify they fail because `store.py` is missing**
 
 Run:
 
@@ -400,7 +402,7 @@ uv run python -m unittest tests.test_project_store -v
 
 Expected: FAIL with `ModuleNotFoundError` or import errors for `autolight.project.store`.
 
-- [ ] **Step 3: Implement project store, graph helpers, and serialization**
+- [x] **Step 3: Implement project store, graph helpers, and serialization**
 
 Create `autolight/project/store.py`:
 
@@ -655,7 +657,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: Run project tests**
+- [x] **Step 4: Run project tests**
 
 Run:
 
@@ -665,7 +667,7 @@ uv run python -m unittest tests.test_project_models tests.test_project_store -v
 
 Expected: PASS with all project tests.
 
-- [ ] **Step 5: Commit project store and graph semantics**
+- [x] **Step 5: Commit project store and graph semantics**
 
 Run:
 
@@ -684,7 +686,7 @@ Expected: commit succeeds.
 - Create: `autolight/cache/store.py`
 - Test: `tests/test_cache.py`
 
-- [ ] **Step 1: Write failing cache tests**
+- [x] **Step 1: Write failing cache tests**
 
 Create `tests/test_cache.py`:
 
@@ -734,7 +736,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run cache tests and verify they fail because cache modules are missing**
+- [x] **Step 2: Run cache tests and verify they fail because cache modules are missing**
 
 Run:
 
@@ -744,7 +746,7 @@ uv run python -m unittest tests.test_cache -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.cache'`.
 
-- [ ] **Step 3: Implement stable cache keys and local artifact writes**
+- [x] **Step 3: Implement stable cache keys and local artifact writes**
 
 Create `autolight/cache/__init__.py`:
 
@@ -833,7 +835,7 @@ class CacheStore:
         return path.exists() and path.stat().st_size == entry.size_bytes
 ```
 
-- [ ] **Step 4: Run cache tests**
+- [x] **Step 4: Run cache tests**
 
 Run:
 
@@ -843,7 +845,7 @@ uv run python -m unittest tests.test_cache -v
 
 Expected: PASS with 3 tests.
 
-- [ ] **Step 5: Commit cache support**
+- [x] **Step 5: Commit cache support**
 
 Run:
 
@@ -862,7 +864,7 @@ Expected: commit succeeds.
 - Create: `autolight/analysis/builtin.py`
 - Test: `tests/test_analysis.py`
 
-- [ ] **Step 1: Write failing analysis tests**
+- [x] **Step 1: Write failing analysis tests**
 
 Create `tests/test_analysis.py`:
 
@@ -917,7 +919,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run analysis tests and verify they fail because analysis modules are missing**
+- [x] **Step 2: Run analysis tests and verify they fail because analysis modules are missing**
 
 Run:
 
@@ -927,7 +929,7 @@ uv run python -m unittest tests.test_analysis -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.analysis'`.
 
-- [ ] **Step 3: Implement transform registry contracts**
+- [x] **Step 3: Implement transform registry contracts**
 
 Create `autolight/analysis/__init__.py`:
 
@@ -1003,7 +1005,7 @@ class TransformRegistry:
         return sorted(self._transforms)
 ```
 
-- [ ] **Step 4: Implement deterministic built-in transforms**
+- [x] **Step 4: Implement deterministic built-in transforms**
 
 Create `autolight/analysis/builtin.py`:
 
@@ -1082,7 +1084,7 @@ def _vocals_stand_in(context: TransformContext, params: dict) -> TransformResult
     return TransformResult(artifacts={"stem": str(artifact)}, metadata={"stem": label})
 ```
 
-- [ ] **Step 5: Run analysis tests**
+- [x] **Step 5: Run analysis tests**
 
 Run:
 
@@ -1092,7 +1094,7 @@ uv run python -m unittest tests.test_analysis -v
 
 Expected: PASS with 3 tests.
 
-- [ ] **Step 6: Commit analysis registry**
+- [x] **Step 6: Commit analysis registry**
 
 Run:
 
@@ -1110,7 +1112,7 @@ Expected: commit succeeds.
 - Create: `autolight/jobs/queue.py`
 - Test: `tests/test_jobs.py`
 
-- [ ] **Step 1: Write failing job queue tests**
+- [x] **Step 1: Write failing job queue tests**
 
 Create `tests/test_jobs.py`:
 
@@ -1197,7 +1199,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run job tests and verify they fail because jobs module is missing**
+- [x] **Step 2: Run job tests and verify they fail because jobs module is missing**
 
 Run:
 
@@ -1207,7 +1209,7 @@ uv run python -m unittest tests.test_jobs -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.jobs'`.
 
-- [ ] **Step 3: Implement the local job queue**
+- [x] **Step 3: Implement the local job queue**
 
 Create `autolight/jobs/__init__.py`:
 
@@ -1323,7 +1325,7 @@ class LocalJobQueue:
             run.completed_at = datetime.now(timezone.utc).isoformat()
 ```
 
-- [ ] **Step 4: Run job tests**
+- [x] **Step 4: Run job tests**
 
 Run:
 
@@ -1333,7 +1335,7 @@ uv run python -m unittest tests.test_jobs -v
 
 Expected: PASS with 3 tests.
 
-- [ ] **Step 5: Commit job queue**
+- [x] **Step 5: Commit job queue**
 
 Run:
 
@@ -1351,7 +1353,7 @@ Expected: commit succeeds.
 - Create: `autolight/timeline/model.py`
 - Test: `tests/test_timeline_model.py`
 
-- [ ] **Step 1: Write failing timeline model tests**
+- [x] **Step 1: Write failing timeline model tests**
 
 Create `tests/test_timeline_model.py`:
 
@@ -1397,7 +1399,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run timeline model tests and verify they fail because timeline module is missing**
+- [x] **Step 2: Run timeline model tests and verify they fail because timeline module is missing**
 
 Run:
 
@@ -1407,7 +1409,7 @@ uv run python -m unittest tests.test_timeline_model -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.timeline'`.
 
-- [ ] **Step 3: Implement QML-facing track model**
+- [x] **Step 3: Implement QML-facing track model**
 
 Create `autolight/timeline/__init__.py`:
 
@@ -1482,7 +1484,7 @@ class TimelineTrackModel(QAbstractListModel):
         raise KeyError(name)
 ```
 
-- [ ] **Step 4: Run timeline model tests**
+- [x] **Step 4: Run timeline model tests**
 
 Run:
 
@@ -1492,7 +1494,7 @@ uv run python -m unittest tests.test_timeline_model -v
 
 Expected: PASS with 1 test.
 
-- [ ] **Step 5: Commit timeline model**
+- [x] **Step 5: Commit timeline model**
 
 Run:
 
@@ -1511,7 +1513,7 @@ Expected: commit succeeds.
 - Replace: `UI/Main.qml`
 - Test: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Write failing app controller tests**
+- [x] **Step 1: Write failing app controller tests**
 
 Create `tests/test_app_controller.py`:
 
@@ -1541,7 +1543,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run controller tests and verify they fail because controller is missing**
+- [x] **Step 2: Run controller tests and verify they fail because controller is missing**
 
 Run:
 
@@ -1551,7 +1553,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.app_controller'`.
 
-- [ ] **Step 3: Implement the controller**
+- [x] **Step 3: Implement the controller**
 
 Create `autolight/app_controller.py`:
 
@@ -1611,7 +1613,7 @@ class AppController(QObject):
         self._track_model.set_project(self._project)
 ```
 
-- [ ] **Step 4: Modify `main.py` to expose the controller and smoke mode**
+- [x] **Step 4: Modify `main.py` to expose the controller and smoke mode**
 
 Replace `main.py`:
 
@@ -1648,7 +1650,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 5: Replace `UI/Main.qml` with the timeline shell**
+- [x] **Step 5: Replace `UI/Main.qml` with the timeline shell**
 
 Replace `UI/Main.qml`:
 
@@ -1797,7 +1799,7 @@ Window {
 }
 ```
 
-- [ ] **Step 6: Run controller and smoke checks**
+- [x] **Step 6: Run controller and smoke checks**
 
 Run:
 
@@ -1808,7 +1810,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: unittest passes and smoke command exits 0.
 
-- [ ] **Step 7: Commit controller and QML shell**
+- [x] **Step 7: Commit controller and QML shell**
 
 Run:
 
@@ -1825,7 +1827,7 @@ Expected: commit succeeds.
 - Create: `tests/test_end_to_end_flow.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write the end-to-end test**
+- [x] **Step 1: Write the end-to-end test**
 
 Create `tests/test_end_to_end_flow.py`:
 
@@ -1890,7 +1892,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the end-to-end test**
+- [x] **Step 2: Run the end-to-end test**
 
 Run:
 
@@ -1900,7 +1902,7 @@ uv run python -m unittest tests.test_end_to_end_flow -v
 
 Expected: PASS with 1 test.
 
-- [ ] **Step 3: Update README with current run and test commands**
+- [x] **Step 3: Update README with current run and test commands**
 
 Replace `README.md`:
 
@@ -1936,7 +1938,7 @@ uv run python -m unittest discover -s tests -v
 - Render project tracks and marker counts in a QML timeline shell.
 ```
 
-- [ ] **Step 4: Run the full verification suite**
+- [x] **Step 4: Run the full verification suite**
 
 Run:
 
@@ -1948,7 +1950,7 @@ git diff --check
 
 Expected: all tests pass, smoke command exits 0, and `git diff --check` prints no errors.
 
-- [ ] **Step 5: Commit end-to-end test and README**
+- [x] **Step 5: Commit end-to-end test and README**
 
 Run:
 
@@ -1961,7 +1963,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests**
+- [x] **Step 1: Run all tests**
 
 Run:
 
@@ -1971,7 +1973,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: every test passes.
 
-- [ ] **Step 2: Run the headless app smoke check**
+- [x] **Step 2: Run the headless app smoke check**
 
 Run:
 
@@ -1981,7 +1983,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: command exits 0.
 
-- [ ] **Step 3: Check the final diff**
+- [x] **Step 3: Check the final diff**
 
 Run:
 
