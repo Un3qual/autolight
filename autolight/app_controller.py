@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import wave
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
@@ -19,6 +20,14 @@ from autolight.project.store import (
     new_project,
 )
 from autolight.timeline.model import TimelineTrackModel
+
+
+def _write_demo_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
 
 
 class AppController(QObject):
@@ -143,7 +152,7 @@ class AppController(QObject):
         self._demo_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-demo-")
         demo_audio_name = Path(self._demo_temp_dir.name).name
         demo_audio_path = Path(self._demo_temp_dir.name) / f"{demo_audio_name}.wav"
-        demo_audio_path.write_bytes(b"demo audio")
+        _write_demo_wav(demo_audio_path)
 
         self._set_project(new_project("Autolight Demo"))
         self._set_project_path("")

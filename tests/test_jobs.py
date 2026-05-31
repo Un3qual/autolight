@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from threading import Event, Lock, Thread
 from unittest.mock import patch
@@ -19,6 +20,14 @@ from autolight.project.store import (
     import_audio_asset,
     new_project,
 )
+
+
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
 
 
 class LocalJobQueueTest(unittest.TestCase):
@@ -590,7 +599,7 @@ def project_with_generated_track(
     tmp: Path, transform_id: str, params: dict, transform_version: str = "1"
 ):
     audio_path = tmp / "song.wav"
-    audio_path.write_bytes(b"audio")
+    write_wav(audio_path)
     project = new_project("Demo")
     source = import_audio_asset(project, audio_path)
     generated = add_generated_track(

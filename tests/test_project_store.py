@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,11 +26,19 @@ from autolight.project.store import (
 )
 
 
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
+
+
 class ProjectStoreTest(unittest.TestCase):
     def test_save_and_load_project_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
-            audio_path.write_bytes(b"fake audio bytes")
+            write_wav(audio_path)
             project_path = Path(tmp) / "show.autolight"
 
             project = new_project("Demo")
@@ -63,7 +72,7 @@ class ProjectStoreTest(unittest.TestCase):
     def test_load_rejects_persisted_project_with_invalid_graph(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
-            audio_path.write_bytes(b"fake audio bytes")
+            write_wav(audio_path)
             project_path = Path(tmp) / "show.autolight"
 
             project = new_project("Demo")
@@ -154,7 +163,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_generated_track_helper_appends_after_parent_validation(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
 
         generated = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
 
@@ -167,7 +176,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_stale_propagation_marks_dependent_tracks_without_overwriting_markers(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
         beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
         project.markers.append(Marker(id="marker_beat", track_id=beat.id, timestamp=1.0))
         edit = create_editable_track_from_markers(project, beat.id, "Edited Beats", ["marker_beat"])
@@ -185,7 +194,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_editable_track_clones_selected_source_markers(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
         beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
         project.markers.append(
             Marker(
@@ -218,7 +227,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_editable_track_rejects_missing_or_foreign_source_markers(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
         beat = add_generated_track(project, source.id, "Beats", "markers.beats", {}, "1", "markers.v1", "h1")
         pitch = add_generated_track(project, beat.id, "Pitch", "pitch.basic", {}, "1", "markers.v1", "h2")
         project.markers.append(Marker(id="marker_pitch", track_id=pitch.id, timestamp=2.0))
@@ -233,7 +242,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_graph_validation_rejects_orphan_markers_jobs_and_cache_refs(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
 
         project.markers.append(Marker(id="marker_orphan", track_id="missing", timestamp=0.0))
         with self.assertRaisesRegex(ValueError, "marker references missing track"):
@@ -263,7 +272,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_graph_validation_rejects_source_tracks_without_audio_asset(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
 
         source.provenance["asset_id"] = "missing_asset"
 
@@ -272,7 +281,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_graph_validation_rejects_source_tracks_with_malformed_provenance(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
         source.provenance = []
 
         with self.assertRaisesRegex(ValueError, "source track provenance"):
@@ -280,7 +289,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_graph_validation_rejects_duplicate_audio_asset_ids(self):
         project = new_project("Demo")
-        import_audio_asset_from_bytes(project, b"audio")
+        import_audio_asset_from_wav(project)
         project.audio_assets.append(
             AudioAsset(
                 id=project.audio_assets[0].id,
@@ -297,7 +306,7 @@ class ProjectStoreTest(unittest.TestCase):
 
     def test_graph_validation_rejects_duplicate_job_run_ids(self):
         project = new_project("Demo")
-        source = import_audio_asset_from_bytes(project, b"audio")
+        source = import_audio_asset_from_wav(project)
         project.job_runs.extend(
             [
                 JobRun(id="job_duplicate", track_id=source.id, transform_id="x", parameters_hash="h1"),
@@ -309,10 +318,10 @@ class ProjectStoreTest(unittest.TestCase):
             validate_graph(project)
 
 
-def import_audio_asset_from_bytes(project, payload: bytes):
+def import_audio_asset_from_wav(project):
     with tempfile.TemporaryDirectory() as tmp:
         audio_path = Path(tmp) / "song.wav"
-        audio_path.write_bytes(payload)
+        write_wav(audio_path)
         return import_audio_asset(project, audio_path)
 
 

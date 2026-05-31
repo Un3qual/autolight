@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 
 from autolight.analysis.builtin import register_builtin_transforms
@@ -15,6 +16,14 @@ from autolight.project.store import (
 )
 
 
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
+
+
 class EndToEndFlowTest(unittest.TestCase):
     def test_import_run_derive_save_and_load(self):
         registry = TransformRegistry()
@@ -23,7 +32,7 @@ class EndToEndFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             audio_path = root / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             project_path = root / "show.autolight"
             project = new_project("Demo")
             source = import_audio_asset(project, audio_path)

@@ -5,6 +5,7 @@ import wave
 from pathlib import Path
 
 from autolight.project.audio_probe import probe_audio_file
+from autolight.project.store import import_audio_asset, new_project
 
 
 def write_wav(path: Path, *, sample_rate: int = 8000, channels: int = 1, frames: int = 8000) -> None:
@@ -31,6 +32,24 @@ class AudioImportMetadataTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(IsADirectoryError, "not a file"):
                 probe_audio_file(Path(tmp))
+
+    def test_import_audio_asset_populates_real_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, sample_rate=11025, channels=1, frames=22050)
+            project = new_project("Demo")
+
+            track = import_audio_asset(project, audio_path)
+
+        self.assertEqual(track.name, "song")
+        self.assertEqual(len(project.audio_assets), 1)
+        asset = project.audio_assets[0]
+        self.assertTrue(math.isclose(asset.duration, 2.0, rel_tol=0.01))
+        self.assertEqual(asset.sample_rate, 11025)
+        self.assertEqual(asset.channels, 1)
+        self.assertEqual(asset.import_status, "online")
+        self.assertEqual(asset.relink_hint, "")
+        self.assertNotEqual(asset.fingerprint, "")
 
 
 if __name__ == "__main__":

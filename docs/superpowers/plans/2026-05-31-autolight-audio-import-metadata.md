@@ -141,7 +141,7 @@ Expected: commit succeeds.
 - Modify: `autolight/project/store.py`
 - Modify: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Add failing project import metadata test**
+- [x] **Step 1: Add failing project import metadata test**
 
 Append this import to `tests/test_audio_import_metadata.py`:
 
@@ -171,7 +171,7 @@ Add this test:
         self.assertNotEqual(asset.fingerprint, "")
 ```
 
-- [ ] **Step 2: Run the new import test and verify failure**
+- [x] **Step 2: Run the new import test and verify failure**
 
 Run:
 
@@ -181,7 +181,7 @@ uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTe
 
 Expected: FAIL because `duration`, `sample_rate`, and `channels` are still zero.
 
-- [ ] **Step 3: Use the probe in `import_audio_asset`**
+- [x] **Step 3: Use the probe in `import_audio_asset`**
 
 Add this import to `autolight/project/store.py`:
 
@@ -203,7 +203,7 @@ Replace the `AudioAsset` construction in `import_audio_asset` with:
     )
 ```
 
-- [ ] **Step 4: Run audio metadata and project store tests**
+- [x] **Step 4: Run audio metadata and project store tests**
 
 Run:
 
@@ -213,7 +213,7 @@ uv run python -m unittest tests.test_audio_import_metadata tests.test_project_st
 
 Expected: PASS. Update every test or fixture that imports audio from a `.wav` path to write decodable audio with this file's `write_wav` helper instead of placeholder bytes. This includes the existing project-store, end-to-end, timeline-model, jobs, and app-controller workflow tests, plus `AppController.load_demo_project`; replace fake writes such as `audio_path.write_bytes(b"fake audio bytes")`, `audio_path.write_bytes(b"audio")`, and `demo_audio_path.write_bytes(b"demo audio")` with `write_wav(...)`.
 
-- [ ] **Step 5: Commit import metadata**
+- [x] **Step 5: Commit import metadata**
 
 Run:
 

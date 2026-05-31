@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
@@ -7,6 +8,14 @@ from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 from autolight.project.models import Marker, ResultState
 from autolight.project.store import add_generated_track, import_audio_asset, new_project
 from autolight.timeline.model import TimelineTrackModel
+
+
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
 
 
 class TimelineTrackModelTest(unittest.TestCase):
@@ -187,7 +196,7 @@ class TimelineTrackModelTest(unittest.TestCase):
     def _project_with_generated_track(self, tmp: Path, generated_name: str = "Beats"):
         tmp.mkdir(parents=True, exist_ok=True)
         audio_path = tmp / "song.wav"
-        audio_path.write_bytes(b"audio")
+        write_wav(audio_path)
         project = new_project("Demo")
         source = import_audio_asset(project, audio_path)
         generated = add_generated_track(

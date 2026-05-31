@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import (
     AudioAsset,
     CacheEntry,
@@ -41,17 +42,13 @@ def fingerprint_file(path: Path) -> str:
 
 def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
     audio_path = Path(path)
-    if audio_path.exists() and not audio_path.is_file():
-        raise IsADirectoryError(f"audio asset path is not a file: {audio_path}")
-    if not audio_path.is_file():
-        raise FileNotFoundError(str(audio_path))
-
+    metadata = probe_audio_file(audio_path)
     asset = AudioAsset(
         id=new_id("asset"),
         path=str(audio_path),
-        duration=0.0,
-        sample_rate=0,
-        channels=0,
+        duration=metadata.duration,
+        sample_rate=metadata.sample_rate,
+        channels=metadata.channels,
         fingerprint=fingerprint_file(audio_path),
     )
     track = Track(
