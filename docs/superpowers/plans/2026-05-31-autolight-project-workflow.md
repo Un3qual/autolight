@@ -295,7 +295,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing tests for selecting, adding transforms, deriving editable tracks, and run errors**
+- [x] **Step 1: Add failing tests for selecting, adding transforms, deriving editable tracks, and run errors**
 
 Add these imports to `tests/test_app_controller.py`:
 
@@ -368,7 +368,7 @@ Add this helper to `AppControllerTest`:
         return model.data(model.index(row, 0), model.role_for_name("trackId"))
 ```
 
-- [ ] **Step 2: Run the controller tests and verify they fail**
+- [x] **Step 2: Run the controller tests and verify they fail**
 
 Run:
 
@@ -378,7 +378,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: FAIL with `AttributeError` for missing `select_track`, `add_fixed_interval_track`, or `create_editable_track_from_track`, and with current `run_track` raising instead of recording `lastError`.
 
-- [ ] **Step 3: Implement controller graph action slots**
+- [x] **Step 3: Implement controller graph action slots**
 
 Add these imports to `autolight/app_controller.py`:
 
@@ -468,7 +468,7 @@ Replace `run_track` with an error-recording version:
             return ""
 ```
 
-- [ ] **Step 4: Run the controller tests and verify graph actions pass**
+- [x] **Step 4: Run the controller tests and verify graph actions pass**
 
 Run:
 
@@ -478,7 +478,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS for controller selection, transform creation, editable derivation, and run-error behavior.
 
-- [ ] **Step 5: Commit controller graph actions**
+- [x] **Step 5: Commit controller graph actions**
 
 Run:
 

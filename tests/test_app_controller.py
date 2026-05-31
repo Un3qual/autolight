@@ -8,6 +8,7 @@ from PySide6.QtCore import QCoreApplication
 
 import main as app_entry
 from autolight.app_controller import AppController
+from autolight.project.models import ResultState
 
 
 def write_wav(path: Path) -> None:
@@ -183,6 +184,59 @@ class AppControllerTest(unittest.TestCase):
         self.assertFalse(controller.save_project(""))
         self.assertIn("project path is required", controller.lastError)
 
+    def test_select_track_updates_selected_track_id(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        second_track_id = self._track_id(controller, 1)
+
+        controller.select_track(second_track_id)
+
+        self.assertEqual(controller.selectedTrackId, second_track_id)
+
+    def test_add_fixed_interval_track_uses_parent_and_selects_generated_track(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+
+        self.assertNotEqual(generated_id, "")
+        self.assertEqual(controller.trackModel.rowCount(), 2)
+        self.assertEqual(controller.selectedTrackId, generated_id)
+        generated = next(track for track in controller._project.tracks if track.id == generated_id)
+        self.assertEqual(generated.input_track_ids, [source_id])
+        self.assertEqual(generated.transform_id, "markers.fixed_interval")
+        self.assertEqual(generated.transform_params, {"duration": 2.0, "interval": 0.5})
+        self.assertNotEqual(generated.dependency_hash, "")
+
+    def test_run_track_records_error_for_non_transform_track(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            job_id = controller.run_track(source_id)
+
+        self.assertEqual(job_id, "")
+        self.assertIn("no transform", controller.lastError)
+
+    def test_create_editable_track_from_generated_markers_selects_editable_track(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated_id = self._track_id(controller, 1)
+
+        editable_id = controller.create_editable_track_from_track(generated_id)
+
+        self.assertNotEqual(editable_id, "")
+        self.assertEqual(controller.trackModel.rowCount(), 4)
+        self.assertEqual(controller.selectedTrackId, editable_id)
+        editable = next(track for track in controller._project.tracks if track.id == editable_id)
+        self.assertEqual(editable.input_track_ids, [generated_id])
+        self.assertEqual(editable.result_state, ResultState.COMPLETE)
+
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
         FakeEngine.root_objects = [object()]
@@ -251,6 +305,10 @@ class AppControllerTest(unittest.TestCase):
         else:
             values["name"] = name
         return values
+
+    def _track_id(self, controller: AppController, row: int) -> str:
+        model = controller.trackModel
+        return model.data(model.index(row, 0), model.role_for_name("trackId"))
 
     def _controller(self):
         controller = AppController()

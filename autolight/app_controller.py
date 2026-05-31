@@ -7,12 +7,14 @@ from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
+from autolight.cache.keys import track_dependency_hash
 from autolight.jobs.queue import LocalJobQueue
 from autolight.project.models import Marker, ResultState
 from autolight.project.store import (
     ProjectStore,
     add_generated_track,
     create_editable_track_from_markers,
+    find_track,
     import_audio_asset,
     new_project,
 )
@@ -150,9 +152,78 @@ class AppController(QObject):
         self._set_selected_track_id(source.id)
         self._set_last_error("")
 
+    @Slot(str)
+    def select_track(self, track_id: str) -> None:
+        if find_track(self._project, track_id) is None:
+            self._set_last_error(f"track not found: {track_id}")
+            return
+        self._set_selected_track_id(track_id)
+        self._set_last_error("")
+
+    @Slot(str, float, float, result=str)
+    def add_fixed_interval_track(self, parent_track_id: str, duration: float, interval: float) -> str:
+        try:
+            parent = find_track(self._project, parent_track_id)
+            if parent is None:
+                raise ValueError(f"parent track not found: {parent_track_id}")
+            transform_id = "markers.fixed_interval"
+            transform_version = "1"
+            params = {"duration": float(duration), "interval": float(interval)}
+            dependency_hash = track_dependency_hash(
+                parent.cache_refs,
+                transform_id,
+                transform_version,
+                params,
+            )
+            track = add_generated_track(
+                self._project,
+                parent_track_id=parent.id,
+                name="Fixed Interval Markers",
+                transform_id=transform_id,
+                transform_params=params,
+                transform_version=transform_version,
+                output_schema="markers.v1",
+                dependency_hash=dependency_hash,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
+    @Slot(str, result=str)
+    def create_editable_track_from_track(self, source_track_id: str) -> str:
+        try:
+            marker_ids = [
+                marker.id for marker in self._project.markers if marker.track_id == source_track_id
+            ]
+            if not marker_ids:
+                raise ValueError("source track has no markers")
+            track = create_editable_track_from_markers(
+                self._project,
+                source_track_id,
+                "Editable Cues",
+                marker_ids,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
-        return self._job_queue.submit(self._project, track_id)
+        try:
+            job_id = self._job_queue.submit(self._project, track_id)
+            self._set_last_error("")
+            return job_id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
 
     @Slot(str)
     def cancel_job(self, job_id: str) -> None:
