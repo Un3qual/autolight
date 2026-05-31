@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from autolight.cache.keys import canonical_hash
 from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import (
     AudioAsset,
@@ -164,6 +165,84 @@ class _RelinkCandidateIndex:
 
 def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
     return _RelinkCandidateIndex(search_roots).find(fingerprint, filename_hint)
+
+
+def refresh_audio_track_status(project: ProjectDocument) -> list[str]:
+    changed_track_ids: list[str] = []
+    offline_assets = {asset.id: asset for asset in project.audio_assets if asset.import_status == "offline"}
+    previous_states = {track.id: track.result_state for track in project.tracks}
+    offline_source_track_ids: list[str] = []
+
+    for track in project.tracks:
+        if track.type != TrackType.SOURCE:
+            continue
+        asset_id = track.provenance.get("asset_id")
+        if not isinstance(asset_id, str):
+            continue
+        asset = offline_assets.get(asset_id)
+        if asset is None:
+            if track.error.startswith("audio asset offline:"):
+                track.error = ""
+                changed_track_ids.append(track.id)
+            continue
+        if track.result_state == ResultState.COMPLETE:
+            track.result_state = ResultState.STALE
+        hint = asset.relink_hint or Path(asset.path).name or asset.id
+        track.error = f"audio asset offline: {hint}"
+        changed_track_ids.append(track.id)
+        offline_source_track_ids.append(track.id)
+
+    for track_id in offline_source_track_ids:
+        mark_dependents_stale(project, track_id)
+
+    for track in project.tracks:
+        if track.id not in changed_track_ids and track.result_state != previous_states[track.id]:
+            changed_track_ids.append(track.id)
+
+    return changed_track_ids
+
+
+def track_dependency_inputs(project: ProjectDocument, track: Track) -> list[str]:
+    if track.cache_refs:
+        return list(track.cache_refs)
+    return [f"track:{track.id}:{_track_content_hash(project, track)}"]
+
+
+def _track_content_hash(project: ProjectDocument, track: Track) -> str:
+    payload = {
+        "track_id": track.id,
+        "track_type": track.type.value,
+        "input_track_ids": list(track.input_track_ids),
+        "dependency_hash": track.dependency_hash,
+        "provenance": track.provenance,
+        "markers": [_to_json(marker) for marker in _markers_for_track(project, track.id)],
+    }
+    if track.type == TrackType.SOURCE:
+        payload["audio_asset"] = _source_audio_asset_payload(project, track)
+    return canonical_hash(payload)
+
+
+def _markers_for_track(project: ProjectDocument, track_id: str) -> list[Marker]:
+    return sorted(
+        (marker for marker in project.markers if marker.track_id == track_id),
+        key=lambda marker: (marker.timestamp, marker.id),
+    )
+
+
+def _source_audio_asset_payload(project: ProjectDocument, track: Track) -> dict[str, str]:
+    asset_id = track.provenance.get("asset_id")
+    asset = next(
+        (candidate for candidate in project.audio_assets if isinstance(asset_id, str) and candidate.id == asset_id),
+        None,
+    )
+    if asset is None:
+        return {"asset_id": str(asset_id or ""), "status": "missing"}
+    return {
+        "asset_id": asset.id,
+        "fingerprint": asset.fingerprint,
+        "import_status": asset.import_status,
+        "relink_hint": asset.relink_hint,
+    }
 
 
 def add_generated_track(

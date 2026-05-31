@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import wave
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
@@ -9,6 +8,7 @@ from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
+from autolight.demo_audio import write_silent_wav
 from autolight.jobs.queue import LocalJobQueue
 from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
@@ -21,16 +21,10 @@ from autolight.project.store import (
     import_audio_asset,
     new_project,
     refresh_audio_asset_status,
+    refresh_audio_track_status,
+    track_dependency_inputs,
 )
 from autolight.timeline.model import TimelineTrackModel
-
-
-def _write_demo_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
 
 
 class AppController(QObject):
@@ -121,12 +115,20 @@ class AppController(QObject):
             project = ProjectStore.load(project_path)
             changed_running_state = self._mark_running_state_stale(project)
             changed_audio_asset_ids = refresh_audio_asset_status(project, search_dirs=[project_path.parent])
+            changed_audio_track_ids = refresh_audio_track_status(project)
             self._set_project(project)
             self._set_project_path(str(project_path))
             self._set_selected_track_id("")
             self._set_last_error("")
             invalid_cache_refs = self.refresh_cache_status()
-            self._set_dirty(bool(invalid_cache_refs or changed_running_state or changed_audio_asset_ids))
+            self._set_dirty(
+                bool(
+                    invalid_cache_refs
+                    or changed_running_state
+                    or changed_audio_asset_ids
+                    or changed_audio_track_ids
+                )
+            )
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -176,7 +178,7 @@ class AppController(QObject):
         self._demo_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-demo-")
         demo_audio_name = Path(self._demo_temp_dir.name).name
         demo_audio_path = Path(self._demo_temp_dir.name) / f"{demo_audio_name}.wav"
-        _write_demo_wav(demo_audio_path)
+        write_silent_wav(demo_audio_path)
 
         self._set_project(new_project("Autolight Demo"))
         self._set_project_path("")
@@ -223,7 +225,7 @@ class AppController(QObject):
             transform_version = "1"
             params = {"duration": float(duration), "interval": float(interval)}
             dependency_hash = track_dependency_hash(
-                parent.cache_refs,
+                track_dependency_inputs(self._project, parent),
                 transform_id,
                 transform_version,
                 params,
@@ -409,7 +411,7 @@ class AppController(QObject):
         if parent is None:
             raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
         track.dependency_hash = track_dependency_hash(
-            parent.cache_refs,
+            track_dependency_inputs(self._project, parent),
             track.transform_id,
             track.transform_version,
             track.transform_params,

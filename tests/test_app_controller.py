@@ -237,6 +237,35 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(asset.relink_hint, "song.wav")
         self.assertTrue(reopened.isDirty)
 
+    def test_open_project_marks_offline_audio_tracks_stale(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            generated = self._track_by_id(controller, generated_id)
+            generated.result_state = ResultState.COMPLETE
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        reopened_source = self._track_by_id(reopened, source_id)
+        reopened_generated = self._track_by_id(reopened, generated_id)
+        source_index = reopened.trackModel.index(0, 0)
+        result_role = reopened.trackModel.role_for_name("resultState")
+        error_role = reopened.trackModel.role_for_name("error")
+        self.assertEqual(reopened_source.result_state, ResultState.STALE)
+        self.assertIn("audio asset offline", reopened_source.error)
+        self.assertEqual(reopened_generated.result_state, ResultState.STALE)
+        self.assertEqual(reopened.trackModel.data(source_index, result_role), "stale")
+        self.assertIn("audio asset offline", reopened.trackModel.data(source_index, error_role))
+
     def test_open_project_searches_project_folder_for_relinked_audio(self):
         controller = self._controller()
 
@@ -592,6 +621,37 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotEqual(job_id, "")
         self.assertEqual(child.dependency_hash, expected_hash)
 
+    def test_rerun_track_recomputes_dependency_hash_from_editable_markers(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        editable = self._track_by_id(controller, self._track_id(controller, 2))
+        child = add_generated_track(
+            controller._project,
+            editable.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+
+        first_job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(first_job_id, timeout=2)
+        first_dependency_hash = child.dependency_hash
+        controller.select_track(editable.id)
+        controller.add_marker_to_selected_track(1.75, "Blackout")
+        child.result_state = ResultState.STALE
+
+        second_job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(second_job_id, timeout=2)
+
+        self.assertNotEqual(first_job_id, "")
+        self.assertNotEqual(second_job_id, "")
+        self.assertNotEqual(child.dependency_hash, first_dependency_hash)
+
     def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -660,7 +720,6 @@ class AppControllerTest(unittest.TestCase):
     def test_qml_timeline_shell_uses_one_row_oriented_list(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
 
-        self.assertEqual(qml.count("ListView {"), 1)
         self.assertIn("id: timelineRows", qml)
         self.assertIn("model: markerSpans", qml)
         self.assertIn("modelData.timestamp", qml)

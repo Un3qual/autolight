@@ -12,7 +12,7 @@ from autolight.analysis.registry import (
     TransformSpec,
 )
 from autolight.jobs.queue import LocalJobQueue
-from autolight.project.models import Marker, ResultState
+from autolight.project.models import CacheEntry, Marker, ResultState
 from autolight.project.store import (
     add_generated_track,
     create_editable_track_from_markers,
@@ -480,6 +480,113 @@ class LocalJobQueueTest(unittest.TestCase):
             self.assertEqual(invalid_refs, [project.cache_entries[0].id])
             self.assertEqual(track.result_state, ResultState.STALE)
             self.assertIn("cache artifact", track.error)
+
+    def test_refresh_cache_validity_marks_dependents_stale_for_invalid_cache_refs(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, upstream_id = project_with_generated_track(
+                Path(tmp),
+                "stems.vocals_stand_in",
+                {"label": "vocals"},
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            upstream = next(track for track in project.tracks if track.id == upstream_id)
+            upstream.result_state = ResultState.COMPLETE
+            upstream.cache_refs = ["missing_cache"]
+            project.cache_entries.append(
+                CacheEntry(
+                    id="missing_cache",
+                    dependency_hash=upstream.dependency_hash,
+                    artifact_kind="stem",
+                    path="missing/stem.json",
+                    created_at="2026-05-31T00:00:00+00:00",
+                    transform_version="1",
+                    size_bytes=1,
+                    payload_digest="missing-digest",
+                )
+            )
+            downstream = add_generated_track(
+                project,
+                upstream.id,
+                "Dependent",
+                "markers.fixed_interval",
+                {"duration": 1.0, "interval": 0.5},
+                "1",
+                "markers.v1",
+                "downstream_dep",
+            )
+            downstream.result_state = ResultState.COMPLETE
+
+            invalid_refs = queue.refresh_cache_validity(project)
+
+        self.assertEqual(invalid_refs, ["missing_cache"])
+        self.assertEqual(upstream.result_state, ResultState.STALE)
+        self.assertEqual(downstream.result_state, ResultState.STALE)
+
+    def test_refresh_cache_validity_does_not_block_cancel_while_validating_artifacts(self):
+        transform_started = Event()
+        release_transform = Event()
+
+        def blocking_transform(context, params):
+            transform_started.set()
+            while not release_transform.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.cancel_during_cache_refresh", blocking_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp),
+                "test.cancel_during_cache_refresh",
+                {},
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+            track = next(track for track in project.tracks if track.id == track_id)
+            track.cache_refs = ["cache_validating"]
+            project.cache_entries.append(
+                CacheEntry(
+                    id="cache_validating",
+                    dependency_hash=track.dependency_hash,
+                    artifact_kind="stem",
+                    path="stem/cache.bin",
+                    created_at="2026-05-31T00:00:00+00:00",
+                    transform_version="1",
+                    size_bytes=1,
+                )
+            )
+            validation_started = Event()
+            release_validation = Event()
+
+            def slow_validation(entry):
+                validation_started.set()
+                release_validation.wait(timeout=1)
+                return True
+
+            job_id = queue.submit(project, track_id)
+            self.assertTrue(transform_started.wait(timeout=1))
+
+            with patch.object(queue.cache_store, "is_entry_valid", side_effect=slow_validation):
+                refresh_thread = Thread(target=queue.refresh_cache_validity, args=(project,))
+                refresh_thread.start()
+                self.assertTrue(validation_started.wait(timeout=1))
+                cancel_thread = Thread(target=queue.cancel, args=(job_id,))
+                cancel_thread.start()
+                try:
+                    cancel_thread.join(timeout=0.2)
+                    self.assertFalse(cancel_thread.is_alive())
+                finally:
+                    release_validation.set()
+                    release_transform.set()
+                    cancel_thread.join(timeout=1)
+                    refresh_thread.join(timeout=1)
+                    queue.wait(job_id, timeout=2)
 
     def test_artifact_job_streams_artifact_into_cache(self):
         def writes_artifact(context, params):

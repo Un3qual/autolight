@@ -113,15 +113,39 @@ class LocalJobQueue:
         self._executor.shutdown(wait=True)
 
     def refresh_cache_validity(self, project: ProjectDocument) -> list[str]:
+        entry_snapshots = self._cache_entry_snapshots(project)
+        validation_status_by_id = self._validate_cache_entries(entry_snapshots)
+        invalid_refs, changed_track_ids = self._apply_cache_validation(project, validation_status_by_id)
+
+        for changed_track_id in changed_track_ids:
+            self._notify_track_changed(changed_track_id)
+        return invalid_refs
+
+    def _cache_entry_snapshots(self, project: ProjectDocument) -> list[CacheEntry]:
+        with self._lock:
+            return [copy.copy(entry) for entry in project.cache_entries]
+
+    def _validate_cache_entries(self, entries: list[CacheEntry]) -> dict[str, str]:
+        return {
+            entry.id: "valid" if self.cache_store.is_entry_valid(entry) else "invalid"
+            for entry in entries
+        }
+
+    def _apply_cache_validation(
+        self,
+        project: ProjectDocument,
+        validation_status_by_id: dict[str, str],
+    ) -> tuple[list[str], list[str]]:
         invalid_refs: list[str] = []
         changed_track_ids: list[str] = []
+        directly_invalid_track_ids: list[str] = []
         with self._lock:
             entries_by_id = {entry.id: entry for entry in project.cache_entries}
-            for entry in project.cache_entries:
-                if self.cache_store.is_entry_valid(entry):
-                    entry.validation_status = "valid"
-                else:
-                    entry.validation_status = "invalid"
+            previous_states = {track.id: track.result_state for track in project.tracks}
+            for entry_id, validation_status in validation_status_by_id.items():
+                entry = entries_by_id.get(entry_id)
+                if entry is not None:
+                    entry.validation_status = validation_status
 
             for track in project.tracks:
                 track_invalid_refs = [
@@ -133,14 +157,20 @@ class LocalJobQueue:
                 if not track_invalid_refs:
                     continue
                 invalid_refs.extend(track_invalid_refs)
+                directly_invalid_track_ids.append(track.id)
                 if track.result_state == ResultState.COMPLETE:
                     track.result_state = ResultState.STALE
                 track.error = f"cache artifact missing or invalid: {track_invalid_refs[0]}"
                 changed_track_ids.append(track.id)
 
-        for changed_track_id in changed_track_ids:
-            self._notify_track_changed(changed_track_id)
-        return invalid_refs
+            for track_id in directly_invalid_track_ids:
+                mark_dependents_stale(project, track_id)
+
+            for track in project.tracks:
+                if track.id not in changed_track_ids and track.result_state != previous_states[track.id]:
+                    changed_track_ids.append(track.id)
+
+        return invalid_refs, changed_track_ids
 
     def _run(
         self,
