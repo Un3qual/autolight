@@ -756,7 +756,7 @@ Expected: commit succeeds.
 - Verify: `tests/test_app_controller.py`
 - Verify: `README.md`
 
-- [ ] **Step 1: Run the full unit suite**
+- [x] **Step 1: Run the full unit suite**
 
 Run:
 
@@ -766,7 +766,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run the headless QML smoke check**
+- [x] **Step 2: Run the headless QML smoke check**
 
 Run:
 
@@ -776,7 +776,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: command exits 0. A Qt font alias warning is acceptable if the process still exits 0.
 
-- [ ] **Step 3: Check the final diff**
+- [x] **Step 3: Check the final diff**
 
 Run:
 
@@ -787,7 +787,7 @@ git status --short --branch
 
 Expected: `git diff --check` exits 0. `git status` shows only intentional changes if commits were not created during task execution, or a clean worktree if each task was committed.
 
-- [ ] **Step 4: Commit any remaining final adjustments**
+- [x] **Step 4: Commit any remaining final adjustments**
 
 If any final verification edits were made, run:
 
