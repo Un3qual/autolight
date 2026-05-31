@@ -292,6 +292,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
         self.assertEqual(restored_source.error, "")
 
+    def test_open_project_marks_modified_audio_tracks_stale(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path, frames=8000)
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            write_wav(audio_path, frames=4000)
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        reopened_source = self._track_by_id(reopened, source_id)
+        self.assertEqual(reopened._project.audio_assets[0].import_status, "modified")
+        self.assertEqual(reopened_source.result_state, ResultState.STALE)
+        self.assertIn("audio asset modified", reopened_source.error)
+
     def test_open_project_searches_project_folder_for_relinked_audio(self):
         controller = self._controller()
 

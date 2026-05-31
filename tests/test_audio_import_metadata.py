@@ -71,6 +71,18 @@ class AudioImportMetadataTest(unittest.TestCase):
 
         open_audio.assert_not_called()
 
+    def test_probe_audio_file_explains_missing_audioread_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.m4a"
+            audio_path.write_bytes(b"decoder dependency is missing")
+
+            with (
+                patch("autolight.project.audio_probe.soundfile.info", side_effect=soundfile.SoundFileError("unsupported")),
+                patch.dict("sys.modules", {"audioread": None}),
+                self.assertRaisesRegex(RuntimeError, "audioread.*unsupported audio container"),
+            ):
+                probe_audio_file(audio_path)
+
     def test_import_audio_asset_populates_real_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
@@ -147,21 +159,13 @@ class AudioImportMetadataTest(unittest.TestCase):
 
             from autolight.project.store import refresh_audio_asset_status
 
-            rglob_calls = []
-            original_rglob = Path.rglob
-
-            def record_rglob(path, pattern):
-                rglob_calls.append((path, pattern))
-                return original_rglob(path, pattern)
-
-            with patch.object(Path, "rglob", record_rglob):
+            with patch.object(Path, "rglob", side_effect=AssertionError("unbounded recursive search")):
                 changed_ids = refresh_audio_asset_status(project, search_dirs=[root])
 
         self.assertEqual(changed_ids, [asset.id for asset in project.audio_assets])
         self.assertEqual([asset.path for asset in project.audio_assets], [str(first_new_path), str(second_new_path)])
-        self.assertEqual(rglob_calls, [(root, "*")])
 
-    def test_refresh_audio_asset_status_marks_existing_fingerprint_mismatch_offline(self):
+    def test_refresh_audio_asset_status_marks_existing_fingerprint_mismatch_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
             write_wav(audio_path, frames=8000)
@@ -175,8 +179,8 @@ class AudioImportMetadataTest(unittest.TestCase):
 
         self.assertEqual(changed_ids, [project.audio_assets[0].id])
         self.assertEqual(project.audio_assets[0].path, str(audio_path))
-        self.assertEqual(project.audio_assets[0].import_status, "offline")
-        self.assertEqual(project.audio_assets[0].relink_hint, "song.wav")
+        self.assertEqual(project.audio_assets[0].import_status, "modified")
+        self.assertEqual(project.audio_assets[0].relink_hint, "")
 
     def test_refresh_audio_asset_status_relinks_when_original_file_is_unreadable(self):
         with tempfile.TemporaryDirectory() as tmp:

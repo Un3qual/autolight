@@ -34,7 +34,12 @@ def probe_audio_file(path: str | Path) -> AudioMetadata:
 
 
 def _probe_with_audioread(audio_path: Path) -> AudioMetadata:
-    import audioread
+    try:
+        import audioread
+    except ImportError as exc:
+        raise RuntimeError(
+            "audioread is required to probe this unsupported audio container"
+        ) from exc
 
     with audioread.audio_open(str(audio_path)) as reader:
         return AudioMetadata(
