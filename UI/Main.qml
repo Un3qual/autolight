@@ -187,6 +187,11 @@ Window {
                 }
 
                 Button {
+                    text: "Check Cache"
+                    onClicked: appController.refresh_cache_status()
+                }
+
+                Button {
                     text: "Derive Editable"
                     enabled: appController.selectedTrackId.length > 0
                     onClicked: appController.create_editable_track_from_track(appController.selectedTrackId)
@@ -270,7 +275,7 @@ Window {
 
                         Text {
                             text: trackType + " - " + resultState + " - " + markerCount + " markers"
-                            color: resultState === "failed" ? "#f87171" : "#a1a1aa"
+                            color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
                             font.pixelSize: 12
                             elide: Text.ElideRight
                             width: parent.width

@@ -118,7 +118,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML stale recovery test**
+- [x] **Step 1: Add failing QML stale recovery test**
 
 Add this test:
 
@@ -132,7 +132,7 @@ Add this test:
         self.assertIn("resultState === \"failed\"", qml)
 ```
 
-- [ ] **Step 2: Run QML stale recovery test and verify failure**
+- [x] **Step 2: Run QML stale recovery test and verify failure**
 
 Run:
 
@@ -142,7 +142,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_e
 
 Expected: FAIL until QML includes cache refresh and stale/failed styling. The `rerun_track` assertion verifies that the prerequisite job-progress plan's canonical `Rerun` button remains present; do not add a second `Rerun` button in this plan.
 
-- [ ] **Step 3: Add cache refresh and stale styling to QML**
+- [x] **Step 3: Add cache refresh and stale styling to QML**
 
 Add a toolbar button:
 
@@ -159,7 +159,7 @@ Update the status text color expression in the track metadata area:
                             color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
 ```
 
-- [ ] **Step 4: Run QML recovery tests and smoke**
+- [x] **Step 4: Run QML recovery tests and smoke**
 
 Run:
 
@@ -170,7 +170,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: test passes and smoke exits 0.
 
-- [ ] **Step 5: Commit stale recovery UI**
+- [x] **Step 5: Commit stale recovery UI**
 
 Run:
 

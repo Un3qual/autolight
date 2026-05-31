@@ -512,6 +512,14 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.cancel_selected_job()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
 
+    def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("appController.refresh_cache_status()", qml)
+        self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
+        self.assertIn('resultState === "stale"', qml)
+        self.assertIn('resultState === "failed"', qml)
+
     @staticmethod
     def _track_role_values(controller: AppController, row: int):
         model = controller.trackModel
