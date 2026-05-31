@@ -221,10 +221,12 @@ Add this test to `AppControllerTest`:
 
         job_id = controller.run_track(stem.id)
         self.assertNotEqual(job_id, "")
-        self.assertTrue(started.wait(2))
-        controller.cancel_selected_job()
-        release.set()
-        controller._job_queue.wait(job_id, timeout=2)
+        try:
+            self.assertTrue(started.wait(2))
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
 
         self.assertEqual(stem.result_state.value, "cancelled")
 

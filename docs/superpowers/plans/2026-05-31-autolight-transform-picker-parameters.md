@@ -333,8 +333,8 @@ Append this test to `TransformPickerTest`:
         no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
         multi_parent = Track(
             id="track_multi_parent",
-            type=TrackType.GENERATED,
-            name="Multi Parent",
+            type=TrackType.EDITABLE,
+            name="Editable Multi Parent",
             input_track_ids=[no_audio.id, source_id],
         )
         controller._project.tracks.extend([no_audio, multi_parent])
