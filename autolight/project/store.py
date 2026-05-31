@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from dataclasses import asdict, is_dataclass
@@ -179,6 +180,40 @@ def create_editable_track_from_markers(
             )
         )
     return track
+
+
+def add_editable_marker(project: ProjectDocument, track_id: str, timestamp: float, label: str) -> Marker:
+    track = find_track(project, track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.type != TrackType.EDITABLE:
+        raise ValueError("markers can only be added to an editable track")
+    timestamp_value = float(timestamp)
+    if not math.isfinite(timestamp_value):
+        raise ValueError("marker timestamp must be finite")
+    marker = Marker(
+        id=new_id("marker"),
+        track_id=track_id,
+        timestamp=timestamp_value,
+        label=str(label),
+        category="cue",
+        metadata={"created_by": "user"},
+    )
+    project.markers.append(marker)
+    return marker
+
+
+def delete_editable_marker(project: ProjectDocument, track_id: str, marker_id: str) -> bool:
+    track = find_track(project, track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.type != TrackType.EDITABLE:
+        raise ValueError("markers can only be deleted from an editable track")
+    before = len(project.markers)
+    project.markers[:] = [
+        marker for marker in project.markers if not (marker.track_id == track_id and marker.id == marker_id)
+    ]
+    return len(project.markers) != before
 
 
 def find_track(project: ProjectDocument, track_id: str) -> Track | None:

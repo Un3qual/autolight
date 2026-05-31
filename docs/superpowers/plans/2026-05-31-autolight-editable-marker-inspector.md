@@ -27,7 +27,7 @@
 - Modify: `autolight/project/__init__.py`
 - Create: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Write failing marker mutation tests**
+- [x] **Step 1: Write failing marker mutation tests**
 
 Create `tests/test_editable_marker_inspector.py`:
 
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run marker mutation tests and verify failure**
+- [x] **Step 2: Run marker mutation tests and verify failure**
 
 Run:
 
@@ -112,7 +112,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: FAIL because `add_editable_marker` and `delete_editable_marker` are missing.
 
-- [ ] **Step 3: Implement marker mutation helpers**
+- [x] **Step 3: Implement marker mutation helpers**
 
 Add this code to `autolight/project/store.py`:
 
@@ -156,7 +156,7 @@ def delete_editable_marker(project: ProjectDocument, track_id: str, marker_id: s
 
 Export both helpers from `autolight/project/__init__.py`.
 
-- [ ] **Step 4: Run marker mutation tests**
+- [x] **Step 4: Run marker mutation tests**
 
 Run:
 
@@ -166,7 +166,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit marker mutation helpers**
+- [x] **Step 5: Commit marker mutation helpers**
 
 Run:
 
