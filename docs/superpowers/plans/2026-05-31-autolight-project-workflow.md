@@ -23,7 +23,7 @@
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing tests for new, import, save, and open**
+- [x] **Step 1: Add failing tests for new, import, save, and open**
 
 Append these imports near the top of `tests/test_app_controller.py`:
 
@@ -105,7 +105,7 @@ Add these test methods to `AppControllerTest`:
         self.assertIn("project path is required", controller.lastError)
 ```
 
-- [ ] **Step 2: Run the controller tests and verify they fail**
+- [x] **Step 2: Run the controller tests and verify they fail**
 
 Run:
 
@@ -115,7 +115,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: FAIL with `AttributeError` for missing `new_project`, `projectPath`, `lastError`, `selectedTrackId`, `import_audio`, `save_project`, or `open_project`.
 
-- [ ] **Step 3: Add controller state, properties, and file workflow slots**
+- [x] **Step 3: Add controller state, properties, and file workflow slots**
 
 Update the imports in `autolight/app_controller.py`:
 
@@ -268,7 +268,7 @@ Add these private helpers before `__del__`:
         return Path(text)
 ```
 
-- [ ] **Step 4: Run the controller tests and verify the project workflow passes**
+- [x] **Step 4: Run the controller tests and verify the project workflow passes**
 
 Run:
 
@@ -278,7 +278,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS for the new project workflow tests. Existing demo and smoke tests continue to pass.
 
-- [ ] **Step 5: Commit the project file workflow**
+- [x] **Step 5: Commit the project file workflow**
 
 Run:
 
@@ -295,7 +295,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing tests for selecting, adding transforms, deriving editable tracks, and run errors**
+- [x] **Step 1: Add failing tests for selecting, adding transforms, deriving editable tracks, and run errors**
 
 Add these imports to `tests/test_app_controller.py`:
 
@@ -368,7 +368,7 @@ Add this helper to `AppControllerTest`:
         return model.data(model.index(row, 0), model.role_for_name("trackId"))
 ```
 
-- [ ] **Step 2: Run the controller tests and verify they fail**
+- [x] **Step 2: Run the controller tests and verify they fail**
 
 Run:
 
@@ -378,7 +378,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: FAIL with `AttributeError` for missing `select_track`, `add_fixed_interval_track`, or `create_editable_track_from_track`, and with current `run_track` raising instead of recording `lastError`.
 
-- [ ] **Step 3: Implement controller graph action slots**
+- [x] **Step 3: Implement controller graph action slots**
 
 Add these imports to `autolight/app_controller.py`:
 
@@ -468,7 +468,7 @@ Replace `run_track` with an error-recording version:
             return ""
 ```
 
-- [ ] **Step 4: Run the controller tests and verify graph actions pass**
+- [x] **Step 4: Run the controller tests and verify graph actions pass**
 
 Run:
 
@@ -478,7 +478,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS for controller selection, transform creation, editable derivation, and run-error behavior.
 
-- [ ] **Step 5: Commit controller graph actions**
+- [x] **Step 5: Commit controller graph actions**
 
 Run:
 
@@ -495,7 +495,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML wiring checks**
+- [x] **Step 1: Add failing QML wiring checks**
 
 Add this test method to `AppControllerTest`:
 
@@ -518,7 +518,7 @@ Add this test method to `AppControllerTest`:
         self.assertIn("appController.lastError", qml)
 ```
 
-- [ ] **Step 2: Run the QML wiring test and verify it fails**
+- [x] **Step 2: Run the QML wiring test and verify it fails**
 
 Run:
 
@@ -528,7 +528,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_e
 
 Expected: FAIL because `UI/Main.qml` does not yet include dialogs or workflow actions.
 
-- [ ] **Step 3: Add dialogs and toolbar actions to QML**
+- [x] **Step 3: Add dialogs and toolbar actions to QML**
 
 Update the imports at the top of `UI/Main.qml`:
 
@@ -675,7 +675,7 @@ Add this status area below the `ListView`:
         }
 ```
 
-- [ ] **Step 4: Run the QML wiring test and smoke check**
+- [x] **Step 4: Run the QML wiring test and smoke check**
 
 Run:
 
@@ -686,7 +686,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: unittest passes and the smoke command exits 0.
 
-- [ ] **Step 5: Commit QML project workflow controls**
+- [x] **Step 5: Commit QML project workflow controls**
 
 Run:
 
@@ -702,7 +702,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Update README with the interactive workflow**
+- [x] **Step 1: Update README with the interactive workflow**
 
 Replace the `Current Scope` section in `README.md` with:
 
@@ -727,7 +727,7 @@ Replace the `Current Scope` section in `README.md` with:
 7. Use `Open` to reload a saved project.
 ```
 
-- [ ] **Step 2: Run README and diff checks**
+- [x] **Step 2: Run README and diff checks**
 
 Run:
 
@@ -737,7 +737,7 @@ git diff --check
 
 Expected: command exits 0 with no whitespace errors.
 
-- [ ] **Step 3: Commit README workflow docs**
+- [x] **Step 3: Commit README workflow docs**
 
 Run:
 
@@ -756,7 +756,7 @@ Expected: commit succeeds.
 - Verify: `tests/test_app_controller.py`
 - Verify: `README.md`
 
-- [ ] **Step 1: Run the full unit suite**
+- [x] **Step 1: Run the full unit suite**
 
 Run:
 
@@ -766,7 +766,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run the headless QML smoke check**
+- [x] **Step 2: Run the headless QML smoke check**
 
 Run:
 
@@ -776,7 +776,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: command exits 0. A Qt font alias warning is acceptable if the process still exits 0.
 
-- [ ] **Step 3: Check the final diff**
+- [x] **Step 3: Check the final diff**
 
 Run:
 
@@ -787,7 +787,7 @@ git status --short --branch
 
 Expected: `git diff --check` exits 0. `git status` shows only intentional changes if commits were not created during task execution, or a clean worktree if each task was committed.
 
-- [ ] **Step 4: Commit any remaining final adjustments**
+- [x] **Step 4: Commit any remaining final adjustments**
 
 If any final verification edits were made, run:
 

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Window {
@@ -12,6 +13,108 @@ Window {
     readonly property real timelinePixelsPerSecond: 96
     readonly property real timelineLeftPadding: 24
     readonly property real timelineRulerHeight: 32
+    readonly property real defaultMarkerDuration: 8.0
+    readonly property real defaultMarkerInterval: 0.5
+
+    function newProjectWithConfirmation() {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "new"
+            discardChangesDialog.pendingPath = ""
+            discardChangesDialog.open()
+        } else {
+            appController.new_project()
+        }
+    }
+
+    function openProjectWithConfirmation(path) {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "open"
+            discardChangesDialog.pendingPath = path
+            discardChangesDialog.open()
+        } else {
+            appController.open_project(path)
+        }
+    }
+
+    function demoProjectWithConfirmation() {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "demo"
+            discardChangesDialog.pendingPath = ""
+            discardChangesDialog.open()
+        } else {
+            appController.load_demo_project()
+        }
+    }
+
+    function runPendingDiscardAction() {
+        if (discardChangesDialog.pendingAction === "new") {
+            appController.new_project()
+        } else if (discardChangesDialog.pendingAction === "open") {
+            appController.open_project(discardChangesDialog.pendingPath)
+        } else if (discardChangesDialog.pendingAction === "demo") {
+            appController.load_demo_project()
+        }
+        discardChangesDialog.pendingAction = ""
+        discardChangesDialog.pendingPath = ""
+    }
+
+    FileDialog {
+        id: openProjectDialog
+        title: "Open Autolight Project"
+        nameFilters: ["Autolight projects (*.autolight)"]
+        fileMode: FileDialog.OpenFile
+        onAccepted: root.openProjectWithConfirmation(String(selectedFile))
+    }
+
+    FileDialog {
+        id: saveProjectDialog
+        title: "Save Autolight Project"
+        nameFilters: ["Autolight projects (*.autolight)"]
+        fileMode: FileDialog.SaveFile
+        onAccepted: appController.save_project(String(selectedFile))
+    }
+
+    FileDialog {
+        id: importAudioDialog
+        title: "Import Audio"
+        nameFilters: ["Audio files (*.wav *.mp3 *.flac *.aiff *.aif *.m4a)", "All files (*)"]
+        fileMode: FileDialog.OpenFile
+        onAccepted: appController.import_audio(String(selectedFile))
+    }
+
+    Dialog {
+        id: discardChangesDialog
+        title: "Discard unsaved changes?"
+        modal: true
+        width: 420
+        anchors.centerIn: parent
+        property string pendingAction: ""
+        property string pendingPath: ""
+
+        contentItem: Text {
+            text: "This project has unsaved changes."
+            color: "#f4f4f5"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 13
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: "Discard"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+        }
+
+        onAccepted: root.runPendingDiscardAction()
+        onRejected: {
+            pendingAction = ""
+            pendingPath = ""
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -35,8 +138,51 @@ Window {
                 Item { Layout.fillWidth: true }
 
                 Button {
+                    text: "New"
+                    onClicked: root.newProjectWithConfirmation()
+                }
+
+                Button {
+                    text: "Open"
+                    onClicked: openProjectDialog.open()
+                }
+
+                Button {
+                    text: "Save"
+                    onClicked: appController.projectPath.length > 0 ? appController.save_project("") : saveProjectDialog.open()
+                }
+
+                Button {
+                    text: "Save As"
+                    onClicked: saveProjectDialog.open()
+                }
+
+                Button {
+                    text: "Import Audio"
+                    onClicked: importAudioDialog.open()
+                }
+
+                Button {
+                    text: "Add Markers"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
+                }
+
+                Button {
+                    text: "Run"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.run_track(appController.selectedTrackId)
+                }
+
+                Button {
+                    text: "Derive Editable"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.create_editable_track_from_track(appController.selectedTrackId)
+                }
+
+                Button {
                     text: "Load Demo"
-                    onClicked: appController.load_demo_project()
+                    onClicked: root.demoProjectWithConfirmation()
                 }
             }
         }
@@ -95,7 +241,7 @@ Window {
                     width: 280
                     height: parent.height
                     color: index % 2 === 0 ? "#23262d" : "#1f2229"
-                    border.color: "#343842"
+                    border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
 
                     Column {
                         anchors.fill: parent
@@ -118,13 +264,19 @@ Window {
                             width: parent.width
                         }
                     }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: appController.select_track(trackId)
+                    }
                 }
 
                 Rectangle {
                     width: Math.max(0, parent.width - 280)
                     height: parent.height
                     color: index % 2 === 0 ? "#171a20" : "#14171d"
-                    border.color: "#2f333d"
+                    border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
 
                     Repeater {
                         model: markerSpans
@@ -137,7 +289,33 @@ Window {
                             color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
                         }
                     }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: appController.select_track(trackId)
+                    }
                 }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 34
+            color: "#111318"
+            border.color: "#2f333d"
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                width: parent.width - 24
+                text: appController.lastError.length > 0
+                    ? appController.lastError
+                    : (appController.projectPath.length > 0 ? appController.projectPath : "Unsaved project")
+                color: appController.lastError.length > 0 ? "#f87171" : "#a1a1aa"
+                elide: Text.ElideMiddle
+                font.pixelSize: 12
             }
         }
     }

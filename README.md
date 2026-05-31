@@ -22,8 +22,19 @@ uv run python -m unittest discover -s tests -v
 
 ## Current Scope
 
+- Create, open, and save `.autolight` project files.
 - Import one local audio file into a project.
 - Create graph-backed source, generated, and editable tracks.
 - Run deterministic built-in transforms through a local background job queue.
-- Persist `.autolight` project files as JSON.
+- Persist project tracks, markers, provenance, job summaries, and cache references as JSON.
 - Render project tracks and marker counts in a QML timeline shell.
+
+## Basic Workflow
+
+1. Launch the app with `uv run python main.py`.
+2. Use `Import Audio` to add a local audio file as a source track.
+3. With the source track selected, choose `Add Markers` to create a generated fixed-interval marker track.
+4. Run the generated marker track by selecting it and choosing `Run`.
+5. After completion, choose `Derive Editable` to create editable cue markers from the generated track.
+6. Use `Save` or `Save As` to write a `.autolight` project file.
+7. Use `Open` to reload a saved project.
