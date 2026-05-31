@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 
-from autolight.project.models import Marker, ResultState
+from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import add_generated_track, import_audio_asset, new_project
 from autolight.timeline.model import TimelineTrackModel
 
@@ -44,6 +44,9 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("markerCount"): b"markerCount",
                     model.role_for_name("markerSpans"): b"markerSpans",
                     model.role_for_name("error"): b"error",
+                    model.role_for_name("activeJobId"): b"activeJobId",
+                    model.role_for_name("jobState"): b"jobState",
+                    model.role_for_name("jobProgress"): b"jobProgress",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -66,6 +69,29 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual(model.data(index, model.role_for_name("resultState")), "complete")
             self.assertEqual(model.data(index, model.role_for_name("error")), "analysis failed")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
+
+    def test_model_exposes_latest_job_state_progress_and_id(self):
+        project = ProjectDocument(id="project_1", name="Demo")
+        track = Track(id="track_1", type=TrackType.GENERATED, name="Beats")
+        project.tracks.append(track)
+        project.job_runs.append(
+            JobRun(
+                id="job_1",
+                track_id="track_1",
+                transform_id="markers.fixed_interval",
+                parameters_hash="hash",
+                state=ResultState.RUNNING,
+                progress=0.25,
+            )
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        index = model.index(0, 0)
+
+        self.assertEqual(model.data(index, model.role_for_name("activeJobId")), "job_1")
+        self.assertEqual(model.data(index, model.role_for_name("jobState")), "running")
+        self.assertEqual(model.data(index, model.role_for_name("jobProgress")), 0.25)
 
     def test_marker_spans_are_sorted_by_timestamp_for_timeline_projection(self):
         with tempfile.TemporaryDirectory() as tmp:

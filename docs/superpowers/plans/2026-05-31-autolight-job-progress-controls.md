@@ -30,7 +30,7 @@
 - Modify: `autolight/jobs/queue.py`
 - Modify: `tests/test_jobs.py`
 
-- [ ] **Step 1: Add failing timeline job role test**
+- [x] **Step 1: Add failing timeline job role test**
 
 Add this test to `TimelineTrackModelTest`:
 
@@ -91,7 +91,7 @@ Add this test to `LocalJobQueueTest` in `tests/test_jobs.py`:
         self.assertGreaterEqual(changed_track_ids.count(track_id), 3)
 ```
 
-- [ ] **Step 2: Run timeline model tests and verify failure**
+- [x] **Step 2: Run timeline model tests and verify failure**
 
 Run:
 
@@ -101,7 +101,7 @@ uv run python -m unittest tests.test_timeline_model -v
 
 Expected: FAIL with `KeyError: 'activeJobId'`.
 
-- [ ] **Step 3: Add job roles to `TimelineTrackModel`**
+- [x] **Step 3: Add job roles to `TimelineTrackModel`**
 
 Extend `ROLE_NAMES` in `autolight/timeline/model.py`:
 
@@ -142,7 +142,7 @@ Update the `progress` callback inside `LocalJobQueue._run` so QML sees updates w
             self._notify_track_changed(snapshot.track_id)
 ```
 
-- [ ] **Step 4: Run timeline model tests**
+- [x] **Step 4: Run timeline model tests**
 
 Run:
 
@@ -152,7 +152,7 @@ uv run python -m unittest tests.test_timeline_model tests.test_jobs.LocalJobQueu
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit timeline job roles**
+- [x] **Step 5: Commit timeline job roles**
 
 Run:
 

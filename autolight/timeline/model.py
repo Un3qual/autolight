@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
-from autolight.project.models import Marker, ProjectDocument
+from autolight.project.models import JobRun, Marker, ProjectDocument
 
 
 class TimelineTrackModel(QAbstractListModel):
@@ -16,6 +16,9 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 5: b"markerCount",
         Qt.ItemDataRole.UserRole + 6: b"markerSpans",
         Qt.ItemDataRole.UserRole + 7: b"error",
+        Qt.ItemDataRole.UserRole + 8: b"activeJobId",
+        Qt.ItemDataRole.UserRole + 9: b"jobState",
+        Qt.ItemDataRole.UserRole + 10: b"jobProgress",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -81,6 +84,13 @@ class TimelineTrackModel(QAbstractListModel):
             return [self._marker_span(marker) for marker in self._markers_for_track(track.id)]
         if role == self.role_for_name("error"):
             return track.error
+        latest_job = self._latest_job_for_track(track.id)
+        if role == self.role_for_name("activeJobId"):
+            return "" if latest_job is None or latest_job.state.value != "running" else latest_job.id
+        if role == self.role_for_name("jobState"):
+            return "" if latest_job is None else latest_job.state.value
+        if role == self.role_for_name("jobProgress"):
+            return 0.0 if latest_job is None else latest_job.progress
         return None
 
     def roleNames(self):
@@ -107,6 +117,12 @@ class TimelineTrackModel(QAbstractListModel):
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])
+
+    def _latest_job_for_track(self, track_id: str) -> JobRun | None:
+        if self._project is None:
+            return None
+        jobs = [run for run in self._project.job_runs if run.track_id == track_id]
+        return jobs[-1] if jobs else None
 
     def _marker_span(self, marker: Marker) -> dict[str, str | float]:
         return {

@@ -156,6 +156,7 @@ class LocalJobQueue:
         def progress(value: float) -> None:
             with self._lock:
                 run.progress = max(0.0, min(1.0, value))
+            self._notify_track_changed(snapshot.track_id)
 
         try:
             transform = self.registry.get(snapshot.transform_id, version=snapshot.transform_version)

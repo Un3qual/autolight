@@ -532,6 +532,28 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual(changed_track_ids[-1], track_id)
         self.assertGreaterEqual(len(changed_track_ids), 2)
 
+    def test_progress_callback_notifies_track_change(self):
+        def reports_progress(context, params):
+            context.progress(0.5)
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.progress", reports_progress))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.progress", {})
+            changed_track_ids = []
+            queue = LocalJobQueue(
+                registry,
+                artifact_root=Path(tmp) / "artifacts",
+                on_track_changed=changed_track_ids.append,
+            )
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+        self.assertGreaterEqual(changed_track_ids.count(track_id), 3)
+
     def test_malformed_marker_output_leaves_no_partial_markers(self):
         def malformed_markers(context, params):
             return TransformResult(
