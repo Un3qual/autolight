@@ -224,6 +224,31 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("cache artifact", reopened_generated.error)
         self.assertTrue(reopened.isDirty)
 
+    def test_refresh_cache_status_marks_invalid_cached_track_stale(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated = controller._project.tracks[1]
+        generated.result_state = ResultState.COMPLETE
+        generated.cache_refs = ["missing_cache"]
+        controller._project.cache_entries.append(
+            CacheEntry(
+                id="missing_cache",
+                dependency_hash="dep",
+                artifact_kind="stem",
+                path="stem/missing.bin",
+                created_at="",
+                transform_version="1",
+                size_bytes=10,
+            )
+        )
+
+        invalid_refs = controller.refresh_cache_status()
+
+        self.assertEqual(invalid_refs, ["missing_cache"])
+        self.assertEqual(generated.result_state, ResultState.STALE)
+        self.assertIn("cache artifact", generated.error)
+        self.assertIn("invalid cache artifacts: 1", controller.lastError)
+
     def test_save_project_rejects_running_jobs(self):
         controller = self._controller()
 

@@ -25,7 +25,7 @@
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing controller cache refresh test**
+- [x] **Step 1: Add failing controller cache refresh test**
 
 Add this test to `AppControllerTest`:
 
@@ -57,7 +57,7 @@ Add this test to `AppControllerTest`:
         self.assertIn("cache artifact", generated.error)
 ```
 
-- [ ] **Step 2: Run cache refresh test and verify failure**
+- [x] **Step 2: Run cache refresh test and verify failure**
 
 Run:
 
@@ -67,7 +67,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_refre
 
 Expected: FAIL because `refresh_cache_status` is missing.
 
-- [ ] **Step 3: Implement `refresh_cache_status`**
+- [x] **Step 3: Implement `refresh_cache_status`**
 
 Add this slot to `autolight/app_controller.py`:
 
@@ -91,7 +91,7 @@ When integrating it into `open_project`, clear a successful file-open error befo
             self.refresh_cache_status()
 ```
 
-- [ ] **Step 4: Run app controller tests**
+- [x] **Step 4: Run app controller tests**
 
 Run:
 
@@ -101,7 +101,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit cache refresh controller**
+- [x] **Step 5: Commit cache refresh controller**
 
 Run:
 

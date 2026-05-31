@@ -96,12 +96,12 @@ class AppController(QObject):
             self._raise_if_running_jobs("replace project")
             project_path = self._path_from_qml(path)
             project = ProjectStore.load(project_path)
-            invalid_cache_refs = self._job_queue.refresh_cache_validity(project)
             changed_running_state = self._mark_running_state_stale(project)
             self._set_project(project)
             self._set_project_path(str(project_path))
             self._set_selected_track_id("")
             self._set_last_error("")
+            invalid_cache_refs = self.refresh_cache_status()
             self._set_dirty(bool(invalid_cache_refs or changed_running_state))
             return True
         except Exception as exc:
@@ -282,6 +282,21 @@ class AppController(QObject):
     @Slot(str)
     def cancel_job(self, job_id: str) -> None:
         self._job_queue.cancel(job_id)
+
+    @Slot(result=list)
+    def refresh_cache_status(self) -> list[str]:
+        try:
+            invalid_refs = self._job_queue.refresh_cache_validity(self._project)
+            self._track_model.set_project(self._project)
+            if invalid_refs:
+                self._set_dirty(True)
+                self._set_last_error(f"invalid cache artifacts: {len(invalid_refs)}")
+            else:
+                self._set_last_error("")
+            return invalid_refs
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return []
 
     @Slot()
     def cleanup(self) -> None:
