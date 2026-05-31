@@ -702,7 +702,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Update README with the interactive workflow**
+- [x] **Step 1: Update README with the interactive workflow**
 
 Replace the `Current Scope` section in `README.md` with:
 
@@ -727,7 +727,7 @@ Replace the `Current Scope` section in `README.md` with:
 7. Use `Open` to reload a saved project.
 ```
 
-- [ ] **Step 2: Run README and diff checks**
+- [x] **Step 2: Run README and diff checks**
 
 Run:
 
@@ -737,7 +737,7 @@ git diff --check
 
 Expected: command exits 0 with no whitespace errors.
 
-- [ ] **Step 3: Commit README workflow docs**
+- [x] **Step 3: Commit README workflow docs**
 
 Run:
 
