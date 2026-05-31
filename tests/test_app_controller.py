@@ -229,27 +229,40 @@ class AppControllerTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            audio_path = root / "song.wav"
-            write_wav(audio_path)
-            source_id = controller.import_audio(str(audio_path))
-            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
-            generated = self._track_by_id(controller, generated_id)
-            generated.result_state = ResultState.RUNNING
-            controller._project.job_runs.append(
-                JobRun(
-                    id="job_running",
-                    track_id=generated_id,
-                    transform_id=generated.transform_id,
-                    parameters_hash=generated.dependency_hash,
-                    state=ResultState.RUNNING,
-                )
-            )
+            self._add_running_job(controller, root)
             project_path = root / "show.autolight"
 
             self.assertFalse(controller.save_project(str(project_path)))
             self.assertFalse(project_path.exists())
 
         self.assertIn("running job", controller.lastError)
+
+    def test_project_replacement_rejects_running_jobs(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._add_running_job(controller, root)
+            row_count = controller.trackModel.rowCount()
+            replacement = self._controller()
+            replacement.load_demo_project()
+            replacement_path = root / "replacement.autolight"
+            self.assertTrue(replacement.save_project(str(replacement_path)))
+
+            controller.new_project()
+            self.assertEqual(controller.projectName, "Untitled")
+            self.assertEqual(controller.trackModel.rowCount(), row_count)
+            self.assertIn("cannot replace project", controller.lastError)
+
+            self.assertFalse(controller.open_project(str(replacement_path)))
+            self.assertEqual(controller.projectName, "Untitled")
+            self.assertEqual(controller.trackModel.rowCount(), row_count)
+            self.assertIn("cannot replace project", controller.lastError)
+
+            controller.load_demo_project()
+            self.assertEqual(controller.projectName, "Untitled")
+            self.assertEqual(controller.trackModel.rowCount(), row_count)
+            self.assertIn("cannot replace project", controller.lastError)
 
     def test_select_track_updates_selected_track_id(self):
         controller = self._controller()
@@ -376,9 +389,12 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: discardChangesDialog", qml)
         self.assertIn("appController.isDirty", qml)
         self.assertIn("root.newProjectWithConfirmation()", qml)
+        self.assertIn("root.demoProjectWithConfirmation()", qml)
         self.assertIn("root.openProjectWithConfirmation(String(selectedFile))", qml)
         self.assertIn("appController.new_project()", qml)
         self.assertIn("appController.open_project(path)", qml)
+        self.assertIn('discardChangesDialog.pendingAction = "demo"', qml)
+        self.assertIn("appController.load_demo_project()", qml)
         self.assertIn("appController.save_project(String(selectedFile))", qml)
         self.assertIn("appController.import_audio(String(selectedFile))", qml)
         self.assertIn("readonly property real defaultMarkerDuration: 8.0", qml)
@@ -418,6 +434,24 @@ class AppControllerTest(unittest.TestCase):
             if track.id == track_id:
                 return track
         self.fail(f"track not found: {track_id}")
+
+    def _add_running_job(self, controller: AppController, root: Path) -> str:
+        audio_path = root / "song.wav"
+        write_wav(audio_path)
+        source_id = controller.import_audio(str(audio_path))
+        generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+        generated = self._track_by_id(controller, generated_id)
+        generated.result_state = ResultState.RUNNING
+        controller._project.job_runs.append(
+            JobRun(
+                id="job_running",
+                track_id=generated_id,
+                transform_id=generated.transform_id,
+                parameters_hash=generated.dependency_hash,
+                state=ResultState.RUNNING,
+            )
+        )
+        return generated_id
 
     def _controller(self):
         controller = AppController()

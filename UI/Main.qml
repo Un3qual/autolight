@@ -36,11 +36,23 @@ Window {
         }
     }
 
+    function demoProjectWithConfirmation() {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "demo"
+            discardChangesDialog.pendingPath = ""
+            discardChangesDialog.open()
+        } else {
+            appController.load_demo_project()
+        }
+    }
+
     function runPendingDiscardAction() {
         if (discardChangesDialog.pendingAction === "new") {
             appController.new_project()
         } else if (discardChangesDialog.pendingAction === "open") {
             appController.open_project(discardChangesDialog.pendingPath)
+        } else if (discardChangesDialog.pendingAction === "demo") {
+            appController.load_demo_project()
         }
         discardChangesDialog.pendingAction = ""
         discardChangesDialog.pendingPath = ""
@@ -170,7 +182,7 @@ Window {
 
                 Button {
                     text: "Load Demo"
-                    onClicked: appController.load_demo_project()
+                    onClicked: root.demoProjectWithConfirmation()
                 }
             }
         }

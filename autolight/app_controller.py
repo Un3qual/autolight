@@ -73,6 +73,8 @@ class AppController(QObject):
 
     @Slot()
     def new_project(self) -> None:
+        if not self._can_replace_project():
+            return
         self._set_project(new_project("Untitled"))
         self._set_project_path("")
         self._set_selected_track_id("")
@@ -82,6 +84,7 @@ class AppController(QObject):
     @Slot(str, result=bool)
     def open_project(self, path: str) -> bool:
         try:
+            self._raise_if_running_jobs("replace project")
             project_path = self._path_from_qml(path)
             project = ProjectStore.load(project_path)
             invalid_cache_refs = self._job_queue.refresh_cache_validity(project)
@@ -104,7 +107,7 @@ class AppController(QObject):
             project_path = self._path_from_qml(path) if path else Path(self._project_path)
             if project_path.suffix != ".autolight":
                 project_path = project_path.with_suffix(".autolight")
-            self._raise_if_running_jobs()
+            self._raise_if_running_jobs("save project")
             ProjectStore.save(self._project, project_path)
             self._set_project_path(str(project_path))
             self._set_last_error("")
@@ -133,6 +136,8 @@ class AppController(QObject):
 
     @Slot()
     def load_demo_project(self) -> None:
+        if not self._can_replace_project():
+            return
         if self._demo_temp_dir is not None:
             self._demo_temp_dir.cleanup()
         self._demo_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-demo-")
@@ -286,9 +291,17 @@ class AppController(QObject):
         self._is_dirty = dirty
         self.isDirtyChanged.emit()
 
-    def _raise_if_running_jobs(self) -> None:
+    def _can_replace_project(self) -> bool:
+        try:
+            self._raise_if_running_jobs("replace project")
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+        return True
+
+    def _raise_if_running_jobs(self, action: str) -> None:
         if any(run.state == ResultState.RUNNING for run in self._project.job_runs):
-            raise ValueError("cannot save project with a running job")
+            raise ValueError(f"cannot {action} with a running job")
 
     @staticmethod
     def _mark_running_state_stale(project) -> bool:
