@@ -303,6 +303,76 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(job_id, "")
         self.assertIn("no transform", controller.lastError)
 
+    def test_cancel_selected_job_cancels_running_track(self):
+        from threading import Event
+
+        from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
+        from autolight.project.store import add_generated_track
+
+        started = Event()
+        release = Event()
+
+        def blocking_transform(context, params):
+            started.set()
+            while not release.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
+
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._registry.register(
+            TransformSpec(
+                id="test.blocking_cancel",
+                version="1",
+                name="Blocking Cancel Test",
+                input_schema="audio.v1",
+                output_schema="artifact.test.v1",
+                estimated_cost="light",
+                run=blocking_transform,
+            )
+        )
+        source_id = self._track_id(controller, 0)
+        stem = add_generated_track(
+            controller._project,
+            source_id,
+            "Vocals Stem",
+            "test.blocking_cancel",
+            {"label": "vocals"},
+            "1",
+            "artifact.stem.v1",
+            "stem_dependency",
+        )
+        controller.trackModel.set_project(controller._project)
+        controller.select_track(stem.id)
+
+        job_id = controller.run_track(stem.id)
+        self.assertNotEqual(job_id, "")
+        try:
+            self.assertTrue(started.wait(2))
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
+
+        self.assertEqual(stem.result_state.value, "cancelled")
+
+    def test_rerun_track_submits_existing_transform(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated_id = self._track_id(controller, 1)
+        generated = next(track for track in controller._project.tracks if track.id == generated_id)
+        generated.result_state = ResultState.STALE
+        generated.error = "cache artifact missing or invalid: cache_1"
+
+        job_id = controller.rerun_track(generated_id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(generated.result_state.value, "complete")
+
     def test_create_editable_track_from_missing_track_records_not_found_error(self):
         controller = self._controller()
 

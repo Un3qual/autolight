@@ -259,6 +259,26 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return ""
 
+    @Slot()
+    def cancel_selected_job(self) -> None:
+        job_id = self._active_job_id_for_track(self._selected_track_id)
+        if not job_id:
+            self._set_last_error("selected track has no running job")
+            return
+        self.cancel_job(job_id)
+        self._set_last_error("")
+
+    @Slot(str, result=str)
+    def rerun_track(self, track_id: str) -> str:
+        track = find_track(self._project, track_id)
+        if track is None:
+            self._set_last_error(f"track not found: {track_id}")
+            return ""
+        if track.result_state == ResultState.STALE:
+            track.result_state = ResultState.PENDING
+        track.error = ""
+        return self.run_track(track_id)
+
     @Slot(str)
     def cancel_job(self, job_id: str) -> None:
         self._job_queue.cancel(job_id)
@@ -311,6 +331,12 @@ class AppController(QObject):
     def _raise_if_running_jobs(self, action: str) -> None:
         if any(run.state == ResultState.RUNNING for run in self._project.job_runs):
             raise ValueError(f"cannot {action} with a running job")
+
+    def _active_job_id_for_track(self, track_id: str) -> str:
+        for run in reversed(self._project.job_runs):
+            if run.track_id == track_id and run.state == ResultState.RUNNING:
+                return run.id
+        return ""
 
     @staticmethod
     def _mark_running_state_stale(project) -> bool:

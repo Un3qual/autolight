@@ -169,7 +169,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing controller job-control tests**
+- [x] **Step 1: Add failing controller job-control tests**
 
 Add this test to `AppControllerTest`:
 
@@ -251,7 +251,7 @@ Ensure this import exists in `tests/test_app_controller.py`:
 from autolight.project.models import ResultState
 ```
 
-- [ ] **Step 2: Run controller job-control tests and verify failure**
+- [x] **Step 2: Run controller job-control tests and verify failure**
 
 Run:
 
@@ -261,7 +261,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_cance
 
 Expected: FAIL because `cancel_selected_job` and `rerun_track` are missing.
 
-- [ ] **Step 3: Implement controller job-control slots**
+- [x] **Step 3: Implement controller job-control slots**
 
 Add this helper to `autolight/app_controller.py`:
 
@@ -297,7 +297,7 @@ Add these slots above `cancel_job`:
         return self.run_track(track_id)
 ```
 
-- [ ] **Step 4: Run controller tests**
+- [x] **Step 4: Run controller tests**
 
 Run:
 
@@ -307,7 +307,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit controller job controls**
+- [x] **Step 5: Commit controller job controls**
 
 Run:
 
