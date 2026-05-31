@@ -26,6 +26,7 @@ class AppController(QObject):
     projectPathChanged = Signal()
     lastErrorChanged = Signal()
     selectedTrackIdChanged = Signal()
+    isDirtyChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -33,6 +34,7 @@ class AppController(QObject):
         self._project_path = ""
         self._last_error = ""
         self._selected_track_id = ""
+        self._is_dirty = False
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
         self._track_model = TimelineTrackModel(parent=self)
@@ -65,21 +67,30 @@ class AppController(QObject):
     def selectedTrackId(self) -> str:
         return self._selected_track_id
 
+    @Property(bool, notify=isDirtyChanged)
+    def isDirty(self) -> bool:
+        return self._is_dirty
+
     @Slot()
     def new_project(self) -> None:
         self._set_project(new_project("Untitled"))
         self._set_project_path("")
         self._set_selected_track_id("")
         self._set_last_error("")
+        self._set_dirty(False)
 
     @Slot(str, result=bool)
     def open_project(self, path: str) -> bool:
         try:
             project_path = self._path_from_qml(path)
-            self._set_project(ProjectStore.load(project_path))
+            project = ProjectStore.load(project_path)
+            invalid_cache_refs = self._job_queue.refresh_cache_validity(project)
+            changed_running_state = self._mark_running_state_stale(project)
+            self._set_project(project)
             self._set_project_path(str(project_path))
             self._set_selected_track_id("")
             self._set_last_error("")
+            self._set_dirty(bool(invalid_cache_refs or changed_running_state))
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -93,9 +104,11 @@ class AppController(QObject):
             project_path = self._path_from_qml(path) if path else Path(self._project_path)
             if project_path.suffix != ".autolight":
                 project_path = project_path.with_suffix(".autolight")
+            self._raise_if_running_jobs()
             ProjectStore.save(self._project, project_path)
             self._set_project_path(str(project_path))
             self._set_last_error("")
+            self._set_dirty(False)
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -109,6 +122,7 @@ class AppController(QObject):
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._set_last_error("")
+            self._set_dirty(True)
             return track.id
         except FileNotFoundError as exc:
             self._set_last_error(f"No such file: {exc}")
@@ -151,6 +165,7 @@ class AppController(QObject):
         self._track_model.set_project(self._project)
         self._set_selected_track_id(source.id)
         self._set_last_error("")
+        self._set_dirty(False)
 
     @Slot(str)
     def select_track(self, track_id: str) -> None:
@@ -188,6 +203,7 @@ class AppController(QObject):
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._set_last_error("")
+            self._set_dirty(True)
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -196,6 +212,8 @@ class AppController(QObject):
     @Slot(str, result=str)
     def create_editable_track_from_track(self, source_track_id: str) -> str:
         try:
+            if find_track(self._project, source_track_id) is None:
+                raise ValueError(f"track not found: {source_track_id}")
             marker_ids = [
                 marker.id for marker in self._project.markers if marker.track_id == source_track_id
             ]
@@ -210,6 +228,7 @@ class AppController(QObject):
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._set_last_error("")
+            self._set_dirty(True)
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -220,6 +239,7 @@ class AppController(QObject):
         try:
             job_id = self._job_queue.submit(self._project, track_id)
             self._set_last_error("")
+            self._set_dirty(True)
             return job_id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -260,7 +280,38 @@ class AppController(QObject):
         self._selected_track_id = track_id
         self.selectedTrackIdChanged.emit()
 
-    def _path_from_qml(self, value: str) -> Path:
+    def _set_dirty(self, dirty: bool) -> None:
+        if self._is_dirty == dirty:
+            return
+        self._is_dirty = dirty
+        self.isDirtyChanged.emit()
+
+    def _raise_if_running_jobs(self) -> None:
+        if any(run.state == ResultState.RUNNING for run in self._project.job_runs):
+            raise ValueError("cannot save project with a running job")
+
+    def _mark_running_state_stale(self, project) -> bool:
+        changed = False
+        running_track_ids = set()
+        for run in project.job_runs:
+            if run.state != ResultState.RUNNING:
+                continue
+            run.state = ResultState.STALE
+            run.error = "job was running when project was opened"
+            running_track_ids.add(run.track_id)
+            changed = True
+
+        for track in project.tracks:
+            if track.result_state != ResultState.RUNNING and track.id not in running_track_ids:
+                continue
+            track.result_state = ResultState.STALE
+            track.error = "job was running when project was opened"
+            changed = True
+
+        return changed
+
+    @staticmethod
+    def _path_from_qml(value: str) -> Path:
         text = str(value)
         if text.startswith("file:"):
             return Path(QUrl(text).toLocalFile())

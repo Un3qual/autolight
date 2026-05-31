@@ -13,13 +13,45 @@ Window {
     readonly property real timelinePixelsPerSecond: 96
     readonly property real timelineLeftPadding: 24
     readonly property real timelineRulerHeight: 32
+    readonly property real defaultMarkerDuration: 8.0
+    readonly property real defaultMarkerInterval: 0.5
+
+    function newProjectWithConfirmation() {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "new"
+            discardChangesDialog.pendingPath = ""
+            discardChangesDialog.open()
+        } else {
+            appController.new_project()
+        }
+    }
+
+    function openProjectWithConfirmation(path) {
+        if (appController.isDirty) {
+            discardChangesDialog.pendingAction = "open"
+            discardChangesDialog.pendingPath = path
+            discardChangesDialog.open()
+        } else {
+            appController.open_project(path)
+        }
+    }
+
+    function runPendingDiscardAction() {
+        if (discardChangesDialog.pendingAction === "new") {
+            appController.new_project()
+        } else if (discardChangesDialog.pendingAction === "open") {
+            appController.open_project(discardChangesDialog.pendingPath)
+        }
+        discardChangesDialog.pendingAction = ""
+        discardChangesDialog.pendingPath = ""
+    }
 
     FileDialog {
         id: openProjectDialog
         title: "Open Autolight Project"
         nameFilters: ["Autolight projects (*.autolight)"]
         fileMode: FileDialog.OpenFile
-        onAccepted: appController.open_project(String(selectedFile))
+        onAccepted: root.openProjectWithConfirmation(String(selectedFile))
     }
 
     FileDialog {
@@ -36,6 +68,40 @@ Window {
         nameFilters: ["Audio files (*.wav *.mp3 *.flac *.aiff *.aif *.m4a)", "All files (*)"]
         fileMode: FileDialog.OpenFile
         onAccepted: appController.import_audio(String(selectedFile))
+    }
+
+    Dialog {
+        id: discardChangesDialog
+        title: "Discard unsaved changes?"
+        modal: true
+        width: 420
+        anchors.centerIn: parent
+        property string pendingAction: ""
+        property string pendingPath: ""
+
+        contentItem: Text {
+            text: "This project has unsaved changes."
+            color: "#f4f4f5"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 13
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: "Discard"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+        }
+
+        onAccepted: root.runPendingDiscardAction()
+        onRejected: {
+            pendingAction = ""
+            pendingPath = ""
+        }
     }
 
     ColumnLayout {
@@ -61,7 +127,7 @@ Window {
 
                 Button {
                     text: "New"
-                    onClicked: appController.new_project()
+                    onClicked: root.newProjectWithConfirmation()
                 }
 
                 Button {
@@ -87,7 +153,7 @@ Window {
                 Button {
                     text: "Add Markers"
                     enabled: appController.selectedTrackId.length > 0
-                    onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, 8.0, 0.5)
+                    onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
                 }
 
                 Button {
