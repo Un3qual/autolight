@@ -125,7 +125,7 @@ Window {
 
             RowLayout {
                 anchors.fill: parent
-                spacing: 12
+                spacing: 8
 
                 Label {
                     text: appController.projectName
@@ -172,6 +172,18 @@ Window {
                     text: "Run"
                     enabled: appController.selectedTrackId.length > 0
                     onClicked: appController.run_track(appController.selectedTrackId)
+                }
+
+                Button {
+                    text: "Cancel"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.cancel_selected_job()
+                }
+
+                Button {
+                    text: "Rerun"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.rerun_track(appController.selectedTrackId)
                 }
 
                 Button {
@@ -262,6 +274,14 @@ Window {
                             font.pixelSize: 12
                             elide: Text.ElideRight
                             width: parent.width
+                        }
+
+                        ProgressBar {
+                            width: parent.width
+                            from: 0
+                            to: 1
+                            value: jobProgress
+                            visible: activeJobId.length > 0
                         }
                     }
 

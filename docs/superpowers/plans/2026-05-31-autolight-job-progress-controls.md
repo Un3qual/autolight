@@ -324,7 +324,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML wiring test**
+- [x] **Step 1: Add failing QML wiring test**
 
 Add this test to `AppControllerTest`:
 
@@ -339,7 +339,7 @@ Add this test to `AppControllerTest`:
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
 ```
 
-- [ ] **Step 2: Run QML wiring test and verify failure**
+- [x] **Step 2: Run QML wiring test and verify failure**
 
 Run:
 
@@ -349,7 +349,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_e
 
 Expected: FAIL because the QML does not yet reference job roles or job actions.
 
-- [ ] **Step 3: Add QML progress and buttons**
+- [x] **Step 3: Add QML progress and buttons**
 
 Add these toolbar buttons near the existing Run button:
 
@@ -379,7 +379,7 @@ Add this `ProgressBar` inside the delegate's left metadata column below the stat
                         }
 ```
 
-- [ ] **Step 4: Run QML wiring and smoke checks**
+- [x] **Step 4: Run QML wiring and smoke checks**
 
 Run:
 
@@ -390,7 +390,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: unittest passes and smoke exits 0.
 
-- [ ] **Step 5: Commit QML job controls**
+- [x] **Step 5: Commit QML job controls**
 
 Run:
 
@@ -403,7 +403,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run full tests**
+- [x] **Step 1: Run full tests**
 
 Run:
 
@@ -413,7 +413,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run smoke**
+- [x] **Step 2: Run smoke**
 
 Run:
 
@@ -423,7 +423,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: exits 0.
 
-- [ ] **Step 3: Check diff**
+- [x] **Step 3: Check diff**
 
 Run:
 

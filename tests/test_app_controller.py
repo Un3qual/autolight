@@ -478,6 +478,15 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.select_track(trackId)", qml)
         self.assertIn("appController.lastError", qml)
 
+    def test_qml_exposes_job_progress_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("jobProgress", qml)
+        self.assertIn("activeJobId", qml)
+        self.assertIn("ProgressBar", qml)
+        self.assertIn("appController.cancel_selected_job()", qml)
+        self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
+
     @staticmethod
     def _track_role_values(controller: AppController, row: int):
         model = controller.trackModel
