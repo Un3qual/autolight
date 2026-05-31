@@ -170,7 +170,7 @@ Window {
 
                 Button {
                     text: "Run"
-                    enabled: appController.selectedTrackId.length > 0
+                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
                     onClicked: appController.run_track(appController.selectedTrackId)
                 }
 
@@ -282,6 +282,15 @@ Window {
                                 text: trackType + " - " + resultState + " - " + markerCount + " markers"
                                 color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
                                 font.pixelSize: 12
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+
+                            Text {
+                                text: error
+                                visible: error.length > 0
+                                color: "#fca5a5"
+                                font.pixelSize: 11
                                 elide: Text.ElideRight
                                 width: parent.width
                             }

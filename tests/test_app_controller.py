@@ -292,6 +292,38 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
         self.assertEqual(restored_source.error, "")
 
+    def test_open_project_restores_audio_staled_dependents_when_audio_returns(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            audio_payload = audio_path.read_bytes()
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            generated = self._track_by_id(controller, generated_id)
+            generated.result_state = ResultState.COMPLETE
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            offline = self._controller()
+            self.assertTrue(offline.open_project(str(project_path)))
+            offline_generated = self._track_by_id(offline, generated_id)
+            self.assertEqual(offline_generated.result_state, ResultState.STALE)
+            self.assertTrue(offline.save_project(str(project_path)))
+            audio_path.write_bytes(audio_payload)
+
+            restored = self._controller()
+            self.assertTrue(restored.open_project(str(project_path)))
+
+        restored_source = self._track_by_id(restored, source_id)
+        restored_generated = self._track_by_id(restored, generated_id)
+        self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_generated.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_generated.error, "")
+
     def test_open_project_marks_modified_audio_tracks_stale(self):
         controller = self._controller()
 
@@ -591,6 +623,24 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotEqual(job_id, "")
         self.assertEqual(generated.result_state.value, "complete")
 
+    def test_rerun_track_rejects_stale_input_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        source = self._track_by_id(controller, self._track_id(controller, 0))
+        generated_id = self._track_id(controller, 1)
+        generated = self._track_by_id(controller, generated_id)
+        source.result_state = ResultState.STALE
+        source.error = "audio asset offline: song.wav"
+        generated.result_state = ResultState.STALE
+        controller.select_track(generated_id)
+
+        job_id = controller.rerun_track(generated_id)
+
+        self.assertEqual(job_id, "")
+        self.assertFalse(controller.selectedTrackCanRerun)
+        self.assertEqual(generated.result_state, ResultState.STALE)
+        self.assertIn("input track is not complete", controller.lastError)
+
     def test_rerun_track_does_not_clear_stale_state_when_submit_fails(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -837,6 +887,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
         self.assertIn('resultState === "stale"', qml)
         self.assertIn('resultState === "failed"', qml)
+        self.assertIn("text: error", qml)
+        self.assertIn("visible: error.length > 0", qml)
 
     @staticmethod
     def _track_role_values(controller: AppController, row: int):

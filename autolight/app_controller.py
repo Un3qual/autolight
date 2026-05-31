@@ -34,6 +34,7 @@ class AppController(QObject):
     selectedTrackIdChanged = Signal()
     selectedTrackMarkersChanged = Signal()
     selectedTrackHasRunningJobChanged = Signal()
+    selectedTrackCanRerunChanged = Signal()
     isDirtyChanged = Signal()
 
     def __init__(self):
@@ -79,10 +80,10 @@ class AppController(QObject):
     def selectedTrackMarkers(self) -> list[dict]:
         return self._marker_summary_for_track(self._selected_track_id)
 
-    @Property(bool, notify=selectedTrackIdChanged)
+    @Property(bool, notify=selectedTrackCanRerunChanged)
     def selectedTrackCanRerun(self) -> bool:
         track = find_track(self._project, self._selected_track_id)
-        return track is not None and bool(track.transform_id)
+        return track is not None and bool(track.transform_id) and self._track_inputs_are_complete(track)
 
     @Property(bool, notify=selectedTrackIdChanged)
     def selectedTrackIsEditable(self) -> bool:
@@ -121,6 +122,7 @@ class AppController(QObject):
             self._set_selected_track_id("")
             self._set_last_error("")
             invalid_cache_refs = self.refresh_cache_status()
+            self.selectedTrackCanRerunChanged.emit()
             self._set_dirty(
                 bool(
                     invalid_cache_refs
@@ -335,6 +337,7 @@ class AppController(QObject):
         try:
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
             self._track_model.set_project(self._project)
+            self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
                 self._set_dirty(True)
                 self._set_last_error(f"invalid cache artifacts: {len(invalid_refs)}")
@@ -357,6 +360,7 @@ class AppController(QObject):
         self._project = project
         self._track_model.set_project(self._project)
         self.projectNameChanged.emit()
+        self.selectedTrackCanRerunChanged.emit()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
@@ -377,6 +381,7 @@ class AppController(QObject):
         self.selectedTrackIdChanged.emit()
         self.selectedTrackMarkersChanged.emit()
         self.selectedTrackHasRunningJobChanged.emit()
+        self.selectedTrackCanRerunChanged.emit()
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -386,6 +391,7 @@ class AppController(QObject):
 
     def _handle_track_changed(self, track_id: str) -> None:
         self._track_model.trackChangedRequested.emit(track_id)
+        self.selectedTrackCanRerunChanged.emit()
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
@@ -425,6 +431,10 @@ class AppController(QObject):
             raise ValueError("track has no transform")
         if self._active_job_id_for_track(track_id):
             raise ValueError(f"track already has a running job: {track_id}")
+        incomplete_inputs = self._incomplete_input_tracks(track)
+        if incomplete_inputs:
+            names = ", ".join(input_track.name for input_track in incomplete_inputs)
+            raise ValueError(f"input track is not complete: {names}")
         self._refresh_dependency_hash(track)
         job_id = self._job_queue.submit(self._project, track_id)
         self._set_last_error("")
@@ -448,6 +458,19 @@ class AppController(QObject):
             if run.track_id == track_id and run.state == ResultState.RUNNING:
                 return run.id
         return ""
+
+    def _track_inputs_are_complete(self, track) -> bool:
+        return not self._incomplete_input_tracks(track)
+
+    def _incomplete_input_tracks(self, track) -> list:
+        input_tracks = []
+        for input_track_id in track.input_track_ids:
+            input_track = find_track(self._project, input_track_id)
+            if input_track is None:
+                continue
+            if input_track.result_state != ResultState.COMPLETE:
+                input_tracks.append(input_track)
+        return input_tracks
 
     @staticmethod
     def _mark_running_state_stale(project) -> bool:

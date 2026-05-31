@@ -207,17 +207,23 @@ def refresh_audio_track_status(project: ProjectDocument) -> list[str]:
     changed_track_ids: list[str] = []
     problem_assets = {asset.id: asset for asset in project.audio_assets if asset.import_status != "online"}
     previous_states = {track.id: track.result_state for track in project.tracks}
-    problem_source_track_ids: list[str] = []
+    problem_source_tracks: list[tuple[str, str]] = []
+    restored_source_track_ids: list[str] = []
 
     for track in _source_tracks(project):
-        track_changed, has_problem = _refresh_source_audio_track(track, problem_assets)
+        track_changed, problem_error, restored = _refresh_source_audio_track(track, problem_assets)
         if track_changed:
             changed_track_ids.append(track.id)
-        if has_problem:
-            problem_source_track_ids.append(track.id)
+        if problem_error:
+            problem_source_tracks.append((track.id, problem_error))
+        if restored:
+            restored_source_track_ids.append(track.id)
 
-    for track_id in problem_source_track_ids:
-        mark_dependents_stale(project, track_id)
+    for track_id, problem_error in problem_source_tracks:
+        mark_dependents_stale(project, track_id, error=_input_audio_problem_error(problem_error))
+
+    for track_id in restored_source_track_ids:
+        _restore_audio_problem_dependents(project, track_id)
 
     _append_changed_dependents(project, previous_states, changed_track_ids)
 
@@ -231,11 +237,13 @@ def _source_tracks(project: ProjectDocument) -> list[Track]:
 def _refresh_source_audio_track(
     track: Track,
     problem_assets: dict[str, AudioAsset],
-) -> tuple[bool, bool]:
+) -> tuple[bool, str, bool]:
     asset = _problem_audio_asset_for_track(track, problem_assets)
     if asset is None:
-        return _clear_audio_problem_error(track), False
-    return _mark_source_audio_problem(track, asset), True
+        restored = _clear_audio_problem_error(track)
+        return restored, "", restored
+    error = _audio_problem_error(asset)
+    return _mark_source_audio_problem(track, error), error, False
 
 
 def _problem_audio_asset_for_track(
@@ -261,21 +269,54 @@ def _is_audio_problem_error(error: str) -> bool:
     return error.startswith("audio asset offline:") or error.startswith("audio asset modified:")
 
 
-def _mark_source_audio_problem(track: Track, asset: AudioAsset) -> bool:
+def _is_audio_dependency_error(error: str) -> bool:
+    return error.startswith("input audio asset offline:") or error.startswith("input audio asset modified:")
+
+
+def _mark_source_audio_problem(track: Track, error: str) -> bool:
     changed = False
     if track.result_state == ResultState.COMPLETE:
         track.result_state = ResultState.STALE
         changed = True
-    error = _audio_problem_error(asset)
     if track.error != error:
         track.error = error
         changed = True
     return changed
 
 
+def _input_audio_problem_error(source_error: str) -> str:
+    return f"input {source_error}"
+
+
 def _audio_problem_error(asset: AudioAsset) -> str:
     hint = asset.relink_hint or Path(asset.path).name or asset.id
     return f"audio asset {asset.import_status}: {hint}"
+
+
+def _restore_audio_problem_dependents(project: ProjectDocument, restored_track_id: str) -> None:
+    restored_ids = {restored_track_id}
+    changed = True
+    while changed:
+        changed = False
+        for track in project.tracks:
+            if track.type == TrackType.SOURCE or track.id in restored_ids:
+                continue
+            if track.result_state != ResultState.STALE or not _is_audio_dependency_error(track.error):
+                continue
+            if not _all_inputs_complete(project, track):
+                continue
+            track.result_state = ResultState.COMPLETE
+            track.error = ""
+            restored_ids.add(track.id)
+            changed = True
+
+
+def _all_inputs_complete(project: ProjectDocument, track: Track) -> bool:
+    return all(
+        (input_track := find_track(project, input_id)) is not None
+        and input_track.result_state == ResultState.COMPLETE
+        for input_id in track.input_track_ids
+    )
 
 
 def _append_changed_dependents(
@@ -493,7 +534,7 @@ def validate_graph(project: ProjectDocument) -> None:
     _validate_acyclic(project)
 
 
-def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> None:
+def mark_dependents_stale(project: ProjectDocument, changed_track_id: str, error: str = "") -> None:
     changed = True
     stale_ids = {changed_track_id}
     while changed:
@@ -504,7 +545,10 @@ def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> No
             if track.id in stale_ids:
                 continue
             if any(input_id in stale_ids for input_id in track.input_track_ids):
+                was_complete = track.result_state == ResultState.COMPLETE
                 track.result_state = ResultState.STALE
+                if error and (was_complete or _is_audio_dependency_error(track.error)):
+                    track.error = error
                 stale_ids.add(track.id)
                 changed = True
 
