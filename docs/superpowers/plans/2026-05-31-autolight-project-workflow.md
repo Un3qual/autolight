@@ -495,7 +495,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML wiring checks**
+- [x] **Step 1: Add failing QML wiring checks**
 
 Add this test method to `AppControllerTest`:
 
@@ -518,7 +518,7 @@ Add this test method to `AppControllerTest`:
         self.assertIn("appController.lastError", qml)
 ```
 
-- [ ] **Step 2: Run the QML wiring test and verify it fails**
+- [x] **Step 2: Run the QML wiring test and verify it fails**
 
 Run:
 
@@ -528,7 +528,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_e
 
 Expected: FAIL because `UI/Main.qml` does not yet include dialogs or workflow actions.
 
-- [ ] **Step 3: Add dialogs and toolbar actions to QML**
+- [x] **Step 3: Add dialogs and toolbar actions to QML**
 
 Update the imports at the top of `UI/Main.qml`:
 
@@ -675,7 +675,7 @@ Add this status area below the `ListView`:
         }
 ```
 
-- [ ] **Step 4: Run the QML wiring test and smoke check**
+- [x] **Step 4: Run the QML wiring test and smoke check**
 
 Run:
 
@@ -686,7 +686,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: unittest passes and the smoke command exits 0.
 
-- [ ] **Step 5: Commit QML project workflow controls**
+- [x] **Step 5: Commit QML project workflow controls**
 
 Run:
 

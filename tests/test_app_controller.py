@@ -291,6 +291,23 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("Layout.preferredHeight: root.timelineRulerHeight", qml)
         self.assertIn("Layout.maximumHeight: root.timelineRulerHeight", qml)
 
+    def test_qml_exposes_project_workflow_actions(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("import QtQuick.Dialogs", qml)
+        self.assertIn("id: openProjectDialog", qml)
+        self.assertIn("id: saveProjectDialog", qml)
+        self.assertIn("id: importAudioDialog", qml)
+        self.assertIn("appController.new_project()", qml)
+        self.assertIn("appController.open_project(String(selectedFile))", qml)
+        self.assertIn("appController.save_project(String(selectedFile))", qml)
+        self.assertIn("appController.import_audio(String(selectedFile))", qml)
+        self.assertIn("appController.add_fixed_interval_track(appController.selectedTrackId, 8.0, 0.5)", qml)
+        self.assertIn("appController.run_track(appController.selectedTrackId)", qml)
+        self.assertIn("appController.create_editable_track_from_track(appController.selectedTrackId)", qml)
+        self.assertIn("appController.select_track(trackId)", qml)
+        self.assertIn("appController.lastError", qml)
+
     def _track_role_values(self, controller: AppController, row: int):
         model = controller.trackModel
         index = model.index(row, 0)
