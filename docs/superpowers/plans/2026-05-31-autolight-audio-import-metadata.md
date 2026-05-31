@@ -24,7 +24,7 @@
 - Create: `autolight/project/audio_probe.py`
 - Create: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Write failing probe tests**
+- [x] **Step 1: Write failing probe tests**
 
 Create `tests/test_audio_import_metadata.py`:
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run probe tests and verify failure**
+- [x] **Step 2: Run probe tests and verify failure**
 
 Run:
 
@@ -78,7 +78,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.project.audio_probe'`.
 
-- [ ] **Step 3: Implement `audio_probe.py`**
+- [x] **Step 3: Implement `audio_probe.py`**
 
 Create `autolight/project/audio_probe.py`:
 
@@ -114,7 +114,7 @@ def probe_audio_file(path: str | Path) -> AudioMetadata:
     )
 ```
 
-- [ ] **Step 4: Run probe tests and verify pass**
+- [x] **Step 4: Run probe tests and verify pass**
 
 Run:
 
@@ -124,7 +124,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: PASS with 2 tests.
 
-- [ ] **Step 5: Commit audio probe module**
+- [x] **Step 5: Commit audio probe module**
 
 Run:
 
