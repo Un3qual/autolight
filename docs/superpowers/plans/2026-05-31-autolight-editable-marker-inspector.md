@@ -183,7 +183,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing controller inspector tests**
+- [x] **Step 1: Add failing controller inspector tests**
 
 Add this test:
 
@@ -248,7 +248,7 @@ Add this test:
         self.assertEqual(controller.lastError, "")
 ```
 
-- [ ] **Step 2: Run controller inspector test and verify failure**
+- [x] **Step 2: Run controller inspector test and verify failure**
 
 Run:
 
@@ -258,7 +258,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because `add_marker_to_selected_track` is missing.
 
-- [ ] **Step 3: Implement controller marker slots**
+- [x] **Step 3: Implement controller marker slots**
 
 Extend imports:
 
@@ -320,7 +320,7 @@ Add slots:
             return False
 ```
 
-- [ ] **Step 4: Run editable marker tests**
+- [x] **Step 4: Run editable marker tests**
 
 Run:
 
@@ -330,7 +330,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit controller inspector slots**
+- [x] **Step 5: Commit controller inspector slots**
 
 Run:
 

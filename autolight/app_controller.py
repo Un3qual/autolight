@@ -13,8 +13,10 @@ from autolight.jobs.queue import LocalJobQueue
 from autolight.project.models import Marker, ResultState
 from autolight.project.store import (
     ProjectStore,
+    add_editable_marker,
     add_generated_track,
     create_editable_track_from_markers,
+    delete_editable_marker,
     find_track,
     import_audio_asset,
     new_project,
@@ -35,6 +37,7 @@ class AppController(QObject):
     projectPathChanged = Signal()
     lastErrorChanged = Signal()
     selectedTrackIdChanged = Signal()
+    selectedTrackMarkersChanged = Signal()
     isDirtyChanged = Signal()
 
     def __init__(self):
@@ -75,6 +78,10 @@ class AppController(QObject):
     @Property(str, notify=selectedTrackIdChanged)
     def selectedTrackId(self) -> str:
         return self._selected_track_id
+
+    @Property(list, notify=selectedTrackMarkersChanged)
+    def selectedTrackMarkers(self) -> list[dict]:
+        return self._marker_summary_for_track(self._selected_track_id)
 
     @Property(bool, notify=isDirtyChanged)
     def isDirty(self) -> bool:
@@ -248,6 +255,33 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return ""
 
+    @Slot(float, str, result=str)
+    def add_marker_to_selected_track(self, timestamp: float, label: str) -> str:
+        try:
+            marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
+            self._track_model.refresh_track(self._selected_track_id)
+            self.selectedTrackMarkersChanged.emit()
+            self._set_last_error("")
+            self._set_dirty(True)
+            return marker.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
+    @Slot(str, result=bool)
+    def delete_marker_from_selected_track(self, marker_id: str) -> bool:
+        try:
+            deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
+            self._track_model.refresh_track(self._selected_track_id)
+            self.selectedTrackMarkersChanged.emit()
+            self._set_last_error("")
+            if deleted:
+                self._set_dirty(True)
+            return deleted
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
         try:
@@ -328,12 +362,27 @@ class AppController(QObject):
             return
         self._selected_track_id = track_id
         self.selectedTrackIdChanged.emit()
+        self.selectedTrackMarkersChanged.emit()
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
             return
         self._is_dirty = dirty
         self.isDirtyChanged.emit()
+
+    def _marker_summary_for_track(self, track_id: str) -> list[dict]:
+        return [
+            {
+                "id": marker.id,
+                "timestamp": marker.timestamp,
+                "label": marker.label,
+                "category": marker.category,
+            }
+            for marker in sorted(
+                (marker for marker in self._project.markers if marker.track_id == track_id),
+                key=lambda marker: (marker.timestamp, marker.id),
+            )
+        ]
 
     def _can_replace_project(self) -> bool:
         try:
