@@ -5,6 +5,7 @@ import json
 import math
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -69,38 +70,58 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
     search_roots = [Path(root) for root in search_dirs or []]
     candidate_index: _RelinkCandidateIndex | None = None
 
-    for asset in project.audio_assets:
-        asset_path = Path(asset.path)
-        if asset_path.is_file():
-            if _fingerprint_matches(asset_path, asset.fingerprint):
-                if asset.import_status != "online" or asset.relink_hint:
-                    asset.import_status = "online"
-                    asset.relink_hint = ""
-                    changed_asset_ids.append(asset.id)
-                continue
-            hint = asset_path.name
-        else:
-            hint = asset_path.name
-
-        replacement = None
+    def find_replacement(fingerprint: str, hint: str) -> Path | None:
+        nonlocal candidate_index
         if Path(hint).stem:
             if candidate_index is None:
                 candidate_index = _RelinkCandidateIndex(search_roots)
-            replacement = candidate_index.find(asset.fingerprint, hint)
-        if replacement is not None:
-            if asset.path != str(replacement) or asset.import_status != "online" or asset.relink_hint:
-                asset.path = str(replacement)
-                asset.import_status = "online"
-                asset.relink_hint = ""
-                changed_asset_ids.append(asset.id)
-            continue
+            return candidate_index.find(fingerprint, hint)
+        return None
 
-        if asset.import_status != "offline" or asset.relink_hint != hint:
-            asset.import_status = "offline"
-            asset.relink_hint = hint
+    for asset in project.audio_assets:
+        if _refresh_audio_asset(asset, find_replacement):
             changed_asset_ids.append(asset.id)
 
     return changed_asset_ids
+
+
+def _refresh_audio_asset(asset: AudioAsset, find_replacement: Callable[[str, str], Path | None]) -> bool:
+    asset_path = Path(asset.path)
+    hint = asset_path.name
+
+    if asset_path.is_file() and _fingerprint_matches(asset_path, asset.fingerprint):
+        return _mark_audio_asset_online(asset)
+
+    replacement = find_replacement(asset.fingerprint, hint)
+    if replacement is not None:
+        return _relink_audio_asset(asset, replacement)
+
+    return _mark_audio_asset_offline(asset, hint)
+
+
+def _mark_audio_asset_online(asset: AudioAsset) -> bool:
+    if asset.import_status == "online" and not asset.relink_hint:
+        return False
+    asset.import_status = "online"
+    asset.relink_hint = ""
+    return True
+
+
+def _relink_audio_asset(asset: AudioAsset, replacement: Path) -> bool:
+    if asset.path == str(replacement) and asset.import_status == "online" and not asset.relink_hint:
+        return False
+    asset.path = str(replacement)
+    asset.import_status = "online"
+    asset.relink_hint = ""
+    return True
+
+
+def _mark_audio_asset_offline(asset: AudioAsset, hint: str) -> bool:
+    if asset.import_status == "offline" and asset.relink_hint == hint:
+        return False
+    asset.import_status = "offline"
+    asset.relink_hint = hint
+    return True
 
 
 def _fingerprint_matches(path: Path, fingerprint: str) -> bool:
