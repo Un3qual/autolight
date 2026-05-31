@@ -182,7 +182,7 @@ Window {
 
                 Button {
                     text: "Rerun"
-                    enabled: appController.selectedTrackCanRerun
+                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
                     onClicked: appController.rerun_track(appController.selectedTrackId)
                 }
 
@@ -405,7 +405,7 @@ Window {
 
                     Button {
                         text: "Add Cue"
-                        enabled: appController.selectedTrackId.length > 0
+                        enabled: appController.selectedTrackId.length > 0 && appController.selectedTrackIsEditable
                         onClicked: appController.add_marker_to_selected_track(
                             Number(markerTimestampField.text),
                             markerLabelField.text
@@ -414,7 +414,7 @@ Window {
 
                     Button {
                         text: "Delete Cue"
-                        enabled: inspectorPanel.selectedMarkerId.length > 0
+                        enabled: inspectorPanel.selectedMarkerId.length > 0 && appController.selectedTrackIsEditable
                         onClicked: {
                             if (appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)) {
                                 inspectorPanel.selectedMarkerId = ""

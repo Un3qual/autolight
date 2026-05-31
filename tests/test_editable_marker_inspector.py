@@ -145,7 +145,15 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("inspectorPanel.selectedMarkerId", qml)
         self.assertIn("appController.add_marker_to_selected_track", qml)
         self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
-        self.assertEqual(qml.count("ListView {"), 1)
+        self.assertIn("appController.selectedTrackIsEditable", qml)
+        self.assertIn(
+            "enabled: appController.selectedTrackId.length > 0 && appController.selectedTrackIsEditable",
+            qml,
+        )
+        self.assertIn(
+            "enabled: inspectorPanel.selectedMarkerId.length > 0 && appController.selectedTrackIsEditable",
+            qml,
+        )
 
     @staticmethod
     def _generated_track(project):

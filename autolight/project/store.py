@@ -67,6 +67,7 @@ def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
 def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str | Path] | None = None) -> list[str]:
     changed_asset_ids: list[str] = []
     search_roots = [Path(root) for root in search_dirs or []]
+    candidate_index: _RelinkCandidateIndex | None = None
 
     for asset in project.audio_assets:
         asset_path = Path(asset.path)
@@ -81,7 +82,11 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
         else:
             hint = asset_path.name
 
-        replacement = _find_relink_candidate(asset.fingerprint, search_roots, hint)
+        replacement = None
+        if Path(hint).stem:
+            if candidate_index is None:
+                candidate_index = _RelinkCandidateIndex(search_roots)
+            replacement = candidate_index.find(asset.fingerprint, hint)
         if replacement is not None:
             if asset.path != str(replacement) or asset.import_status != "online" or asset.relink_hint:
                 asset.path = str(replacement)
@@ -105,21 +110,39 @@ def _fingerprint_matches(path: Path, fingerprint: str) -> bool:
         return False
 
 
-def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
-    hinted_stem = Path(filename_hint).stem.casefold()
-    if not hinted_stem:
-        return None
-    for root in search_roots:
-        if not root.is_dir():
-            continue
-        for candidate in root.rglob("*"):
-            if not candidate.is_file():
+class _RelinkCandidateIndex:
+    def __init__(self, search_roots: list[Path]):
+        self._candidates: list[tuple[str, Path]] = []
+        self._fingerprints: dict[Path, str | None] = {}
+        seen_roots: set[Path] = set()
+        for root in search_roots:
+            if root in seen_roots or not root.is_dir():
                 continue
-            if not candidate.stem.casefold().startswith(hinted_stem):
-                continue
-            if _fingerprint_matches(candidate, fingerprint):
+            seen_roots.add(root)
+            for candidate in root.rglob("*"):
+                if candidate.is_file():
+                    self._candidates.append((candidate.stem.casefold(), candidate))
+
+    def find(self, fingerprint: str, filename_hint: str) -> Path | None:
+        hinted_stem = Path(filename_hint).stem.casefold()
+        if not hinted_stem:
+            return None
+        for candidate_stem, candidate in self._candidates:
+            if candidate_stem.startswith(hinted_stem) and self._fingerprint_matches(candidate, fingerprint):
                 return candidate
-    return None
+        return None
+
+    def _fingerprint_matches(self, path: Path, fingerprint: str) -> bool:
+        if path not in self._fingerprints:
+            try:
+                self._fingerprints[path] = fingerprint_file(path)
+            except OSError:
+                self._fingerprints[path] = None
+        return self._fingerprints[path] == fingerprint
+
+
+def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
+    return _RelinkCandidateIndex(search_roots).find(fingerprint, filename_hint)
 
 
 def add_generated_track(

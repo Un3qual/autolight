@@ -346,6 +346,18 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(self._track_id(controller, 2))
         self.assertFalse(controller.selectedTrackCanRerun)
 
+    def test_selected_track_is_editable_only_for_editable_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+
+        self.assertFalse(controller.selectedTrackIsEditable)
+
+        controller.select_track(self._track_id(controller, 1))
+        self.assertFalse(controller.selectedTrackIsEditable)
+
+        controller.select_track(self._track_id(controller, 2))
+        self.assertTrue(controller.selectedTrackIsEditable)
+
     def test_selected_track_has_running_job_follows_job_state(self):
         from threading import Event
 
@@ -708,7 +720,10 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.cancel_selected_job()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
         self.assertIn("enabled: appController.selectedTrackHasRunningJob", qml)
-        self.assertIn("enabled: appController.selectedTrackCanRerun", qml)
+        self.assertIn(
+            "enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob",
+            qml,
+        )
 
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

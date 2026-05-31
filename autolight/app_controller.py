@@ -10,7 +10,7 @@ from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
 from autolight.jobs.queue import LocalJobQueue
-from autolight.project.models import Marker, ResultState
+from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
     ProjectStore,
     add_editable_marker,
@@ -89,6 +89,11 @@ class AppController(QObject):
     def selectedTrackCanRerun(self) -> bool:
         track = find_track(self._project, self._selected_track_id)
         return track is not None and bool(track.transform_id)
+
+    @Property(bool, notify=selectedTrackIdChanged)
+    def selectedTrackIsEditable(self) -> bool:
+        track = find_track(self._project, self._selected_track_id)
+        return track is not None and track.type == TrackType.EDITABLE
 
     @Property(bool, notify=selectedTrackHasRunningJobChanged)
     def selectedTrackHasRunningJob(self) -> bool:

@@ -126,6 +126,41 @@ class AudioImportMetadataTest(unittest.TestCase):
         self.assertEqual(project.audio_assets[0].import_status, "online")
         self.assertEqual(project.audio_assets[0].relink_hint, "")
 
+    def test_refresh_audio_asset_status_walks_search_roots_once_for_multiple_relinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_old_path = root / "first.wav"
+            second_old_path = root / "second.wav"
+            first_new_path = root / "first-copy.wav"
+            second_new_path = root / "second-copy.wav"
+            write_wav(first_old_path, frames=8000)
+            write_wav(second_old_path, frames=4000)
+            first_payload = first_old_path.read_bytes()
+            second_payload = second_old_path.read_bytes()
+            project = new_project("Demo")
+            import_audio_asset(project, first_old_path)
+            import_audio_asset(project, second_old_path)
+            first_old_path.unlink()
+            second_old_path.unlink()
+            first_new_path.write_bytes(first_payload)
+            second_new_path.write_bytes(second_payload)
+
+            from autolight.project.store import refresh_audio_asset_status
+
+            rglob_calls = []
+            original_rglob = Path.rglob
+
+            def record_rglob(path, pattern):
+                rglob_calls.append((path, pattern))
+                return original_rglob(path, pattern)
+
+            with patch.object(Path, "rglob", record_rglob):
+                changed_ids = refresh_audio_asset_status(project, search_dirs=[root])
+
+        self.assertEqual(changed_ids, [asset.id for asset in project.audio_assets])
+        self.assertEqual([asset.path for asset in project.audio_assets], [str(first_new_path), str(second_new_path)])
+        self.assertEqual(rglob_calls, [(root, "*")])
+
     def test_refresh_audio_asset_status_marks_existing_fingerprint_mismatch_offline(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
