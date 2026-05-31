@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
-from autolight.project.models import JobRun, Marker, ProjectDocument
+from autolight.project.models import JobRun, Marker, ProjectDocument, Track
 
 
 class TimelineTrackModel(QAbstractListModel):
@@ -27,6 +27,18 @@ class TimelineTrackModel(QAbstractListModel):
         self._markers_by_track: dict[str, list[Marker]] = {}
         self._role_by_name = {
             role_name.decode("utf-8"): role for role, role_name in self.ROLE_NAMES.items()
+        }
+        self._role_handlers = {
+            self.role_for_name("trackId"): lambda track: track.id,
+            self.role_for_name("name"): lambda track: track.name,
+            self.role_for_name("trackType"): lambda track: track.type.value,
+            self.role_for_name("resultState"): lambda track: track.result_state.value,
+            self.role_for_name("markerCount"): self._marker_count_for_track,
+            self.role_for_name("markerSpans"): self._marker_spans_for_track,
+            self.role_for_name("error"): lambda track: track.error,
+            self.role_for_name("activeJobId"): self._active_job_id_for_track,
+            self.role_for_name("jobState"): self._job_state_for_track,
+            self.role_for_name("jobProgress"): self._job_progress_for_track,
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
@@ -55,43 +67,13 @@ class TimelineTrackModel(QAbstractListModel):
         return self.createIndex(row, column, self._generation)
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if (
-            self._project is None
-            or not index.isValid()
-            or index.model() is not self
-            or index.column() != 0
-            or index.internalId() != self._generation
-        ):
+        track = self._track_for_index(index)
+        if track is None:
             return None
-        row = index.row()
-        if row < 0 or row >= len(self._project.tracks):
-            return None
-
-        track = self._project.tracks[row]
         if role == Qt.ItemDataRole.DisplayRole:
             return track.name
-        if role == self.role_for_name("trackId"):
-            return track.id
-        if role == self.role_for_name("name"):
-            return track.name
-        if role == self.role_for_name("trackType"):
-            return track.type.value
-        if role == self.role_for_name("resultState"):
-            return track.result_state.value
-        if role == self.role_for_name("markerCount"):
-            return len(self._markers_by_track.get(track.id, []))
-        if role == self.role_for_name("markerSpans"):
-            return [self._marker_span(marker) for marker in self._markers_for_track(track.id)]
-        if role == self.role_for_name("error"):
-            return track.error
-        latest_job = self._latest_job_for_track(track.id)
-        if role == self.role_for_name("activeJobId"):
-            return "" if latest_job is None or latest_job.state.value != "running" else latest_job.id
-        if role == self.role_for_name("jobState"):
-            return "" if latest_job is None else latest_job.state.value
-        if role == self.role_for_name("jobProgress"):
-            return 0.0 if latest_job is None else latest_job.progress
-        return None
+        handler = self._role_handlers.get(role)
+        return None if handler is None else handler(track)
 
     def roleNames(self):
         return dict(self.ROLE_NAMES)
@@ -114,6 +96,38 @@ class TimelineTrackModel(QAbstractListModel):
 
     def role_for_name(self, name: str) -> int:
         return self._role_by_name[name]
+
+    def _track_for_index(self, index: QModelIndex) -> Track | None:
+        if (
+            self._project is None
+            or not index.isValid()
+            or index.model() is not self
+            or index.column() != 0
+            or index.internalId() != self._generation
+        ):
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._project.tracks):
+            return None
+        return self._project.tracks[row]
+
+    def _marker_count_for_track(self, track: Track) -> int:
+        return len(self._markers_by_track.get(track.id, []))
+
+    def _marker_spans_for_track(self, track: Track) -> list[dict[str, str | float]]:
+        return [self._marker_span(marker) for marker in self._markers_for_track(track.id)]
+
+    def _active_job_id_for_track(self, track: Track) -> str:
+        latest_job = self._latest_job_for_track(track.id)
+        return "" if latest_job is None or latest_job.state.value != "running" else latest_job.id
+
+    def _job_state_for_track(self, track: Track) -> str:
+        latest_job = self._latest_job_for_track(track.id)
+        return "" if latest_job is None else latest_job.state.value
+
+    def _job_progress_for_track(self, track: Track) -> float:
+        latest_job = self._latest_job_for_track(track.id)
+        return 0.0 if latest_job is None else latest_job.progress
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])
