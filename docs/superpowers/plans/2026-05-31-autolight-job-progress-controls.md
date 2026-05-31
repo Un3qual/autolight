@@ -175,16 +175,42 @@ Add this test to `AppControllerTest`:
 
 ```python
     def test_cancel_selected_job_cancels_running_track(self):
+        from threading import Event
+
+        from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
         from autolight.project.store import add_generated_track
+
+        started = Event()
+        release = Event()
+
+        def blocking_transform(context, params):
+            started.set()
+            while not release.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
 
         controller = self._controller()
         controller.load_demo_project()
+        controller._registry.register(
+            TransformSpec(
+                id="test.blocking_cancel",
+                version="1",
+                name="Blocking Cancel Test",
+                input_schema="audio.v1",
+                output_schema="artifact.test.v1",
+                estimated_cost="light",
+                run=blocking_transform,
+            )
+        )
         source_id = self._track_id(controller, 0)
         stem = add_generated_track(
             controller._project,
             source_id,
             "Vocals Stem",
-            "stems.vocals_stand_in",
+            "test.blocking_cancel",
             {"label": "vocals"},
             "1",
             "artifact.stem.v1",
@@ -195,8 +221,12 @@ Add this test to `AppControllerTest`:
 
         job_id = controller.run_track(stem.id)
         self.assertNotEqual(job_id, "")
-        controller.cancel_selected_job()
-        controller._job_queue.wait(job_id, timeout=2)
+        try:
+            self.assertTrue(started.wait(2))
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
 
         self.assertEqual(stem.result_state.value, "cancelled")
 
