@@ -492,7 +492,7 @@ class LocalJobQueueTest(unittest.TestCase):
                 {"label": "vocals"},
             )
             queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
-            upstream = next(track for track in project.tracks if track.id == upstream_id)
+            upstream = track_by_id(project, upstream_id)
             upstream.result_state = ResultState.COMPLETE
             upstream.cache_refs = ["missing_cache"]
             project.cache_entries.append(
@@ -548,7 +548,7 @@ class LocalJobQueueTest(unittest.TestCase):
                 {},
             )
             queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
-            track = next(track for track in project.tracks if track.id == track_id)
+            track = track_by_id(project, track_id)
             track.cache_refs = ["cache_validating"]
             project.cache_entries.append(
                 CacheEntry(
@@ -757,6 +757,13 @@ def project_with_generated_track(
         dependency_hash="dep",
     )
     return project, generated.id
+
+
+def track_by_id(project, track_id: str):
+    for track in project.tracks:
+        if track.id == track_id:
+            return track
+    raise AssertionError(f"track not found: {track_id}")
 
 
 def test_transform(transform_id: str, run):

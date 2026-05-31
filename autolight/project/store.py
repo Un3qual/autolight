@@ -173,33 +173,77 @@ def refresh_audio_track_status(project: ProjectDocument) -> list[str]:
     previous_states = {track.id: track.result_state for track in project.tracks}
     offline_source_track_ids: list[str] = []
 
-    for track in project.tracks:
-        if track.type != TrackType.SOURCE:
-            continue
-        asset_id = track.provenance.get("asset_id")
-        if not isinstance(asset_id, str):
-            continue
-        asset = offline_assets.get(asset_id)
-        if asset is None:
-            if track.error.startswith("audio asset offline:"):
-                track.error = ""
-                changed_track_ids.append(track.id)
-            continue
-        if track.result_state == ResultState.COMPLETE:
-            track.result_state = ResultState.STALE
-        hint = asset.relink_hint or Path(asset.path).name or asset.id
-        track.error = f"audio asset offline: {hint}"
-        changed_track_ids.append(track.id)
-        offline_source_track_ids.append(track.id)
+    for track in _source_tracks(project):
+        track_changed, is_offline = _refresh_source_audio_track(track, offline_assets)
+        if track_changed:
+            changed_track_ids.append(track.id)
+        if is_offline:
+            offline_source_track_ids.append(track.id)
 
     for track_id in offline_source_track_ids:
         mark_dependents_stale(project, track_id)
 
+    _append_changed_dependents(project, previous_states, changed_track_ids)
+
+    return changed_track_ids
+
+
+def _source_tracks(project: ProjectDocument) -> list[Track]:
+    return [track for track in project.tracks if track.type == TrackType.SOURCE]
+
+
+def _refresh_source_audio_track(
+    track: Track,
+    offline_assets: dict[str, AudioAsset],
+) -> tuple[bool, bool]:
+    asset = _offline_audio_asset_for_track(track, offline_assets)
+    if asset is None:
+        return _clear_offline_audio_error(track), False
+    return _mark_source_audio_offline(track, asset), True
+
+
+def _offline_audio_asset_for_track(
+    track: Track,
+    offline_assets: dict[str, AudioAsset],
+) -> AudioAsset | None:
+    asset_id = track.provenance.get("asset_id")
+    if not isinstance(asset_id, str):
+        return None
+    return offline_assets.get(asset_id)
+
+
+def _clear_offline_audio_error(track: Track) -> bool:
+    if not track.error.startswith("audio asset offline:"):
+        return False
+    track.error = ""
+    return True
+
+
+def _mark_source_audio_offline(track: Track, asset: AudioAsset) -> bool:
+    changed = False
+    if track.result_state == ResultState.COMPLETE:
+        track.result_state = ResultState.STALE
+        changed = True
+    error = _offline_audio_error(asset)
+    if track.error != error:
+        track.error = error
+        changed = True
+    return changed
+
+
+def _offline_audio_error(asset: AudioAsset) -> str:
+    hint = asset.relink_hint or Path(asset.path).name or asset.id
+    return f"audio asset offline: {hint}"
+
+
+def _append_changed_dependents(
+    project: ProjectDocument,
+    previous_states: dict[str, ResultState],
+    changed_track_ids: list[str],
+) -> None:
     for track in project.tracks:
         if track.id not in changed_track_ids and track.result_state != previous_states[track.id]:
             changed_track_ids.append(track.id)
-
-    return changed_track_ids
 
 
 def track_dependency_inputs(project: ProjectDocument, track: Track) -> list[str]:
