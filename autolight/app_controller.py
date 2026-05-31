@@ -290,7 +290,8 @@ class AppController(QObject):
         if any(run.state == ResultState.RUNNING for run in self._project.job_runs):
             raise ValueError("cannot save project with a running job")
 
-    def _mark_running_state_stale(self, project) -> bool:
+    @staticmethod
+    def _mark_running_state_stale(project) -> bool:
         changed = False
         running_track_ids = set()
         for run in project.job_runs:
