@@ -186,7 +186,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Update README cache section**
+- [x] **Step 1: Update README cache section**
 
 Add this section to `README.md`:
 
@@ -196,7 +196,7 @@ Add this section to `README.md`:
 Autolight records generated artifact metadata in the `.autolight` project file and stores artifact bytes under the app runtime cache. If a cached artifact is missing or corrupted, `Check Cache` marks affected generated tracks as `stale` while preserving visible markers and editable derived tracks. Select a stale or failed generated track and choose `Rerun` to regenerate its output.
 ```
 
-- [ ] **Step 2: Run diff check**
+- [x] **Step 2: Run diff check**
 
 Run:
 
@@ -206,7 +206,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 3: Commit README cache recovery docs**
+- [x] **Step 3: Commit README cache recovery docs**
 
 Run:
 
@@ -219,7 +219,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run full tests and smoke**
+- [x] **Step 1: Run full tests and smoke**
 
 Run:
 
@@ -230,7 +230,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 
