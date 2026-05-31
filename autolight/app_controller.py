@@ -3,22 +3,34 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.jobs.queue import LocalJobQueue
 from autolight.project.models import Marker, ResultState
-from autolight.project.store import add_generated_track, create_editable_track_from_markers, import_audio_asset, new_project
+from autolight.project.store import (
+    ProjectStore,
+    add_generated_track,
+    create_editable_track_from_markers,
+    import_audio_asset,
+    new_project,
+)
 from autolight.timeline.model import TimelineTrackModel
 
 
 class AppController(QObject):
     projectNameChanged = Signal()
+    projectPathChanged = Signal()
+    lastErrorChanged = Signal()
+    selectedTrackIdChanged = Signal()
 
     def __init__(self):
         super().__init__()
         self._project = new_project("Untitled")
+        self._project_path = ""
+        self._last_error = ""
+        self._selected_track_id = ""
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
         self._track_model = TimelineTrackModel(parent=self)
@@ -39,6 +51,70 @@ class AppController(QObject):
     def projectName(self) -> str:
         return self._project.name
 
+    @Property(str, notify=projectPathChanged)
+    def projectPath(self) -> str:
+        return self._project_path
+
+    @Property(str, notify=lastErrorChanged)
+    def lastError(self) -> str:
+        return self._last_error
+
+    @Property(str, notify=selectedTrackIdChanged)
+    def selectedTrackId(self) -> str:
+        return self._selected_track_id
+
+    @Slot()
+    def new_project(self) -> None:
+        self._set_project(new_project("Untitled"))
+        self._set_project_path("")
+        self._set_selected_track_id("")
+        self._set_last_error("")
+
+    @Slot(str, result=bool)
+    def open_project(self, path: str) -> bool:
+        try:
+            project_path = self._path_from_qml(path)
+            self._set_project(ProjectStore.load(project_path))
+            self._set_project_path(str(project_path))
+            self._set_selected_track_id("")
+            self._set_last_error("")
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(str, result=bool)
+    def save_project(self, path: str = "") -> bool:
+        try:
+            if not path and not self._project_path:
+                raise ValueError("project path is required")
+            project_path = self._path_from_qml(path) if path else Path(self._project_path)
+            if project_path.suffix != ".autolight":
+                project_path = project_path.with_suffix(".autolight")
+            ProjectStore.save(self._project, project_path)
+            self._set_project_path(str(project_path))
+            self._set_last_error("")
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(str, result=str)
+    def import_audio(self, path: str) -> str:
+        try:
+            audio_path = self._path_from_qml(path)
+            track = import_audio_asset(self._project, audio_path)
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            return track.id
+        except FileNotFoundError as exc:
+            self._set_last_error(f"No such file: {exc}")
+            return ""
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
     @Slot()
     def load_demo_project(self) -> None:
         if self._demo_temp_dir is not None:
@@ -48,8 +124,8 @@ class AppController(QObject):
         demo_audio_path = Path(self._demo_temp_dir.name) / f"{demo_audio_name}.wav"
         demo_audio_path.write_bytes(b"demo audio")
 
-        self._project = new_project("Autolight Demo")
-        self.projectNameChanged.emit()
+        self._set_project(new_project("Autolight Demo"))
+        self._set_project_path("")
         source = import_audio_asset(self._project, demo_audio_path)
         beats = add_generated_track(
             self._project,
@@ -71,6 +147,8 @@ class AppController(QObject):
         )
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
         self._track_model.set_project(self._project)
+        self._set_selected_track_id(source.id)
+        self._set_last_error("")
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
@@ -87,6 +165,35 @@ class AppController(QObject):
             self._demo_temp_dir.cleanup()
             self._demo_temp_dir = None
         self._runtime_temp_dir.cleanup()
+
+    def _set_project(self, project) -> None:
+        self._project = project
+        self._track_model.set_project(self._project)
+        self.projectNameChanged.emit()
+
+    def _set_project_path(self, path: str) -> None:
+        if self._project_path == path:
+            return
+        self._project_path = path
+        self.projectPathChanged.emit()
+
+    def _set_last_error(self, message: str) -> None:
+        if self._last_error == message:
+            return
+        self._last_error = message
+        self.lastErrorChanged.emit()
+
+    def _set_selected_track_id(self, track_id: str) -> None:
+        if self._selected_track_id == track_id:
+            return
+        self._selected_track_id = track_id
+        self.selectedTrackIdChanged.emit()
+
+    def _path_from_qml(self, value: str) -> Path:
+        text = str(value)
+        if text.startswith("file:"):
+            return Path(QUrl(text).toLocalFile())
+        return Path(text)
 
     def __del__(self):
         try:

@@ -23,7 +23,7 @@
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing tests for new, import, save, and open**
+- [x] **Step 1: Add failing tests for new, import, save, and open**
 
 Append these imports near the top of `tests/test_app_controller.py`:
 
@@ -105,7 +105,7 @@ Add these test methods to `AppControllerTest`:
         self.assertIn("project path is required", controller.lastError)
 ```
 
-- [ ] **Step 2: Run the controller tests and verify they fail**
+- [x] **Step 2: Run the controller tests and verify they fail**
 
 Run:
 
@@ -115,7 +115,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: FAIL with `AttributeError` for missing `new_project`, `projectPath`, `lastError`, `selectedTrackId`, `import_audio`, `save_project`, or `open_project`.
 
-- [ ] **Step 3: Add controller state, properties, and file workflow slots**
+- [x] **Step 3: Add controller state, properties, and file workflow slots**
 
 Update the imports in `autolight/app_controller.py`:
 
@@ -268,7 +268,7 @@ Add these private helpers before `__del__`:
         return Path(text)
 ```
 
-- [ ] **Step 4: Run the controller tests and verify the project workflow passes**
+- [x] **Step 4: Run the controller tests and verify the project workflow passes**
 
 Run:
 
@@ -278,7 +278,7 @@ uv run python -m unittest tests.test_app_controller -v
 
 Expected: PASS for the new project workflow tests. Existing demo and smoke tests continue to pass.
 
-- [ ] **Step 5: Commit the project file workflow**
+- [x] **Step 5: Commit the project file workflow**
 
 Run:
 

@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,6 +8,14 @@ from PySide6.QtCore import QCoreApplication
 
 import main as app_entry
 from autolight.app_controller import AppController
+
+
+def write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\0\0" * 8000)
 
 
 class FakeContext:
@@ -114,6 +124,64 @@ class AppControllerTest(unittest.TestCase):
         second_path = controller._project.audio_assets[0].path
 
         self.assertNotEqual(first_path, second_path)
+
+    def test_new_project_resets_project_path_and_timeline_model(self):
+        controller = self._controller()
+        controller.load_demo_project()
+
+        controller.new_project()
+
+        self.assertEqual(controller.projectName, "Untitled")
+        self.assertEqual(controller.projectPath, "")
+        self.assertEqual(controller.lastError, "")
+        self.assertEqual(controller.trackModel.rowCount(), 0)
+
+    def test_import_audio_adds_source_track_and_selects_it(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            track_id = controller.import_audio(str(audio_path))
+
+        self.assertNotEqual(track_id, "")
+        self.assertEqual(controller.trackModel.rowCount(), 1)
+        self.assertEqual(controller.selectedTrackId, track_id)
+        self.assertEqual(controller.lastError, "")
+
+    def test_import_audio_records_error_for_missing_file(self):
+        controller = self._controller()
+
+        track_id = controller.import_audio("/missing/song.wav")
+
+        self.assertEqual(track_id, "")
+        self.assertIn("No such file", controller.lastError)
+        self.assertEqual(controller.trackModel.rowCount(), 0)
+
+    def test_save_and_open_project_round_trip_updates_path_and_model(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            controller.import_audio(str(audio_path))
+
+            self.assertTrue(controller.save_project(str(project_path)))
+            controller.new_project()
+            self.assertTrue(controller.open_project(str(project_path)))
+
+        self.assertEqual(controller.projectName, "Untitled")
+        self.assertTrue(controller.projectPath.endswith("show.autolight"))
+        self.assertEqual(controller.trackModel.rowCount(), 1)
+        self.assertEqual(controller.lastError, "")
+
+    def test_save_project_requires_path_for_unsaved_project(self):
+        controller = self._controller()
+
+        self.assertFalse(controller.save_project(""))
+        self.assertIn("project path is required", controller.lastError)
 
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
