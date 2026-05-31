@@ -103,6 +103,18 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
         self.assertEqual(controller.lastError, "")
 
+    def test_qml_exposes_editable_marker_inspector(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("id: inspectorPanel", qml)
+        self.assertIn("markerTimestampField", qml)
+        self.assertIn("markerLabelField", qml)
+        self.assertIn("appController.selectedTrackMarkers", qml)
+        self.assertIn("inspectorPanel.selectedMarkerId", qml)
+        self.assertIn("appController.add_marker_to_selected_track", qml)
+        self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
+        self.assertEqual(qml.count("ListView {"), 1)
+
     def _generated_track(self, project):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"

@@ -347,7 +347,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing QML inspector test**
+- [x] **Step 1: Add failing QML inspector test**
 
 Add this test:
 
@@ -365,7 +365,7 @@ Add this test:
         self.assertEqual(qml.count("ListView {"), 1)
 ```
 
-- [ ] **Step 2: Run QML inspector test and verify failure**
+- [x] **Step 2: Run QML inspector test and verify failure**
 
 Run:
 
@@ -375,7 +375,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because the inspector controls are not present.
 
-- [ ] **Step 3: Add QML inspector panel**
+- [x] **Step 3: Add QML inspector panel**
 
 Use `ScrollView` and `Repeater` for the marker list rather than adding a second `ListView`, so the existing timeline shell test that enforces one row-oriented timeline `ListView` remains meaningful.
 
@@ -480,7 +480,7 @@ Add a right-side `Rectangle` with this core content:
 
 Wrap the existing timeline `ListView` and the new inspector in a `RowLayout`; keep the existing `ListView` as `Layout.fillWidth: true` and put the inspector `Rectangle` beside it.
 
-- [ ] **Step 4: Run inspector tests and smoke**
+- [x] **Step 4: Run inspector tests and smoke**
 
 Run:
 
@@ -491,7 +491,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit inspector UI**
+- [x] **Step 5: Commit inspector UI**
 
 Run:
 
@@ -504,7 +504,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests and smoke**
+- [x] **Step 1: Run all tests and smoke**
 
 Run:
 
@@ -515,7 +515,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 
