@@ -169,16 +169,23 @@ Expected: commit succeeds.
 Add this test:
 
 ```python
+    def _track_id_for_type(self, controller, track_type: str) -> str:
+        model = controller.trackModel
+        type_role = model.role_for_name("trackType")
+        id_role = model.role_for_name("trackId")
+        for row in range(model.rowCount()):
+            index = model.index(row, 0)
+            if model.data(index, type_role) == track_type:
+                return model.data(index, id_role)
+        raise AssertionError(f"track type not found: {track_type}")
+
     def test_controller_adds_marker_to_selected_editable_track(self):
         from autolight.app_controller import AppController
 
         controller = AppController()
         self.addCleanup(controller.cleanup)
         controller.load_demo_project()
-        editable_id = controller.trackModel.data(
-            controller.trackModel.index(2, 0),
-            controller.trackModel.role_for_name("trackId"),
-        )
+        editable_id = self._track_id_for_type(controller, "editable")
         controller.select_track(editable_id)
 
         marker_id = controller.add_marker_to_selected_track(1.5, "Blackout")
@@ -193,10 +200,7 @@ Add this test:
         controller = AppController()
         self.addCleanup(controller.cleanup)
         controller.load_demo_project()
-        editable_id = controller.trackModel.data(
-            controller.trackModel.index(2, 0),
-            controller.trackModel.role_for_name("trackId"),
-        )
+        editable_id = self._track_id_for_type(controller, "editable")
         controller.select_track(editable_id)
         marker_id = controller.add_marker_to_selected_track(1.5, "Blackout")
 
@@ -320,6 +324,7 @@ Add this test:
         self.assertIn("inspectorPanel.selectedMarkerId", qml)
         self.assertIn("appController.add_marker_to_selected_track", qml)
         self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
+        self.assertEqual(qml.count("ListView {"), 1)
 ```
 
 - [ ] **Step 2: Run QML inspector test and verify failure**
@@ -333,6 +338,8 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 Expected: FAIL because the inspector controls are not present.
 
 - [ ] **Step 3: Add QML inspector panel**
+
+Use `ScrollView` and `Repeater` for the marker list rather than adding a second `ListView`, so the existing timeline shell test that enforces one row-oriented timeline `ListView` remains meaningful.
 
 Add a right-side `Rectangle` with this core content:
 
@@ -375,29 +382,38 @@ Add a right-side `Rectangle` with this core content:
                         text: "Cue"
                     }
 
-                    ListView {
-                        id: markerList
+                    ScrollView {
+                        id: markerScroll
                         width: parent.width
                         height: 120
                         clip: true
-                        model: appController.selectedTrackMarkers
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: markerList.width
-                            height: 28
-                            color: inspectorPanel.selectedMarkerId === modelData.id ? "#2f4366" : "transparent"
 
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
-                                color: "#f4f4f5"
-                                elide: Text.ElideRight
-                                width: parent.width
-                            }
+                        Column {
+                            id: markerList
+                            width: markerScroll.availableWidth
+                            spacing: 2
 
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: inspectorPanel.selectedMarkerId = modelData.id
+                            Repeater {
+                                model: appController.selectedTrackMarkers
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    width: markerList.width
+                                    height: 28
+                                    color: inspectorPanel.selectedMarkerId === modelData.id ? "#2f4366" : "transparent"
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
+                                        color: "#f4f4f5"
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: inspectorPanel.selectedMarkerId = modelData.id
+                                    }
+                                }
                             }
                         }
                     }

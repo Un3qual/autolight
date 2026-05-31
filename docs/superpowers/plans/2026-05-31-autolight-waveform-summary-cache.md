@@ -330,7 +330,7 @@ import json
 from autolight.project.store import find_track
 ```
 
-Change the `LocalJobQueue` setup so controller code sees completed track changes before the model refresh signal:
+Change the `LocalJobQueue` setup so controller code sees completed track changes before the model refresh signal. The job-progress-controls plan owns progress notification changes inside `LocalJobQueue._run`; this waveform plan only requires those notifications to be present if the job-progress plan has not already landed:
 
 ```python
             on_track_changed=self._handle_track_changed,
@@ -353,7 +353,10 @@ Add these helpers to `AppController`:
             if entry is None or entry.artifact_kind != "waveform":
                 continue
             artifact_path = self._job_queue.cache_store.artifact_path(entry)
-            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            try:
+                payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
                 track.provenance["waveform_samples"] = samples
