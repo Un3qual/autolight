@@ -267,6 +267,43 @@ Append this test to `TransformPickerTest`:
         track = next(track for track in controller._project.tracks if track.id == track_id)
         self.assertIn("audio_path", track.transform_params)
         self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_resolves_audio_path_from_parent_chain(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+        generated_id = controller.add_transform_track(
+            source_id,
+            "markers.fixed_interval",
+            "1",
+            '{"duration": 3.0, "interval": 1.0}',
+        )
+
+        track_id = controller.add_transform_track(generated_id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
 ```
 
 - [ ] **Step 2: Run generic-transform test and verify failure**
@@ -345,11 +382,26 @@ Add this helper near the other private controller helpers:
     def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
         enriched = dict(params)
         if spec.input_schema == "audio.v1" and "audio_path" not in enriched:
-            asset_id = parent.provenance.get("asset_id")
+            audio_path = self._source_audio_path_for_track(parent)
+            if not audio_path:
+                raise ValueError("audio transform requires a source audio track")
+            enriched["audio_path"] = audio_path
+        return enriched
+
+    def _source_audio_path_for_track(self, track) -> str:
+        seen_track_ids = set()
+        current = track
+        while current is not None and current.id not in seen_track_ids:
+            seen_track_ids.add(current.id)
+            asset_id = current.provenance.get("asset_id")
             asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
             if asset is not None:
-                enriched["audio_path"] = asset.path
-        return enriched
+                return asset.path
+            next_track_id = current.input_track_ids[0] if current.input_track_ids else ""
+            if not next_track_id:
+                next_track_id = current.provenance.get("source_track_id", "")
+            current = find_track(self._project, next_track_id) if next_track_id else None
+        return ""
 ```
 
 - [ ] **Step 4: Run transform picker tests**
