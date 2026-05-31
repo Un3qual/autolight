@@ -16,6 +16,7 @@ from autolight.project.store import (
     import_audio_asset,
     mark_dependents_stale,
     new_project,
+    refresh_audio_asset_status,
     validate_graph,
 )
 
@@ -35,5 +36,6 @@ __all__ = [
     "import_audio_asset",
     "mark_dependents_stale",
     "new_project",
+    "refresh_audio_asset_status",
     "validate_graph",
 ]

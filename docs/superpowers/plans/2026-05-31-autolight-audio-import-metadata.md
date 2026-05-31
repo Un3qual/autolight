@@ -231,7 +231,7 @@ Expected: commit succeeds.
 - Modify: `autolight/project/__init__.py`
 - Modify: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Add failing offline and relink tests**
+- [x] **Step 1: Add failing offline and relink tests**
 
 Add these tests to `AudioImportMetadataTest`:
 
@@ -307,7 +307,7 @@ Add these tests to `AudioImportMetadataTest`:
         self.assertNotIn(unrelated_path, checked_paths)
 ```
 
-- [ ] **Step 2: Run offline tests and verify failure**
+- [x] **Step 2: Run offline tests and verify failure**
 
 Run:
 
@@ -317,7 +317,7 @@ uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTe
 
 Expected: FAIL because `refresh_audio_asset_status` is not defined.
 
-- [ ] **Step 3: Implement `refresh_audio_asset_status`**
+- [x] **Step 3: Implement `refresh_audio_asset_status`**
 
 Add this function to `autolight/project/store.py` below `import_audio_asset`:
 
@@ -375,7 +375,7 @@ from autolight.project.store import refresh_audio_asset_status
 
 Add `"refresh_audio_asset_status"` to `__all__`.
 
-- [ ] **Step 4: Run audio import tests**
+- [x] **Step 4: Run audio import tests**
 
 Run:
 
@@ -385,7 +385,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit offline status and relink**
+- [x] **Step 5: Commit offline status and relink**
 
 Run:
 

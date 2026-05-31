@@ -63,6 +63,51 @@ def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
     return track
 
 
+def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str | Path] | None = None) -> list[str]:
+    changed_asset_ids: list[str] = []
+    search_roots = [Path(root) for root in search_dirs or []]
+
+    for asset in project.audio_assets:
+        asset_path = Path(asset.path)
+        if asset_path.is_file():
+            if asset.import_status != "online" or asset.relink_hint:
+                asset.import_status = "online"
+                asset.relink_hint = ""
+                changed_asset_ids.append(asset.id)
+            continue
+
+        hint = asset_path.name
+        replacement = _find_relink_candidate(asset.fingerprint, search_roots, hint)
+        if replacement is not None:
+            asset.path = str(replacement)
+            asset.import_status = "online"
+            asset.relink_hint = ""
+            changed_asset_ids.append(asset.id)
+            continue
+
+        if asset.import_status != "offline" or asset.relink_hint != hint:
+            asset.import_status = "offline"
+            asset.relink_hint = hint
+            changed_asset_ids.append(asset.id)
+
+    return changed_asset_ids
+
+
+def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
+    hinted_stem = Path(filename_hint).stem.casefold()
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for candidate in root.rglob("*"):
+            if not candidate.is_file():
+                continue
+            if not candidate.stem.casefold().startswith(hinted_stem):
+                continue
+            if fingerprint_file(candidate) == fingerprint:
+                return candidate
+    return None
+
+
 def add_generated_track(
     project: ProjectDocument,
     parent_track_id: str,
