@@ -227,6 +227,11 @@ Add this test:
         self.assertEqual(marker_id, "")
         self.assertIn("finite", controller.lastError)
 
+        marker_id = controller.add_marker_to_selected_track(math.inf, "Broken")
+
+        self.assertEqual(marker_id, "")
+        self.assertIn("finite", controller.lastError)
+
     def test_controller_deletes_marker_from_selected_editable_track(self):
         from autolight.app_controller import AppController
 

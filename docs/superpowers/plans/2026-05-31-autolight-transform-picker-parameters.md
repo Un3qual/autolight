@@ -4,7 +4,7 @@
 
 **Goal:** Replace the hard-coded "Add Markers" action with a controller-backed transform catalog and parameter flow.
 
-**Architecture:** Expose registered `TransformSpec` metadata through a lightweight Qt list model. QML presents available transforms for the selected parent track and calls one generic controller slot with a transform id, version, and JSON parameter payload.
+**Architecture:** Expose registered `TransformSpec` metadata through a lightweight Qt list model. QML presents available transforms for the selected parent track and calls one generic controller slot with a transform id, version, and JSON parameter payload. Audio-backed transforms require a reachable source audio asset; the controller should derive `audio_path` from any ancestor branch and surface a clear `lastError` when no source audio is reachable.
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `TransformRegistry`, `TransformSpec`, and `track_dependency_hash`.
 
@@ -38,6 +38,7 @@ from PySide6.QtCore import QCoreApplication
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry, TransformResult, TransformSpec
+from autolight.project.models import Track, TrackType
 from autolight.timeline.transform_model import TransformSpecModel
 
 
@@ -304,6 +305,73 @@ Append this test to `TransformPickerTest`:
         track = next(track for track in controller._project.tracks if track.id == track_id)
         self.assertIn("audio_path", track.transform_params)
         self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_searches_all_parent_branches_for_audio(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        multi_parent = Track(
+            id="track_multi_parent",
+            type=TrackType.GENERATED,
+            name="Multi Parent",
+            input_track_ids=[no_audio.id, source_id],
+        )
+        controller._project.tracks.extend([no_audio, multi_parent])
+
+        track_id = controller.add_transform_track(multi_parent.id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_rejects_audio_transform_without_source_audio(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        controller._project.tracks.append(no_audio)
+
+        track_id = controller.add_transform_track(no_audio.id, "test.audio_path", "1", "{}")
+
+        self.assertEqual(track_id, "")
+        self.assertIn("source audio track", controller.lastError)
 ```
 
 - [ ] **Step 2: Run generic-transform test and verify failure**
@@ -376,6 +444,8 @@ Add slot:
             return ""
 ```
 
+Keep the `ValueError` path intentional: an `audio.v1` transform with no reachable source audio should fail at add time and set `lastError` instead of creating a child track that later fails at run time without `audio_path`.
+
 Add this helper near the other private controller helpers:
 
 ```python
@@ -390,17 +460,24 @@ Add this helper near the other private controller helpers:
 
     def _source_audio_path_for_track(self, track) -> str:
         seen_track_ids = set()
-        current = track
-        while current is not None and current.id not in seen_track_ids:
+        pending = [track]
+        while pending:
+            current = pending.pop(0)
+            if current is None or current.id in seen_track_ids:
+                continue
             seen_track_ids.add(current.id)
             asset_id = current.provenance.get("asset_id")
             asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
             if asset is not None:
                 return asset.path
-            next_track_id = current.input_track_ids[0] if current.input_track_ids else ""
-            if not next_track_id:
-                next_track_id = current.provenance.get("source_track_id", "")
-            current = find_track(self._project, next_track_id) if next_track_id else None
+            next_track_ids = list(current.input_track_ids)
+            source_track_id = current.provenance.get("source_track_id", "")
+            if source_track_id:
+                next_track_ids.append(source_track_id)
+            for next_track_id in next_track_ids:
+                candidate = find_track(self._project, next_track_id)
+                if candidate is not None:
+                    pending.append(candidate)
         return ""
 ```
 
