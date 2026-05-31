@@ -346,6 +346,64 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(self._track_id(controller, 2))
         self.assertFalse(controller.selectedTrackCanRerun)
 
+    def test_selected_track_has_running_job_follows_job_state(self):
+        from threading import Event
+
+        from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
+        from autolight.project.store import add_generated_track
+
+        started = Event()
+        release = Event()
+
+        def blocking_transform(context, params):
+            started.set()
+            while not release.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
+
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._registry.register(
+            TransformSpec(
+                id="test.blocking_selected_job",
+                version="1",
+                name="Blocking Selected Job Test",
+                input_schema="audio.v1",
+                output_schema="artifact.test.v1",
+                estimated_cost="light",
+                run=blocking_transform,
+            )
+        )
+        source_id = self._track_id(controller, 0)
+        generated = add_generated_track(
+            controller._project,
+            source_id,
+            "Blocking Track",
+            "test.blocking_selected_job",
+            {},
+            "1",
+            "artifact.test.v1",
+            "blocking_dependency",
+        )
+        controller.trackModel.set_project(controller._project)
+        controller.select_track(generated.id)
+
+        self.assertFalse(controller.selectedTrackHasRunningJob)
+        job_id = controller.run_track(generated.id)
+        try:
+            self.assertNotEqual(job_id, "")
+            self.assertTrue(started.wait(2))
+            self.assertTrue(controller.selectedTrackHasRunningJob)
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
+
+        self.assertFalse(controller.selectedTrackHasRunningJob)
+
     def test_add_fixed_interval_track_uses_parent_and_selects_generated_track(self):
         controller = self._controller()
 
@@ -492,6 +550,36 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotEqual(job_id, "")
         self.assertEqual(child.dependency_hash, expected_hash)
 
+    def test_run_track_recomputes_dependency_hash_from_parent_cache_refs(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        parent = self._track_by_id(controller, self._track_id(controller, 1))
+        parent.cache_refs = ["cache_new"]
+        child = add_generated_track(
+            controller._project,
+            parent.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+        expected_hash = track_dependency_hash(
+            parent.cache_refs,
+            child.transform_id,
+            child.transform_version,
+            child.transform_params,
+        )
+
+        job_id = controller.run_track(child.id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(child.dependency_hash, expected_hash)
+
     def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -619,7 +707,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("ProgressBar", qml)
         self.assertIn("appController.cancel_selected_job()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
-        self.assertIn("appController.selectedTrackCanRerun", qml)
+        self.assertIn("enabled: appController.selectedTrackHasRunningJob", qml)
+        self.assertIn("enabled: appController.selectedTrackCanRerun", qml)
 
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

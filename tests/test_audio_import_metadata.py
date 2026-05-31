@@ -4,12 +4,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
+import soundfile
 
 from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import AudioAsset
 from autolight.project.store import import_audio_asset, new_project
 from tests.helpers import write_wav
+
+
+class FakeAudioRead:
+    channels = 2
+    samplerate = 44100
+    duration = 0.1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
 
 
 class AudioImportMetadataTest(unittest.TestCase):
@@ -32,18 +44,32 @@ class AudioImportMetadataTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.m4a"
             audio_path.write_bytes(b"decoder is mocked")
-            decoded = np.zeros((2, 4410), dtype=np.float32)
 
             with (
-                patch("autolight.project.audio_probe.soundfile.info", side_effect=RuntimeError("unsupported")),
-                patch("librosa.load", return_value=(decoded, 44100)) as load_audio,
+                patch("autolight.project.audio_probe.soundfile.info", side_effect=soundfile.SoundFileError("unsupported")),
+                patch("audioread.audio_open", return_value=FakeAudioRead()) as open_audio,
+                patch("librosa.load", side_effect=AssertionError("metadata probe must not decode full audio")),
             ):
                 metadata = probe_audio_file(audio_path)
 
-        load_audio.assert_called_once_with(str(audio_path), sr=None, mono=False)
+        open_audio.assert_called_once_with(str(audio_path))
         self.assertTrue(math.isclose(metadata.duration, 0.1, rel_tol=0.01))
         self.assertEqual(metadata.sample_rate, 44100)
         self.assertEqual(metadata.channels, 2)
+
+    def test_probe_audio_file_preserves_non_format_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+
+            with (
+                patch("autolight.project.audio_probe.soundfile.info", side_effect=PermissionError("denied")),
+                patch("audioread.audio_open") as open_audio,
+                self.assertRaises(PermissionError),
+            ):
+                probe_audio_file(audio_path)
+
+        open_audio.assert_not_called()
 
     def test_import_audio_asset_populates_real_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +142,34 @@ class AudioImportMetadataTest(unittest.TestCase):
         self.assertEqual(project.audio_assets[0].path, str(audio_path))
         self.assertEqual(project.audio_assets[0].import_status, "offline")
         self.assertEqual(project.audio_assets[0].relink_hint, "song.wav")
+
+    def test_refresh_audio_asset_status_relinks_when_original_file_is_unreadable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_path = root / "song.wav"
+            replacement_path = root / "song-copy.wav"
+            write_wav(old_path)
+            payload = old_path.read_bytes()
+            project = new_project("Demo")
+            import_audio_asset(project, old_path)
+            replacement_path.write_bytes(payload)
+
+            from autolight.project import store as project_store
+
+            original_fingerprint_file = project_store.fingerprint_file
+
+            def maybe_unreadable(path):
+                if Path(path) == old_path:
+                    raise PermissionError("denied")
+                return original_fingerprint_file(path)
+
+            with patch.object(project_store, "fingerprint_file", side_effect=maybe_unreadable):
+                changed_ids = project_store.refresh_audio_asset_status(project, search_dirs=[root])
+
+        self.assertEqual(changed_ids, [project.audio_assets[0].id])
+        self.assertEqual(project.audio_assets[0].path, str(replacement_path))
+        self.assertEqual(project.audio_assets[0].import_status, "online")
+        self.assertEqual(project.audio_assets[0].relink_hint, "")
 
     def test_relink_candidate_hashes_only_name_prefix_matches(self):
         with tempfile.TemporaryDirectory() as tmp:

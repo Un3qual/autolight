@@ -39,6 +39,7 @@ class AppController(QObject):
     lastErrorChanged = Signal()
     selectedTrackIdChanged = Signal()
     selectedTrackMarkersChanged = Signal()
+    selectedTrackHasRunningJobChanged = Signal()
     isDirtyChanged = Signal()
 
     def __init__(self):
@@ -88,6 +89,10 @@ class AppController(QObject):
     def selectedTrackCanRerun(self) -> bool:
         track = find_track(self._project, self._selected_track_id)
         return track is not None and bool(track.transform_id)
+
+    @Property(bool, notify=selectedTrackHasRunningJobChanged)
+    def selectedTrackHasRunningJob(self) -> bool:
+        return bool(self._active_job_id_for_track(self._selected_track_id))
 
     @Property(bool, notify=isDirtyChanged)
     def isDirty(self) -> bool:
@@ -292,10 +297,7 @@ class AppController(QObject):
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
         try:
-            job_id = self._job_queue.submit(self._project, track_id)
-            self._set_last_error("")
-            self._set_dirty(True)
-            return job_id
+            return self._submit_track(track_id)
         except Exception as exc:
             self._set_last_error(str(exc))
             return ""
@@ -312,18 +314,7 @@ class AppController(QObject):
     @Slot(str, result=str)
     def rerun_track(self, track_id: str) -> str:
         try:
-            track = find_track(self._project, track_id)
-            if track is None:
-                raise ValueError(f"track not found: {track_id}")
-            if not track.transform_id:
-                raise ValueError("track has no transform")
-            if self._active_job_id_for_track(track_id):
-                raise ValueError(f"track already has a running job: {track_id}")
-            self._refresh_dependency_hash(track)
-            job_id = self._job_queue.submit(self._project, track_id)
-            self._set_last_error("")
-            self._set_dirty(True)
-            return job_id
+            return self._submit_track(track_id)
         except Exception as exc:
             self._set_last_error(str(exc))
             return ""
@@ -378,6 +369,7 @@ class AppController(QObject):
         self._selected_track_id = track_id
         self.selectedTrackIdChanged.emit()
         self.selectedTrackMarkersChanged.emit()
+        self.selectedTrackHasRunningJobChanged.emit()
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -389,6 +381,7 @@ class AppController(QObject):
         self._track_model.trackChangedRequested.emit(track_id)
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
+            self.selectedTrackHasRunningJobChanged.emit()
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         return [
@@ -416,6 +409,20 @@ class AppController(QObject):
             track.transform_version,
             track.transform_params,
         )
+
+    def _submit_track(self, track_id: str) -> str:
+        track = find_track(self._project, track_id)
+        if track is None:
+            raise ValueError(f"track not found: {track_id}")
+        if not track.transform_id:
+            raise ValueError("track has no transform")
+        if self._active_job_id_for_track(track_id):
+            raise ValueError(f"track already has a running job: {track_id}")
+        self._refresh_dependency_hash(track)
+        job_id = self._job_queue.submit(self._project, track_id)
+        self._set_last_error("")
+        self._set_dirty(True)
+        return job_id
 
     def _can_replace_project(self) -> bool:
         try:

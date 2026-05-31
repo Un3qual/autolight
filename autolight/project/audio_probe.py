@@ -22,8 +22,8 @@ def probe_audio_file(path: str | Path) -> AudioMetadata:
 
     try:
         info = soundfile.info(str(audio_path))
-    except Exception:
-        return _probe_with_librosa(audio_path)
+    except (soundfile.SoundFileError, RuntimeError):
+        return _probe_with_audioread(audio_path)
 
     duration = 0.0 if info.samplerate == 0 else info.frames / info.samplerate
     return AudioMetadata(
@@ -33,20 +33,12 @@ def probe_audio_file(path: str | Path) -> AudioMetadata:
     )
 
 
-def _probe_with_librosa(audio_path: Path) -> AudioMetadata:
-    import librosa
+def _probe_with_audioread(audio_path: Path) -> AudioMetadata:
+    import audioread
 
-    audio, sample_rate = librosa.load(str(audio_path), sr=None, mono=False)
-    shape = getattr(audio, "shape", ())
-    channels = 1
-    frames = len(audio)
-    if len(shape) >= 2:
-        channels = int(shape[0])
-        frames = int(shape[-1])
-
-    duration = 0.0 if sample_rate == 0 else frames / sample_rate
-    return AudioMetadata(
-        duration=float(duration),
-        sample_rate=int(sample_rate),
-        channels=channels,
-    )
+    with audioread.audio_open(str(audio_path)) as reader:
+        return AudioMetadata(
+            duration=float(reader.duration),
+            sample_rate=int(reader.samplerate),
+            channels=int(reader.channels),
+        )

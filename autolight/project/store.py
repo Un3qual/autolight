@@ -71,7 +71,7 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
     for asset in project.audio_assets:
         asset_path = Path(asset.path)
         if asset_path.is_file():
-            if fingerprint_file(asset_path) == asset.fingerprint:
+            if _fingerprint_matches(asset_path, asset.fingerprint):
                 if asset.import_status != "online" or asset.relink_hint:
                     asset.import_status = "online"
                     asset.relink_hint = ""
@@ -98,6 +98,13 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
     return changed_asset_ids
 
 
+def _fingerprint_matches(path: Path, fingerprint: str) -> bool:
+    try:
+        return fingerprint_file(path) == fingerprint
+    except OSError:
+        return False
+
+
 def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
     hinted_stem = Path(filename_hint).stem.casefold()
     if not hinted_stem:
@@ -110,7 +117,7 @@ def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_
                 continue
             if not candidate.stem.casefold().startswith(hinted_stem):
                 continue
-            if fingerprint_file(candidate) == fingerprint:
+            if _fingerprint_matches(candidate, fingerprint):
                 return candidate
     return None
 

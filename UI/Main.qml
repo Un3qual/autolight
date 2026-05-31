@@ -176,7 +176,7 @@ Window {
 
                 Button {
                     text: "Cancel"
-                    enabled: appController.selectedTrackId.length > 0
+                    enabled: appController.selectedTrackHasRunningJob
                     onClicked: appController.cancel_selected_job()
                 }
 
