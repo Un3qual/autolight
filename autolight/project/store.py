@@ -216,6 +216,8 @@ def _clear_offline_audio_error(track: Track) -> bool:
     if not track.error.startswith("audio asset offline:"):
         return False
     track.error = ""
+    if track.result_state == ResultState.STALE:
+        track.result_state = ResultState.COMPLETE
     return True
 
 

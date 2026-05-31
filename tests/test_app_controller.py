@@ -266,6 +266,32 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(reopened.trackModel.data(source_index, result_role), "stale")
         self.assertIn("audio asset offline", reopened.trackModel.data(source_index, error_role))
 
+    def test_open_project_restores_source_track_when_missing_audio_returns(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            audio_payload = audio_path.read_bytes()
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            offline = self._controller()
+            self.assertTrue(offline.open_project(str(project_path)))
+            self.assertTrue(offline.save_project(str(project_path)))
+            audio_path.write_bytes(audio_payload)
+
+            restored = self._controller()
+            self.assertTrue(restored.open_project(str(project_path)))
+
+        restored_source = self._track_by_id(restored, source_id)
+        self.assertEqual(restored._project.audio_assets[0].import_status, "online")
+        self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_source.error, "")
+
     def test_open_project_searches_project_folder_for_relinked_audio(self):
         controller = self._controller()
 
