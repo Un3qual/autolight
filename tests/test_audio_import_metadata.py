@@ -1,20 +1,13 @@
 import math
 import tempfile
 import unittest
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
 from autolight.project.audio_probe import probe_audio_file
+from autolight.project.models import AudioAsset
 from autolight.project.store import import_audio_asset, new_project
-
-
-def write_wav(path: Path, *, sample_rate: int = 8000, channels: int = 1, frames: int = 8000) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(channels)
-        handle.setsampwidth(2)
-        handle.setframerate(sample_rate)
-        handle.writeframes(b"\0\0" * frames * channels)
+from tests.helpers import write_wav
 
 
 class AudioImportMetadataTest(unittest.TestCase):
@@ -30,9 +23,8 @@ class AudioImportMetadataTest(unittest.TestCase):
         self.assertEqual(metadata.channels, 2)
 
     def test_probe_audio_file_rejects_directory(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(IsADirectoryError, "not a file"):
-                probe_audio_file(Path(tmp))
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(IsADirectoryError, "not a file"):
+            probe_audio_file(Path(tmp))
 
     def test_import_audio_asset_populates_real_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,6 +112,33 @@ class AudioImportMetadataTest(unittest.TestCase):
 
         self.assertIn(replacement_path, checked_paths)
         self.assertNotIn(unrelated_path, checked_paths)
+
+    def test_refresh_audio_asset_status_skips_relink_search_without_filename_hint(self):
+        from autolight.project.store import refresh_audio_asset_status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_wav(root / "candidate.wav")
+            project = new_project("Demo")
+            project.audio_assets.append(
+                AudioAsset(
+                    id="asset_missing_hint",
+                    path="",
+                    duration=0.0,
+                    sample_rate=0,
+                    channels=0,
+                    fingerprint="missing",
+                    import_status="online",
+                )
+            )
+
+            with patch("autolight.project.store.fingerprint_file", return_value="other") as fingerprint_file:
+                changed_ids = refresh_audio_asset_status(project, search_dirs=[root])
+
+        self.assertEqual(changed_ids, ["asset_missing_hint"])
+        self.assertEqual(project.audio_assets[0].import_status, "offline")
+        self.assertEqual(project.audio_assets[0].relink_hint, "")
+        fingerprint_file.assert_not_called()
 
 
 if __name__ == "__main__":

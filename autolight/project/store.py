@@ -96,6 +96,8 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
 
 def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
     hinted_stem = Path(filename_hint).stem.casefold()
+    if not hinted_stem:
+        return None
     for root in search_roots:
         if not root.is_dir():
             continue
@@ -200,6 +202,7 @@ def add_editable_marker(project: ProjectDocument, track_id: str, timestamp: floa
         metadata={"created_by": "user"},
     )
     project.markers.append(marker)
+    mark_dependents_stale(project, track_id)
     return marker
 
 
@@ -213,7 +216,10 @@ def delete_editable_marker(project: ProjectDocument, track_id: str, marker_id: s
     project.markers[:] = [
         marker for marker in project.markers if not (marker.track_id == track_id and marker.id == marker_id)
     ]
-    return len(project.markers) != before
+    deleted = len(project.markers) != before
+    if deleted:
+        mark_dependents_stale(project, track_id)
+    return deleted
 
 
 def find_track(project: ProjectDocument, track_id: str) -> Track | None:

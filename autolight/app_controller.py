@@ -20,6 +20,7 @@ from autolight.project.store import (
     find_track,
     import_audio_asset,
     new_project,
+    refresh_audio_asset_status,
 )
 from autolight.timeline.model import TimelineTrackModel
 
@@ -56,7 +57,7 @@ class AppController(QObject):
         self._job_queue = LocalJobQueue(
             self._registry,
             artifact_root=Path(self._runtime_temp_dir.name) / "artifacts",
-            on_track_changed=self._track_model.trackChangedRequested.emit,
+            on_track_changed=self._handle_track_changed,
         )
 
     @Property(QObject, constant=True)
@@ -83,6 +84,11 @@ class AppController(QObject):
     def selectedTrackMarkers(self) -> list[dict]:
         return self._marker_summary_for_track(self._selected_track_id)
 
+    @Property(bool, notify=selectedTrackIdChanged)
+    def selectedTrackCanRerun(self) -> bool:
+        track = find_track(self._project, self._selected_track_id)
+        return track is not None and bool(track.transform_id)
+
     @Property(bool, notify=isDirtyChanged)
     def isDirty(self) -> bool:
         return self._is_dirty
@@ -104,12 +110,13 @@ class AppController(QObject):
             project_path = self._path_from_qml(path)
             project = ProjectStore.load(project_path)
             changed_running_state = self._mark_running_state_stale(project)
+            changed_audio_asset_ids = refresh_audio_asset_status(project)
             self._set_project(project)
             self._set_project_path(str(project_path))
             self._set_selected_track_id("")
             self._set_last_error("")
             invalid_cache_refs = self.refresh_cache_status()
-            self._set_dirty(bool(invalid_cache_refs or changed_running_state))
+            self._set_dirty(bool(invalid_cache_refs or changed_running_state or changed_audio_asset_ids))
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -259,7 +266,7 @@ class AppController(QObject):
     def add_marker_to_selected_track(self, timestamp: float, label: str) -> str:
         try:
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
-            self._track_model.refresh_track(self._selected_track_id)
+            self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             self._set_dirty(True)
@@ -272,7 +279,7 @@ class AppController(QObject):
     def delete_marker_from_selected_track(self, marker_id: str) -> bool:
         try:
             deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
-            self._track_model.refresh_track(self._selected_track_id)
+            self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             if deleted:
@@ -304,14 +311,22 @@ class AppController(QObject):
 
     @Slot(str, result=str)
     def rerun_track(self, track_id: str) -> str:
-        track = find_track(self._project, track_id)
-        if track is None:
-            self._set_last_error(f"track not found: {track_id}")
+        try:
+            track = find_track(self._project, track_id)
+            if track is None:
+                raise ValueError(f"track not found: {track_id}")
+            if not track.transform_id:
+                raise ValueError("track has no transform")
+            if self._active_job_id_for_track(track_id):
+                raise ValueError(f"track already has a running job: {track_id}")
+            self._refresh_dependency_hash(track)
+            job_id = self._job_queue.submit(self._project, track_id)
+            self._set_last_error("")
+            self._set_dirty(True)
+            return job_id
+        except Exception as exc:
+            self._set_last_error(str(exc))
             return ""
-        if track.result_state == ResultState.STALE:
-            track.result_state = ResultState.PENDING
-        track.error = ""
-        return self.run_track(track_id)
 
     @Slot(str)
     def cancel_job(self, job_id: str) -> None:
@@ -370,6 +385,11 @@ class AppController(QObject):
         self._is_dirty = dirty
         self.isDirtyChanged.emit()
 
+    def _handle_track_changed(self, track_id: str) -> None:
+        self._track_model.trackChangedRequested.emit(track_id)
+        if track_id == self._selected_track_id:
+            self.selectedTrackMarkersChanged.emit()
+
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         return [
             {
@@ -383,6 +403,19 @@ class AppController(QObject):
                 key=lambda marker: (marker.timestamp, marker.id),
             )
         ]
+
+    def _refresh_dependency_hash(self, track) -> None:
+        if not track.transform_id or not track.input_track_ids:
+            return
+        parent = find_track(self._project, track.input_track_ids[0])
+        if parent is None:
+            raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+        track.dependency_hash = track_dependency_hash(
+            parent.cache_refs,
+            track.transform_id,
+            track.transform_version,
+            track.transform_params,
+        )
 
     def _can_replace_project(self) -> bool:
         try:

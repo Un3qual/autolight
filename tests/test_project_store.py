@@ -1,7 +1,6 @@
 import json
 import tempfile
 import unittest
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,14 +23,7 @@ from autolight.project.store import (
     new_project,
     validate_graph,
 )
-
-
-def write_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
+from tests.helpers import write_wav
 
 
 class ProjectStoreTest(unittest.TestCase):

@@ -1,6 +1,5 @@
 import unittest
 import tempfile
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,15 +7,9 @@ from PySide6.QtCore import QCoreApplication
 
 import main as app_entry
 from autolight.app_controller import AppController
+from autolight.cache.keys import track_dependency_hash
 from autolight.project.models import CacheEntry, JobRun, ResultState
-
-
-def write_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
+from tests.helpers import write_wav
 
 
 class FakeContext:
@@ -224,6 +217,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("cache artifact", reopened_generated.error)
         self.assertTrue(reopened.isDirty)
 
+    def test_open_project_refreshes_missing_audio_asset_status(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        asset = reopened._project.audio_assets[0]
+        self.assertEqual(asset.import_status, "offline")
+        self.assertEqual(asset.relink_hint, "song.wav")
+        self.assertTrue(reopened.isDirty)
+
     def test_refresh_cache_status_marks_invalid_cached_track_stale(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -297,6 +310,18 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(second_track_id)
 
         self.assertEqual(controller.selectedTrackId, second_track_id)
+
+    def test_selected_track_can_rerun_only_for_transform_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+
+        self.assertFalse(controller.selectedTrackCanRerun)
+
+        controller.select_track(self._track_id(controller, 1))
+        self.assertTrue(controller.selectedTrackCanRerun)
+
+        controller.select_track(self._track_id(controller, 2))
+        self.assertFalse(controller.selectedTrackCanRerun)
 
     def test_add_fixed_interval_track_uses_parent_and_selects_generated_track(self):
         controller = self._controller()
@@ -388,7 +413,7 @@ class AppControllerTest(unittest.TestCase):
         controller = self._controller()
         controller.load_demo_project()
         generated_id = self._track_id(controller, 1)
-        generated = next(track for track in controller._project.tracks if track.id == generated_id)
+        generated = self._track_by_id(controller, generated_id)
         generated.result_state = ResultState.STALE
         generated.error = "cache artifact missing or invalid: cache_1"
 
@@ -397,6 +422,66 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertNotEqual(job_id, "")
         self.assertEqual(generated.result_state.value, "complete")
+
+    def test_rerun_track_does_not_clear_stale_state_when_submit_fails(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        editable = self._track_by_id(controller, editable_id)
+        editable.result_state = ResultState.STALE
+        editable.error = "source track changed"
+
+        job_id = controller.rerun_track(editable_id)
+
+        self.assertEqual(job_id, "")
+        self.assertEqual(editable.result_state, ResultState.STALE)
+        self.assertEqual(editable.error, "source track changed")
+        self.assertIn("no transform", controller.lastError)
+
+    def test_rerun_track_recomputes_dependency_hash_from_parent_cache_refs(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        parent = self._track_by_id(controller, self._track_id(controller, 1))
+        parent.cache_refs = ["cache_new"]
+        child = add_generated_track(
+            controller._project,
+            parent.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+        child.result_state = ResultState.STALE
+        expected_hash = track_dependency_hash(
+            parent.cache_refs,
+            child.transform_id,
+            child.transform_version,
+            child.transform_params,
+        )
+
+        job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(child.dependency_hash, expected_hash)
+
+    def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated_id = self._track_id(controller, 1)
+        controller.select_track(generated_id)
+        marker_changes = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+
+        job_id = controller.rerun_track(generated_id)
+        controller._job_queue.wait(job_id, timeout=2)
+        QCoreApplication.processEvents()
+
+        self.assertGreaterEqual(len(marker_changes), 1)
 
     def test_create_editable_track_from_missing_track_records_not_found_error(self):
         controller = self._controller()
@@ -511,6 +596,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("ProgressBar", qml)
         self.assertIn("appController.cancel_selected_job()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
+        self.assertIn("appController.selectedTrackCanRerun", qml)
 
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

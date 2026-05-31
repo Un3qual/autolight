@@ -1,25 +1,18 @@
 import math
 import tempfile
 import unittest
-import wave
 from pathlib import Path
 
-from autolight.project.models import Marker
+from autolight.project.models import Marker, ResultState
 from autolight.project.store import (
     add_editable_marker,
+    add_generated_track,
     create_editable_track_from_markers,
     delete_editable_marker,
     import_audio_asset,
     new_project,
 )
-
-
-def write_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
+from tests.helpers import write_wav
 
 
 class EditableMarkerInspectorTest(unittest.TestCase):
@@ -41,6 +34,45 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         self.assertTrue(deleted)
         self.assertNotIn(marker.id, [item.id for item in project.markers if item.track_id == editable.id])
+
+    def test_add_editable_marker_marks_downstream_generated_tracks_stale(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+
+        add_editable_marker(project, editable.id, 1.25, "Cue")
+
+        self.assertEqual(downstream.result_state, ResultState.STALE)
+
+    def test_delete_editable_marker_marks_downstream_generated_tracks_stale(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.25, "Cue")
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+
+        self.assertTrue(delete_editable_marker(project, editable.id, marker.id))
+
+        self.assertEqual(downstream.result_state, ResultState.STALE)
 
     def test_add_editable_marker_rejects_non_finite_timestamp(self):
         project = new_project("Demo")
@@ -115,16 +147,23 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
         self.assertEqual(qml.count("ListView {"), 1)
 
-    def _generated_track(self, project):
+    @staticmethod
+    def _generated_track(project):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
             write_wav(audio_path)
             source = import_audio_asset(project, audio_path)
-        from autolight.project.store import add_generated_track
 
         return add_generated_track(project, source.id, "Generated", "markers.fixed_interval", {}, "1", "markers.v1", "hash")
 
-    def _track_id_for_type(self, controller, track_type: str) -> str:
+    @staticmethod
+    def _editable_track(project):
+        generated = EditableMarkerInspectorTest._generated_track(project)
+        project.markers.append(Marker(id="marker_source", track_id=generated.id, timestamp=0.5))
+        return create_editable_track_from_markers(project, generated.id, "Editable", ["marker_source"])
+
+    @staticmethod
+    def _track_id_for_type(controller, track_type: str) -> str:
         model = controller.trackModel
         type_role = model.role_for_name("trackType")
         id_role = model.role_for_name("trackId")

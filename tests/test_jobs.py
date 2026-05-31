@@ -1,6 +1,5 @@
 import tempfile
 import unittest
-import wave
 from pathlib import Path
 from threading import Event, Lock, Thread
 from unittest.mock import patch
@@ -20,14 +19,7 @@ from autolight.project.store import (
     import_audio_asset,
     new_project,
 )
-
-
-def write_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
+from tests.helpers import write_wav
 
 
 class LocalJobQueueTest(unittest.TestCase):
@@ -553,6 +545,29 @@ class LocalJobQueueTest(unittest.TestCase):
             queue.wait(job_id, timeout=2)
 
         self.assertGreaterEqual(changed_track_ids.count(track_id), 3)
+
+    def test_progress_callback_coalesces_small_delta_notifications(self):
+        def reports_many_small_progress_updates(context, params):
+            for step in range(1, 100):
+                context.progress(step / 1000)
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.progress_many_small_deltas", reports_many_small_progress_updates))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.progress_many_small_deltas", {})
+            changed_track_ids = []
+            queue = LocalJobQueue(
+                registry,
+                artifact_root=Path(tmp) / "artifacts",
+                on_track_changed=changed_track_ids.append,
+            )
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+        self.assertLessEqual(changed_track_ids.count(track_id), 10)
 
     def test_malformed_marker_output_leaves_no_partial_markers(self):
         def malformed_markers(context, params):

@@ -152,11 +152,18 @@ class LocalJobQueue:
     ) -> None:
         artifact_dir = self._work_root / run.id
         additional_changed_track_ids: list[str] = []
+        last_notified_progress = 0.0
 
         def progress(value: float) -> None:
+            nonlocal last_notified_progress
+            should_notify = False
             with self._lock:
                 run.progress = max(0.0, min(1.0, value))
-            self._notify_track_changed(snapshot.track_id)
+                if run.progress >= 1.0 or run.progress - last_notified_progress >= 0.05:
+                    last_notified_progress = run.progress
+                    should_notify = True
+            if should_notify:
+                self._notify_track_changed(snapshot.track_id)
 
         try:
             transform = self.registry.get(snapshot.transform_id, version=snapshot.transform_version)

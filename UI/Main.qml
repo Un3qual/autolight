@@ -182,7 +182,7 @@ Window {
 
                 Button {
                     text: "Rerun"
-                    enabled: appController.selectedTrackId.length > 0
+                    enabled: appController.selectedTrackCanRerun
                     onClicked: appController.rerun_track(appController.selectedTrackId)
                 }
 
