@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import AudioAsset
 from autolight.project.store import import_audio_asset, new_project
@@ -25,6 +27,23 @@ class AudioImportMetadataTest(unittest.TestCase):
     def test_probe_audio_file_rejects_directory(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(IsADirectoryError, "not a file"):
             probe_audio_file(Path(tmp))
+
+    def test_probe_audio_file_falls_back_when_soundfile_rejects_container(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.m4a"
+            audio_path.write_bytes(b"decoder is mocked")
+            decoded = np.zeros((2, 4410), dtype=np.float32)
+
+            with (
+                patch("autolight.project.audio_probe.soundfile.info", side_effect=RuntimeError("unsupported")),
+                patch("librosa.load", return_value=(decoded, 44100)) as load_audio,
+            ):
+                metadata = probe_audio_file(audio_path)
+
+        load_audio.assert_called_once_with(str(audio_path), sr=None, mono=False)
+        self.assertTrue(math.isclose(metadata.duration, 0.1, rel_tol=0.01))
+        self.assertEqual(metadata.sample_rate, 44100)
+        self.assertEqual(metadata.channels, 2)
 
     def test_import_audio_asset_populates_real_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,6 +99,23 @@ class AudioImportMetadataTest(unittest.TestCase):
         self.assertEqual(project.audio_assets[0].path, str(new_path))
         self.assertEqual(project.audio_assets[0].import_status, "online")
         self.assertEqual(project.audio_assets[0].relink_hint, "")
+
+    def test_refresh_audio_asset_status_marks_existing_fingerprint_mismatch_offline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=8000)
+            project = new_project("Demo")
+            import_audio_asset(project, audio_path)
+            write_wav(audio_path, frames=4000)
+
+            from autolight.project.store import refresh_audio_asset_status
+
+            changed_ids = refresh_audio_asset_status(project)
+
+        self.assertEqual(changed_ids, [project.audio_assets[0].id])
+        self.assertEqual(project.audio_assets[0].path, str(audio_path))
+        self.assertEqual(project.audio_assets[0].import_status, "offline")
+        self.assertEqual(project.audio_assets[0].relink_hint, "song.wav")
 
     def test_relink_candidate_hashes_only_name_prefix_matches(self):
         with tempfile.TemporaryDirectory() as tmp:

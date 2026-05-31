@@ -71,19 +71,23 @@ def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str |
     for asset in project.audio_assets:
         asset_path = Path(asset.path)
         if asset_path.is_file():
-            if asset.import_status != "online" or asset.relink_hint:
+            if fingerprint_file(asset_path) == asset.fingerprint:
+                if asset.import_status != "online" or asset.relink_hint:
+                    asset.import_status = "online"
+                    asset.relink_hint = ""
+                    changed_asset_ids.append(asset.id)
+                continue
+            hint = asset_path.name
+        else:
+            hint = asset_path.name
+
+        replacement = _find_relink_candidate(asset.fingerprint, search_roots, hint)
+        if replacement is not None:
+            if asset.path != str(replacement) or asset.import_status != "online" or asset.relink_hint:
+                asset.path = str(replacement)
                 asset.import_status = "online"
                 asset.relink_hint = ""
                 changed_asset_ids.append(asset.id)
-            continue
-
-        hint = asset_path.name
-        replacement = _find_relink_candidate(asset.fingerprint, search_roots, hint)
-        if replacement is not None:
-            asset.path = str(replacement)
-            asset.import_status = "online"
-            asset.relink_hint = ""
-            changed_asset_ids.append(asset.id)
             continue
 
         if asset.import_status != "offline" or asset.relink_hint != hint:

@@ -110,7 +110,7 @@ class AppController(QObject):
             project_path = self._path_from_qml(path)
             project = ProjectStore.load(project_path)
             changed_running_state = self._mark_running_state_stale(project)
-            changed_audio_asset_ids = refresh_audio_asset_status(project)
+            changed_audio_asset_ids = refresh_audio_asset_status(project, search_dirs=[project_path.parent])
             self._set_project(project)
             self._set_project_path(str(project_path))
             self._set_selected_track_id("")

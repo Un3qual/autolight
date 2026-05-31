@@ -237,6 +237,29 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(asset.relink_hint, "song.wav")
         self.assertTrue(reopened.isDirty)
 
+    def test_open_project_searches_project_folder_for_relinked_audio(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            relinked_path = root / "song-copy.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            relinked_path.write_bytes(audio_path.read_bytes())
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        asset = reopened._project.audio_assets[0]
+        self.assertEqual(asset.path, str(relinked_path))
+        self.assertEqual(asset.import_status, "online")
+        self.assertEqual(asset.relink_hint, "")
+        self.assertTrue(reopened.isDirty)
+
     def test_refresh_cache_status_marks_invalid_cached_track_stale(self):
         controller = self._controller()
         controller.load_demo_project()
