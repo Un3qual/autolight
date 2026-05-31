@@ -165,6 +165,28 @@ class AudioImportMetadataTest(unittest.TestCase):
         self.assertEqual(changed_ids, [asset.id for asset in project.audio_assets])
         self.assertEqual([asset.path for asset in project.audio_assets], [str(first_new_path), str(second_new_path)])
 
+    def test_refresh_audio_asset_status_can_relink_nested_candidates_without_rglob(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_path = root / "song.wav"
+            nested = root / "media" / "library" / "archive"
+            replacement_path = nested / "song-restored.wav"
+            write_wav(old_path)
+            payload = old_path.read_bytes()
+            project = new_project("Demo")
+            import_audio_asset(project, old_path)
+            old_path.unlink()
+            nested.mkdir(parents=True)
+            replacement_path.write_bytes(payload)
+
+            from autolight.project.store import refresh_audio_asset_status
+
+            with patch.object(Path, "rglob", side_effect=AssertionError("unbounded recursive search")):
+                changed_ids = refresh_audio_asset_status(project, search_dirs=[root])
+
+        self.assertEqual(changed_ids, [project.audio_assets[0].id])
+        self.assertEqual(project.audio_assets[0].path, str(replacement_path))
+
     def test_refresh_audio_asset_status_marks_existing_fingerprint_mismatch_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"

@@ -26,8 +26,8 @@ from autolight.project.models import (
     TrackType,
 )
 
-MAX_RELINK_SEARCH_DEPTH = 2
 MAX_RELINK_CANDIDATES = 2048
+MAX_RELINK_DIRECTORIES = 512
 
 
 def new_id(prefix: str) -> str:
@@ -180,9 +180,11 @@ class _RelinkCandidateIndex:
 
 def _iter_relink_candidates(root: Path):
     candidate_count = 0
-    stack: list[tuple[Path, int]] = [(root, 0)]
-    while stack:
-        current, depth = stack.pop()
+    searched_directories = 0
+    stack: list[Path] = [root]
+    while stack and searched_directories < MAX_RELINK_DIRECTORIES:
+        current = stack.pop()
+        searched_directories += 1
         try:
             children = current.iterdir()
         except OSError:
@@ -193,8 +195,8 @@ def _iter_relink_candidates(root: Path):
                 candidate_count += 1
                 if candidate_count >= MAX_RELINK_CANDIDATES:
                     return
-            elif depth < MAX_RELINK_SEARCH_DEPTH and child.is_dir() and not child.is_symlink():
-                stack.append((child, depth + 1))
+            elif child.is_dir() and not child.is_symlink():
+                stack.append(child)
 
 
 def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:

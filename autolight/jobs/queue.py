@@ -4,7 +4,7 @@ import copy
 import shutil
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Callable
@@ -74,7 +74,7 @@ class LocalJobQueue:
                 transform_id=snapshot.transform_id,
                 parameters_hash=snapshot.dependency_hash,
                 state=ResultState.RUNNING,
-                started_at=datetime.now(timezone.utc).isoformat(),
+                started_at=datetime.now(UTC).isoformat(),
             )
             project.job_runs.append(run)
             track.result_state = ResultState.RUNNING
@@ -307,7 +307,7 @@ class LocalJobQueue:
         additional_changed_track_ids: list[str],
     ) -> None:
         with self._lock:
-            run.completed_at = datetime.now(timezone.utc).isoformat()
+            run.completed_at = datetime.now(UTC).isoformat()
             if self._active_job_by_track.get(track.id) == run.id:
                 self._active_job_by_track.pop(track.id, None)
         shutil.rmtree(artifact_dir, ignore_errors=True)
