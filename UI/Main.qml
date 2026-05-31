@@ -11,6 +11,7 @@ Window {
     color: "#181a1f"
     readonly property real timelinePixelsPerSecond: 96
     readonly property real timelineLeftPadding: 24
+    readonly property real timelineRulerHeight: 32
 
     ColumnLayout {
         anchors.fill: parent
@@ -41,8 +42,11 @@ Window {
         }
 
         RowLayout {
+            id: timelineRuler
             Layout.fillWidth: true
-            Layout.preferredHeight: 42
+            Layout.minimumHeight: root.timelineRulerHeight
+            Layout.preferredHeight: root.timelineRulerHeight
+            Layout.maximumHeight: root.timelineRulerHeight
             spacing: 0
 
             Rectangle {

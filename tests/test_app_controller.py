@@ -160,6 +160,15 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)
 
+    def test_qml_timeline_ruler_has_fixed_height(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("readonly property real timelineRulerHeight: 32", qml)
+        self.assertIn("id: timelineRuler", qml)
+        self.assertIn("Layout.minimumHeight: root.timelineRulerHeight", qml)
+        self.assertIn("Layout.preferredHeight: root.timelineRulerHeight", qml)
+        self.assertIn("Layout.maximumHeight: root.timelineRulerHeight", qml)
+
     def _track_role_values(self, controller: AppController, row: int):
         model = controller.trackModel
         index = model.index(row, 0)
