@@ -398,7 +398,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run the full unit suite**
+- [x] **Step 1: Run the full unit suite**
 
 Run:
 
@@ -408,7 +408,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run the headless smoke check**
+- [x] **Step 2: Run the headless smoke check**
 
 Run:
 
@@ -418,7 +418,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: command exits 0.
 
-- [ ] **Step 3: Check whitespace and status**
+- [x] **Step 3: Check whitespace and status**
 
 Run:
 
