@@ -404,7 +404,7 @@ Expected: tests pass and smoke exits 0.
 Run:
 
 ```bash
-git add autolight/timeline/model.py UI/Main.qml tests/test_waveform_summary.py
+git add autolight/app_controller.py autolight/timeline/model.py UI/Main.qml tests/test_waveform_summary.py
 git commit -m "Expose waveform summaries in timeline"
 ```
 

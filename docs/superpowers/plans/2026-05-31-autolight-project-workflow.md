@@ -97,6 +97,12 @@ Add these test methods to `AppControllerTest`:
         self.assertTrue(controller.projectPath.endswith("show.autolight"))
         self.assertEqual(controller.trackModel.rowCount(), 1)
         self.assertEqual(controller.lastError, "")
+
+    def test_save_project_requires_path_for_unsaved_project(self):
+        controller = self._controller()
+
+        self.assertFalse(controller.save_project(""))
+        self.assertIn("project path is required", controller.lastError)
 ```
 
 - [ ] **Step 2: Run the controller tests and verify they fail**
@@ -183,9 +189,9 @@ Add these slots above `load_demo_project`:
     @Slot(str, result=bool)
     def save_project(self, path: str = "") -> bool:
         try:
-            project_path = self._path_from_qml(path) if path else Path(self._project_path)
-            if not str(project_path):
+            if not path and not self._project_path:
                 raise ValueError("project path is required")
+            project_path = self._path_from_qml(path) if path else Path(self._project_path)
             if project_path.suffix != ".autolight":
                 project_path = project_path.with_suffix(".autolight")
             ProjectStore.save(self._project, project_path)

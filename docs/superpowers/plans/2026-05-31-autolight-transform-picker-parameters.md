@@ -14,6 +14,7 @@
 
 ## File Structure
 
+- Modify `autolight/analysis/registry.py`: expose registered transform specs without relying on single-version lookup.
 - Create `autolight/timeline/transform_model.py`: QML list model for transform specs.
 - Modify `autolight/app_controller.py`: expose `transformModel` and `add_transform_track`.
 - Modify `UI/Main.qml`: add transform combo box and parameter fields.
@@ -22,6 +23,7 @@
 ## Task 1: Transform Spec Model
 
 **Files:**
+- Modify: `autolight/analysis/registry.py`
 - Create: `autolight/timeline/transform_model.py`
 - Create: `tests/test_transform_picker.py`
 
@@ -35,7 +37,7 @@ import unittest
 from PySide6.QtCore import QCoreApplication
 
 from autolight.analysis.builtin import register_builtin_transforms
-from autolight.analysis.registry import TransformRegistry
+from autolight.analysis.registry import TransformRegistry, TransformResult, TransformSpec
 from autolight.timeline.transform_model import TransformSpecModel
 
 
@@ -57,6 +59,42 @@ class TransformPickerTest(unittest.TestCase):
         self.assertIn("markers.fixed_interval", ids)
         self.assertIn("stems.vocals_stand_in", ids)
 
+    def test_transform_model_exposes_multiple_versions_for_same_transform(self):
+        def noop(context, params):
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(
+            TransformSpec(
+                id="test.versioned",
+                version="1",
+                name="Versioned 1",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        registry.register(
+            TransformSpec(
+                id="test.versioned",
+                version="2",
+                name="Versioned 2",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+
+        model = TransformSpecModel(registry)
+        versions = [
+            model.data(model.index(row, 0), model.role_for_name("version"))
+            for row in range(model.rowCount())
+        ]
+
+        self.assertEqual(versions, ["1", "2"])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -72,7 +110,18 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.timeline.transform_model'`.
 
-- [ ] **Step 3: Implement `TransformSpecModel`**
+- [ ] **Step 3: Implement registry spec listing and `TransformSpecModel`**
+
+Add this method to `TransformRegistry` in `autolight/analysis/registry.py`:
+
+```python
+    def specs(self) -> list[TransformSpec]:
+        return [
+            self._transforms[transform_id][version]
+            for transform_id in sorted(self._transforms)
+            for version in sorted(self._transforms[transform_id])
+        ]
+```
 
 Create `autolight/timeline/transform_model.py`:
 
@@ -95,9 +144,7 @@ class TransformSpecModel(QAbstractListModel):
 
     def __init__(self, registry: TransformRegistry, parent: QObject | None = None):
         super().__init__(parent)
-        self._specs: list[TransformSpec] = [
-            registry.get(transform_id) for transform_id in registry.ids()
-        ]
+        self._specs: list[TransformSpec] = registry.specs()
         self._role_by_name = {
             value.decode("utf-8"): role for role, value in self.ROLE_NAMES.items()
         }
@@ -149,7 +196,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add autolight/timeline/transform_model.py tests/test_transform_picker.py
+git add autolight/analysis/registry.py autolight/timeline/transform_model.py tests/test_transform_picker.py
 git commit -m "Add transform spec model"
 ```
 
@@ -189,6 +236,37 @@ Append this test to `TransformPickerTest`:
         self.assertEqual(track.transform_id, "markers.fixed_interval")
         self.assertEqual(track.transform_version, "1")
         self.assertEqual(track.transform_params, {"duration": 3.0, "interval": 1.0})
+
+    def test_controller_add_transform_track_defaults_audio_path_for_audio_transform(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+
+        track_id = controller.add_transform_track(source_id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
 ```
 
 - [ ] **Step 2: Run generic-transform test and verify failure**
@@ -240,6 +318,7 @@ Add slot:
             if parent is None:
                 raise ValueError(f"parent track not found: {parent_track_id}")
             spec = self._registry.get(transform_id, version=version)
+            params = self._params_with_parent_defaults(parent, spec, params)
             dependency_hash = track_dependency_hash(parent.cache_refs, spec.id, spec.version, params)
             track = add_generated_track(
                 self._project,
@@ -258,6 +337,19 @@ Add slot:
         except Exception as exc:
             self._set_last_error(str(exc))
             return ""
+```
+
+Add this helper near the other private controller helpers:
+
+```python
+    def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
+        enriched = dict(params)
+        if spec.input_schema == "audio.v1" and "audio_path" not in enriched:
+            asset_id = parent.provenance.get("asset_id")
+            asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
+            if asset is not None:
+                enriched["audio_path"] = asset.path
+        return enriched
 ```
 
 - [ ] **Step 4: Run transform picker tests**

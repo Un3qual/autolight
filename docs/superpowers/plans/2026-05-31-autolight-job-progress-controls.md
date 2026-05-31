@@ -8,14 +8,18 @@
 
 **Tech Stack:** Python 3.14, PySide6/QML, `unittest`, existing `LocalJobQueue`, `TimelineTrackModel`, and `AppController`.
 
+**Prerequisite:** Complete `2026-05-31-autolight-project-workflow.md` first. This plan reuses `select_track`, `_selected_track_id`, `_set_last_error`, and selected-row QML state from that workflow.
+
 ---
 
 ## File Structure
 
 - Modify `autolight/timeline/model.py`: add `jobState`, `jobProgress`, and `activeJobId` roles.
+- Modify `autolight/jobs/queue.py`: emit track-change notifications when progress changes.
 - Modify `autolight/app_controller.py`: track selected job, expose `cancel_selected_job`, and add `rerun_track`.
 - Modify `UI/Main.qml`: show progress and Cancel/Rerun buttons for selected/running tracks.
 - Modify `tests/test_timeline_model.py`: cover job roles.
+- Modify `tests/test_jobs.py`: cover progress notifications.
 - Modify `tests/test_app_controller.py`: cover controller cancel/rerun and QML wiring.
 
 ## Task 1: Timeline Job Roles
@@ -23,6 +27,8 @@
 **Files:**
 - Modify: `autolight/timeline/model.py`
 - Modify: `tests/test_timeline_model.py`
+- Modify: `autolight/jobs/queue.py`
+- Modify: `tests/test_jobs.py`
 
 - [ ] **Step 1: Add failing timeline job role test**
 
@@ -57,6 +63,32 @@ Ensure these imports exist in `tests/test_timeline_model.py`:
 
 ```python
 from autolight.project.models import JobRun, ProjectDocument, ResultState, Track, TrackType
+```
+
+Add this test to `LocalJobQueueTest` in `tests/test_jobs.py`:
+
+```python
+    def test_progress_callback_notifies_track_change(self):
+        def reports_progress(context, params):
+            context.progress(0.5)
+            return TransformResult()
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.progress", reports_progress))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(Path(tmp), "test.progress", {})
+            changed_track_ids = []
+            queue = LocalJobQueue(
+                registry,
+                artifact_root=Path(tmp) / "artifacts",
+                on_track_changed=changed_track_ids.append,
+            )
+            job_id = queue.submit(project, track_id)
+
+            queue.wait(job_id, timeout=2)
+
+        self.assertGreaterEqual(changed_track_ids.count(track_id), 3)
 ```
 
 - [ ] **Step 2: Run timeline model tests and verify failure**
@@ -101,12 +133,21 @@ Add this helper below `_markers_for_track`:
         return jobs[-1] if jobs else None
 ```
 
+Update the `progress` callback inside `LocalJobQueue._run` so QML sees updates while a job is still running:
+
+```python
+        def progress(value: float) -> None:
+            with self._lock:
+                run.progress = max(0.0, min(1.0, value))
+            self._notify_track_changed(snapshot.track_id)
+```
+
 - [ ] **Step 4: Run timeline model tests**
 
 Run:
 
 ```bash
-uv run python -m unittest tests.test_timeline_model -v
+uv run python -m unittest tests.test_timeline_model tests.test_jobs.LocalJobQueueTest.test_progress_callback_notifies_track_change -v
 ```
 
 Expected: PASS.
@@ -116,7 +157,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add autolight/timeline/model.py tests/test_timeline_model.py
+git add autolight/timeline/model.py autolight/jobs/queue.py tests/test_timeline_model.py tests/test_jobs.py
 git commit -m "Expose job progress roles in timeline model"
 ```
 
@@ -163,13 +204,21 @@ Add this test to `AppControllerTest`:
         controller = self._controller()
         controller.load_demo_project()
         generated_id = self._track_id(controller, 1)
+        generated = next(track for track in controller._project.tracks if track.id == generated_id)
+        generated.result_state = ResultState.STALE
+        generated.error = "cache artifact missing or invalid: cache_1"
 
         job_id = controller.rerun_track(generated_id)
         controller._job_queue.wait(job_id, timeout=2)
 
         self.assertNotEqual(job_id, "")
-        generated = next(track for track in controller._project.tracks if track.id == generated_id)
         self.assertEqual(generated.result_state.value, "complete")
+```
+
+Ensure this import exists in `tests/test_app_controller.py`:
+
+```python
+from autolight.project.models import ResultState
 ```
 
 - [ ] **Step 2: Run controller job-control tests and verify failure**
@@ -212,6 +261,8 @@ Add these slots above `cancel_job`:
         if track is None:
             self._set_last_error(f"track not found: {track_id}")
             return ""
+        if track.result_state == ResultState.STALE:
+            track.result_state = ResultState.PENDING
         track.error = ""
         return self.run_track(track_id)
 ```

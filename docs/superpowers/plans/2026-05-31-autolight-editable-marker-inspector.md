@@ -186,6 +186,24 @@ Add this test:
         self.assertNotEqual(marker_id, "")
         self.assertEqual(controller.lastError, "")
         self.assertTrue(any(marker.id == marker_id for marker in controller._project.markers))
+
+    def test_controller_deletes_marker_from_selected_editable_track(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = controller.trackModel.data(
+            controller.trackModel.index(2, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(1.5, "Blackout")
+
+        self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
+
+        self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertEqual(controller.lastError, "")
 ```
 
 - [ ] **Step 2: Run controller inspector test and verify failure**
@@ -193,7 +211,7 @@ Add this test:
 Run:
 
 ```bash
-uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerInspectorTest.test_controller_adds_marker_to_selected_editable_track -v
+uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerInspectorTest.test_controller_adds_marker_to_selected_editable_track tests.test_editable_marker_inspector.EditableMarkerInspectorTest.test_controller_deletes_marker_from_selected_editable_track -v
 ```
 
 Expected: FAIL because `add_marker_to_selected_track` is missing.

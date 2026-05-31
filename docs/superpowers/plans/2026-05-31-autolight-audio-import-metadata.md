@@ -218,7 +218,7 @@ Expected: PASS. Update every test or fixture that imports audio from a `.wav` pa
 Run:
 
 ```bash
-git add autolight/project/store.py tests/test_audio_import_metadata.py tests/test_project_store.py
+git add autolight/project/store.py autolight/app_controller.py tests/test_audio_import_metadata.py tests/test_project_store.py tests/test_app_controller.py tests/test_end_to_end_flow.py tests/test_jobs.py tests/test_timeline_model.py
 git commit -m "Populate audio asset metadata on import"
 ```
 
