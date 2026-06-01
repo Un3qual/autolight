@@ -53,7 +53,7 @@
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing structure tests for the app-layer boundary**
+- [x] **Step 1: Add failing structure tests for the app-layer boundary**
 
 Add these imports near the top of `tests/test_app_controller.py`:
 
@@ -86,7 +86,7 @@ Add these tests to `AppControllerTest`:
         self.assertEqual(type(controller._waveform_lod).__name__, "WaveformLodStore")
 ```
 
-- [ ] **Step 2: Run structure tests and verify failure**
+- [x] **Step 2: Run structure tests and verify failure**
 
 Run:
 
@@ -96,7 +96,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_app_l
 
 Expected: FAIL with `ModuleNotFoundError` for `autolight.app.session` or `AttributeError` for missing controller collaborators.
 
-- [ ] **Step 3: Create the app-layer package and minimal session boundary**
+- [x] **Step 3: Create the app-layer package and minimal session boundary**
 
 Create `autolight/app/__init__.py`:
 
@@ -251,7 +251,7 @@ Inside `AppController.__init__`, after creating `self._project`:
         self._waveform_lod = WaveformLodStore()
 ```
 
-- [ ] **Step 4: Run structure tests**
+- [x] **Step 4: Run structure tests**
 
 Run:
 
@@ -261,7 +261,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_app_l
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit app-layer shell**
+- [x] **Step 5: Commit app-layer shell**
 
 ```bash
 git add autolight/app tests/test_app_controller.py autolight/app_controller.py
@@ -277,7 +277,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing viewport policy tests**
+- [x] **Step 1: Add failing viewport policy tests**
 
 Add these tests to `AppControllerTest`:
 
@@ -331,7 +331,7 @@ Add these tests to `AppControllerTest`:
         self.assertAlmostEqual(scroll, 5.0)
 ```
 
-- [ ] **Step 2: Run viewport tests and verify failure**
+- [x] **Step 2: Run viewport tests and verify failure**
 
 Run:
 
@@ -341,7 +341,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_playb
 
 Expected: FAIL because `TimelineViewport` does not yet implement the policy methods.
 
-- [ ] **Step 3: Implement viewport policy**
+- [x] **Step 3: Implement viewport policy**
 
 Replace `autolight/app/timeline_viewport.py` with:
 
@@ -487,7 +487,7 @@ Update `_keep_playback_position_visible()`:
 
 Add `import time` to `autolight/app_controller.py`.
 
-- [ ] **Step 4: Run viewport tests**
+- [x] **Step 4: Run viewport tests**
 
 Run:
 
@@ -497,7 +497,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_playb
 
 Expected: PASS.
 
-- [ ] **Step 5: Run playback and app-controller focused suites**
+- [x] **Step 5: Run playback and app-controller focused suites**
 
 Run:
 
@@ -507,7 +507,7 @@ uv run python -m unittest tests.test_playback_transport tests.test_app_controlle
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit viewport policy**
+- [x] **Step 6: Commit viewport policy**
 
 ```bash
 git add autolight/app/timeline_viewport.py autolight/app_controller.py tests/test_app_controller.py
@@ -524,7 +524,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app/marker_editing.py`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing manual-track and marker-editing tests**
+- [x] **Step 1: Add failing manual-track and marker-editing tests**
 
 Add these imports to `tests/test_editable_marker_inspector.py`:
 
@@ -637,7 +637,7 @@ Add helper `_source_track()` to `EditableMarkerInspectorTest`:
             return import_audio_asset(project, audio_path)
 ```
 
-- [ ] **Step 2: Run marker-editing tests and verify failure**
+- [x] **Step 2: Run marker-editing tests and verify failure**
 
 Run:
 
@@ -647,7 +647,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL with missing helper imports or methods.
 
-- [ ] **Step 3: Implement manual-track and marker-editing store helpers**
+- [x] **Step 3: Implement manual-track and marker-editing store helpers**
 
 Add to `autolight/project/store.py` near editable marker helpers:
 
@@ -779,7 +779,7 @@ def _finite_marker_duration(value: float) -> float:
 
 Export new helpers from `autolight/project/__init__.py`.
 
-- [ ] **Step 4: Implement snapping service**
+- [x] **Step 4: Implement snapping service**
 
 Replace `autolight/app/marker_editing.py` with:
 
@@ -841,7 +841,7 @@ class MarkerEditingService:
         return number if math.isfinite(number) and number > 0.0 else fallback
 ```
 
-- [ ] **Step 5: Run marker-editing tests**
+- [x] **Step 5: Run marker-editing tests**
 
 Run:
 
@@ -851,7 +851,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit marker-editing domain helpers**
+- [x] **Step 6: Commit marker-editing domain helpers**
 
 ```bash
 git add autolight/project/store.py autolight/project/__init__.py autolight/app/marker_editing.py tests/test_editable_marker_inspector.py
@@ -868,7 +868,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_editable_marker_inspector.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing edit-history tests**
+- [x] **Step 1: Add failing edit-history tests**
 
 Add these imports to `tests/test_editable_marker_inspector.py`:
 
@@ -937,7 +937,7 @@ Add to `tests/test_app_controller.py`:
         self.assertFalse(controller.canRedo)
 ```
 
-- [ ] **Step 2: Run edit-history tests and verify failure**
+- [x] **Step 2: Run edit-history tests and verify failure**
 
 Run:
 
@@ -947,7 +947,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL with missing command classes and controller properties.
 
-- [ ] **Step 3: Implement edit-history commands**
+- [x] **Step 3: Implement edit-history commands**
 
 Replace `autolight/app/edit_history.py` with:
 
@@ -1068,7 +1068,7 @@ class EditHistory:
         self._redo_stack.clear()
 ```
 
-- [ ] **Step 4: Integrate controller undo/redo state**
+- [x] **Step 4: Integrate controller undo/redo state**
 
 Add signals to `AppController`:
 
@@ -1144,7 +1144,7 @@ Add a full-project snapshot helper for track creation and any edit that mutates 
 
 Import `copy` and `ProjectSnapshotCommand` in `autolight/app_controller.py`.
 
-- [ ] **Step 5: Run edit-history tests**
+- [x] **Step 5: Run edit-history tests**
 
 Run:
 
@@ -1154,7 +1154,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_app_co
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit edit history**
+- [x] **Step 6: Commit edit history**
 
 ```bash
 git add autolight/app/edit_history.py autolight/app_controller.py tests/test_editable_marker_inspector.py tests/test_app_controller.py
@@ -1169,7 +1169,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing controller slot tests**
+- [x] **Step 1: Add failing controller slot tests**
 
 Add tests:
 
@@ -1215,7 +1215,7 @@ Add tests:
         self.assertEqual(controller.snap_timeline_time(1.03, False), 1.0)
 ```
 
-- [ ] **Step 2: Run controller slot tests and verify failure**
+- [x] **Step 2: Run controller slot tests and verify failure**
 
 Run:
 
@@ -1225,7 +1225,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_contr
 
 Expected: FAIL because slots are missing.
 
-- [ ] **Step 3: Implement controller slots**
+- [x] **Step 3: Implement controller slots**
 
 Add imports:
 
@@ -1314,7 +1314,7 @@ Add slots:
 
 Use the `_push_project_snapshot_command()` helper from Task 4 for manual track creation so undo removes the newly-created track and redo restores it.
 
-- [ ] **Step 4: Run controller slot tests**
+- [x] **Step 4: Run controller slot tests**
 
 Run:
 
@@ -1324,7 +1324,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_contr
 
 Expected: PASS.
 
-- [ ] **Step 5: Run controller and editable marker suites**
+- [x] **Step 5: Run controller and editable marker suites**
 
 Run:
 
@@ -1334,7 +1334,7 @@ uv run python -m unittest tests.test_app_controller tests.test_editable_marker_i
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit controller editing slots**
+- [x] **Step 6: Commit controller editing slots**
 
 ```bash
 git add autolight/app_controller.py autolight/app/edit_history.py tests/test_app_controller.py
@@ -1352,7 +1352,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing waveform LOD tests**
+- [x] **Step 1: Add failing waveform LOD tests**
 
 Add imports:
 
@@ -1410,7 +1410,7 @@ Add tests to `WaveformSummaryTest`:
         self.assertEqual(visible["samples"][0]["peak"], 0.25)
 ```
 
-- [ ] **Step 2: Run waveform LOD tests and verify failure**
+- [x] **Step 2: Run waveform LOD tests and verify failure**
 
 Run:
 
@@ -1420,7 +1420,7 @@ uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_b
 
 Expected: FAIL because waveform payloads are version 1 and `WaveformLodStore` is empty.
 
-- [ ] **Step 3: Implement waveform pyramid payloads**
+- [x] **Step 3: Implement waveform pyramid payloads**
 
 Add this module constant near `WAVEFORM_READ_BLOCK_FRAMES`:
 
@@ -1466,7 +1466,7 @@ def _waveform_level_bucket_counts(base_bucket_count: int, frame_count: int) -> l
 
 Keep existing soundfile/audioread summarization paths by extracting the old single-resolution summary into `_summarize_samples(audio_path, bucket_count, cancel_requested)`.
 
-- [ ] **Step 4: Implement LOD parsing and visible slicing**
+- [x] **Step 4: Implement LOD parsing and visible slicing**
 
 Replace `autolight/app/waveform_lod.py`:
 
@@ -1539,7 +1539,7 @@ class WaveformLodStore:
         return duration if math.isfinite(duration) and duration >= 0.0 else 0.0
 ```
 
-- [ ] **Step 5: Run waveform tests**
+- [x] **Step 5: Run waveform tests**
 
 Run:
 
@@ -1549,7 +1549,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit waveform LOD data path**
+- [x] **Step 6: Commit waveform LOD data path**
 
 ```bash
 git add autolight/analysis/waveform.py autolight/analysis/builtin.py autolight/app/waveform_lod.py tests/test_waveform_summary.py
@@ -1566,7 +1566,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_timeline_model.py`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing timeline role tests**
+- [x] **Step 1: Add failing timeline role tests**
 
 Add tests to `tests/test_timeline_model.py`:
 
@@ -1613,7 +1613,7 @@ Add tests to `tests/test_timeline_model.py`:
         self.assertEqual(model.data(index, model.role_for_name("waveformLevelBucketCount")), 8)
 ```
 
-- [ ] **Step 2: Run timeline role tests and verify failure**
+- [x] **Step 2: Run timeline role tests and verify failure**
 
 Run:
 
@@ -1623,7 +1623,7 @@ uv run python -m unittest tests.test_timeline_model.TimelineTrackModelTest.test_
 
 Expected: FAIL because roles are missing.
 
-- [ ] **Step 3: Add timeline roles**
+- [x] **Step 3: Add timeline roles**
 
 Add roles to `TimelineTrackModel.ROLE_NAMES`:
 
@@ -1683,7 +1683,7 @@ Update existing expected marker-span dictionaries to include:
                         "selected": False,
 ```
 
-- [ ] **Step 4: Integrate controller visible waveform refresh**
+- [x] **Step 4: Integrate controller visible waveform refresh**
 
 In `AppController`, add helper:
 
@@ -1706,7 +1706,7 @@ In `AppController`, add helper:
 
 Call `_refresh_visible_waveforms()` after `_load_waveform_samples()`, after scroll changes, after zoom changes, and after visible seconds changes.
 
-- [ ] **Step 5: Run timeline and waveform focused tests**
+- [x] **Step 5: Run timeline and waveform focused tests**
 
 Run:
 
@@ -1716,7 +1716,7 @@ uv run python -m unittest tests.test_timeline_model tests.test_waveform_summary 
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit timeline waveform roles**
+- [x] **Step 6: Commit timeline waveform roles**
 
 ```bash
 git add autolight/timeline/model.py autolight/app_controller.py tests/test_timeline_model.py tests/test_waveform_summary.py
@@ -1742,7 +1742,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML componentization tests**
+- [x] **Step 1: Add failing QML componentization tests**
 
 Add tests:
 
@@ -1773,7 +1773,7 @@ Add tests:
                 self.assertTrue(path.exists())
 ```
 
-- [ ] **Step 2: Run QML componentization tests and verify failure**
+- [x] **Step 2: Run QML componentization tests and verify failure**
 
 Run:
 
@@ -1783,7 +1783,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_m
 
 Expected: FAIL because components do not exist and `Main.qml` is still too large.
 
-- [ ] **Step 3: Extract root components without changing behavior**
+- [x] **Step 3: Extract root components without changing behavior**
 
 Create `UI/components/ProjectToolbar.qml` with a `ToolBar` root and properties:
 
@@ -1837,7 +1837,7 @@ import "components"
 
 `Main.qml` should wire component signals to existing root functions and dialogs.
 
-- [ ] **Step 4: Run QML componentization tests and smoke**
+- [x] **Step 4: Run QML componentization tests and smoke**
 
 Run:
 
@@ -1848,7 +1848,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit QML component extraction**
+- [x] **Step 5: Commit QML component extraction**
 
 ```bash
 git add UI/Main.qml UI/components tests/test_app_controller.py
@@ -1867,7 +1867,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing direct-manipulation QML tests**
+- [x] **Step 1: Add failing direct-manipulation QML tests**
 
 Add:
 
@@ -1893,7 +1893,7 @@ Add:
         self.assertIn("canRedo", toolbar_qml + qml)
 ```
 
-- [ ] **Step 2: Run direct-manipulation QML tests and verify failure**
+- [x] **Step 2: Run direct-manipulation QML tests and verify failure**
 
 Run:
 
@@ -1903,7 +1903,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_e
 
 Expected: FAIL because QML is not wired yet.
 
-- [ ] **Step 3: Add manual track and undo/redo actions**
+- [x] **Step 3: Add manual track and undo/redo actions**
 
 In `ProjectToolbar.qml`, add buttons:
 
@@ -1928,7 +1928,7 @@ In `ProjectToolbar.qml`, add buttons:
         }
 ```
 
-- [ ] **Step 4: Add marker drag and resize handlers**
+- [x] **Step 4: Add marker drag and resize handlers**
 
 In `MarkerBlock.qml`, define properties and drag handling:
 
@@ -2019,7 +2019,7 @@ MarkerBlock {
 }
 ```
 
-- [ ] **Step 5: Run direct-manipulation tests and smoke**
+- [x] **Step 5: Run direct-manipulation tests and smoke**
 
 Run:
 
@@ -2030,7 +2030,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit direct manipulation QML**
+- [x] **Step 6: Commit direct manipulation QML**
 
 ```bash
 git add UI/Main.qml UI/components tests/test_app_controller.py
@@ -2048,7 +2048,7 @@ Expected: commit succeeds.
 - Modify: `UI/components/WaveformStrip.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing performance-structure QML tests**
+- [x] **Step 1: Add failing performance-structure QML tests**
 
 Add:
 
@@ -2068,7 +2068,7 @@ Add:
         self.assertIn("seek_playback", playback_qml)
 ```
 
-- [ ] **Step 2: Run performance-structure tests and verify failure**
+- [x] **Step 2: Run performance-structure tests and verify failure**
 
 Run:
 
@@ -2078,7 +2078,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_w
 
 Expected: FAIL until waveform strip uses canvas and scrubber separates preview from committed seeks.
 
-- [ ] **Step 3: Implement batched waveform strip**
+- [x] **Step 3: Implement batched waveform strip**
 
 Create or replace `UI/components/WaveformStrip.qml`:
 
@@ -2147,7 +2147,7 @@ WaveformStrip {
 }
 ```
 
-- [ ] **Step 4: Reduce scrubber churn**
+- [x] **Step 4: Reduce scrubber churn**
 
 In `PlaybackBar.qml`, make the scrubber keep a local preview while pressed:
 
@@ -2172,7 +2172,7 @@ Slider {
 }
 ```
 
-- [ ] **Step 5: Run performance-structure tests and smoke**
+- [x] **Step 5: Run performance-structure tests and smoke**
 
 Run:
 
@@ -2183,7 +2183,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit QML performance rendering**
+- [x] **Step 6: Commit QML performance rendering**
 
 ```bash
 git add UI/components tests/test_app_controller.py
@@ -2198,7 +2198,7 @@ Expected: commit succeeds.
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-06-01-autolight-interactive-timeline.md`
 
-- [ ] **Step 1: Update README workflow**
+- [x] **Step 1: Update README workflow**
 
 Update `README.md` `Current Scope` with:
 
@@ -2219,7 +2219,7 @@ Update `Basic Workflow` with:
 9. Use generated timing tracks as snap guides while editing; hold the snap-bypass modifier for free placement.
 ```
 
-- [ ] **Step 2: Run focused milestone suites**
+- [x] **Step 2: Run focused milestone suites**
 
 Run:
 
@@ -2229,7 +2229,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_timeli
 
 Expected: PASS.
 
-- [ ] **Step 3: Run full unit suite**
+- [x] **Step 3: Run full unit suite**
 
 Run:
 
@@ -2239,7 +2239,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: PASS.
 
-- [ ] **Step 4: Run headless smoke and visual QA**
+- [x] **Step 4: Run headless smoke and visual QA**
 
 Run:
 
@@ -2251,7 +2251,7 @@ uv run python scripts/check_qml_screenshot.py /tmp/autolight-interactive-timelin
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Check whitespace and final worktree status**
+- [x] **Step 5: Check whitespace and final worktree status**
 
 Run:
 
@@ -2262,11 +2262,11 @@ git status --short
 
 Expected: `git diff --check` exits 0. `git status --short` shows only intended files before plan closure.
 
-- [ ] **Step 6: Mark this implementation plan complete**
+- [x] **Step 6: Mark this implementation plan complete**
 
 After all previous steps pass, update every completed checkbox in `docs/superpowers/plans/2026-06-01-autolight-interactive-timeline.md` from `[ ]` to `[x]`.
 
-- [ ] **Step 7: Commit documentation and plan closure**
+- [x] **Step 7: Commit documentation and plan closure**
 
 ```bash
 git add README.md docs/superpowers/plans/2026-06-01-autolight-interactive-timeline.md

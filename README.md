@@ -25,10 +25,15 @@ uv run python -m unittest discover -s tests -v
 - Create, open, and save `.autolight` project files.
 - Import one local audio file into a project.
 - Create graph-backed source, generated, and editable tracks.
+- Create blank manual cue tracks for direct authoring.
 - Run deterministic built-in transforms through a local background job queue.
 - Persist project tracks, markers, provenance, job summaries, and cache references as JSON.
 - Restore saved timeline zoom, horizontal scroll, and selected track when reopening a project.
 - Render project tracks and marker counts in a QML timeline shell.
+- Move, resize, select, and delete editable cue markers directly on the timeline.
+- Undo and redo manual track and marker edits during the current app session.
+- Snap editable marker movement to visible generated timing markers, with a modifier-key bypass for free placement.
+- Render zoom-adaptive waveform detail while keeping playback follow, scrubbing, and scrolling responsive.
 
 ## Basic Workflow
 
@@ -39,8 +44,12 @@ uv run python -m unittest discover -s tests -v
 5. With the source track selected, choose `Add Markers` or `Add Transform` to create generated marker tracks.
 6. Run generated tracks by selecting them and choosing `Run`.
 7. After completion, choose `Derive Editable` to create editable cue markers from a generated track.
-8. Use `Save` or `Save As` to write a `.autolight` project file.
-9. Use `Open` to reload a saved project.
+8. Choose `Manual Track` to create an empty editable cue track for direct authoring.
+9. Click cues to select them, shift-click to multi-select, drag selected cues to move them, and drag cue edges to resize duration cues.
+10. Use `Undo` and `Redo` to recover from marker and manual-track edits during the current session.
+11. Use generated timing tracks as snap guides while editing; hold the snap-bypass modifier for free placement.
+12. Use `Save` or `Save As` to write a `.autolight` project file.
+13. Use `Open` to reload a saved project.
 
 Timeline zoom, horizontal scroll, and the selected track are stored in the `.autolight` project when you save.
 
