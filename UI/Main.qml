@@ -15,6 +15,18 @@ Window {
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
+    property real timelineVisibleSeconds: 8.0
+
+    function timelineX(seconds) {
+        return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
+    }
+
+    function formatSeconds(seconds) {
+        var safeSeconds = Math.max(0, Number(seconds))
+        var minutes = Math.floor(safeSeconds / 60)
+        var remaining = Math.floor(safeSeconds % 60)
+        return minutes + ":" + (remaining < 10 ? "0" + remaining : remaining)
+    }
 
     function newProjectWithConfirmation() {
         if (appController.isDirty) {
@@ -136,6 +148,25 @@ Window {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                Button {
+                    text: appController.playback.isPlaying ? "Pause" : "Play"
+                    enabled: appController.selectedTrackCanPlay || appController.playback.sourcePath.length > 0
+                    onClicked: appController.playback.isPlaying ? appController.pause_playback() : appController.play_selected_track()
+                }
+
+                Button {
+                    text: "Stop"
+                    enabled: appController.playback.sourcePath.length > 0
+                    onClicked: appController.stop_playback()
+                }
+
+                Label {
+                    id: playheadTimeLabel
+                    text: root.formatSeconds(appController.playback.positionSeconds) + " / " + root.formatSeconds(appController.playback.durationSeconds)
+                    color: "#d4d4d8"
+                    font.pixelSize: 12
+                }
 
                 Button {
                     text: "New"
@@ -274,6 +305,17 @@ Window {
             }
         }
 
+        Slider {
+            id: playbackScrubber
+            Layout.fillWidth: true
+            from: 0
+            to: Math.max(0.01, appController.playback.durationSeconds)
+            value: appController.playback.positionSeconds
+            enabled: appController.playback.sourcePath.length > 0
+            live: true
+            onMoved: appController.seek_playback(value)
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -375,11 +417,23 @@ Window {
                             Rectangle {
                                 width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
                                 height: parent.height - 18
-                                x: Math.max(0, Math.min(parent.width - width, root.timelineLeftPadding + modelData.timestamp * root.timelinePixelsPerSecond))
+                                x: Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))
                                 y: 9
                                 radius: 2
                                 color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
                             }
+                        }
+
+                        Rectangle {
+                            id: playhead
+                            width: 2
+                            height: parent.height
+                            x: root.timelineX(appController.playback.positionSeconds)
+                            color: "#facc15"
+                            visible: appController.playback.sourcePath.length > 0
+                                && x >= root.timelineLeftPadding
+                                && x <= parent.width
+                            z: 10
                         }
 
                         MouseArea {

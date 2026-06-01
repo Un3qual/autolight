@@ -268,6 +268,18 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.timelinePixelsPerSecond, 120.0)
         self.assertEqual(controller.timelineScrollSeconds, 4.0)
 
+    def test_qml_exposes_transport_controls_and_playhead(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("appController.play_selected_track()", qml)
+        self.assertIn("appController.pause_playback()", qml)
+        self.assertIn("appController.stop_playback()", qml)
+        self.assertIn("appController.seek_playback", qml)
+        self.assertIn("appController.playback.positionSeconds", qml)
+        self.assertIn("appController.playback.durationSeconds", qml)
+        self.assertIn("id: playhead", qml)
+        self.assertIn("playheadTimeLabel", qml)
+
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
 
