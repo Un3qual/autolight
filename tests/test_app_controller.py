@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
@@ -149,6 +150,60 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.selectedTrackId, track_id)
         self.assertEqual(controller.lastError, "")
         self.assertTrue(controller.isDirty)
+
+    def test_selected_source_track_can_play(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=16000)
+            track_id = controller.import_audio(str(audio_path))
+
+            self.assertEqual(controller.selectedTrackId, track_id)
+            self.assertTrue(controller.selectedTrackCanPlay)
+            self.assertAlmostEqual(controller.timelineDurationSeconds, 2.0, places=2)
+
+    def test_play_selected_track_loads_resolved_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+
+            self.assertTrue(controller.play_selected_track())
+
+        controller.playback.load_source.assert_called_once()
+        loaded_path, loaded_duration = controller.playback.load_source.call_args.args
+        self.assertEqual(loaded_path, str(audio_path))
+        self.assertAlmostEqual(loaded_duration, 1.5, places=2)
+        controller.playback.play.assert_called_once()
+
+    def test_play_selected_track_rejects_track_without_source_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = controller._project.tracks[-1].id
+        controller._project.audio_assets.clear()
+        controller.select_track(editable_id)
+
+        self.assertFalse(controller.play_selected_track())
+
+        self.assertIn("source audio", controller.lastError)
+
+    def test_timeline_zoom_and_scroll_are_clamped(self):
+        controller = self._controller()
+        self.assertEqual(controller.timelinePixelsPerSecond, 96.0)
+
+        controller.set_timeline_zoom(500.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 240.0)
+
+        controller.set_timeline_zoom(5.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 24.0)
+
+        controller.set_timeline_scroll_seconds(-10.0)
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
 
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
