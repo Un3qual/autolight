@@ -218,6 +218,20 @@ class PlaybackTransportTest(unittest.TestCase):
             self.assertEqual(player.position_ms, 11_000)
             self.assertEqual(transport.positionSeconds, 11.0)
 
+    def test_set_volume_clamps_and_emits_volume_change(self):
+        audio = FakeAudioOutput()
+        transport = PlaybackTransport(player=FakeMediaPlayer(), audio_output=audio)
+        changes = []
+        transport.volumeChanged.connect(lambda: changes.append(transport.volume))
+
+        transport.set_volume(1.5)
+        transport.set_volume(0.25)
+        transport.set_volume(-2.0)
+
+        self.assertEqual(audio.volume, 0.0)
+        self.assertEqual(changes, [0.25, 0.0])
+        self.assertEqual(transport.volume, 0.0)
+
     def test_unload_clears_source_and_position(self):
         player = FakeMediaPlayer()
         transport = PlaybackTransport(player=player, audio_output=FakeAudioOutput())

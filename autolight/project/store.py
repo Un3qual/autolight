@@ -5,7 +5,7 @@ import json
 import math
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -28,6 +28,15 @@ from autolight.project.models import (
 
 MAX_RELINK_CANDIDATES = 2048
 MAX_RELINK_DIRECTORIES = 512
+MARKER_COLOR_PALETTE = {
+    "cyan": "#67e8f9",
+    "green": "#a7f3d0",
+    "amber": "#fbbf24",
+    "violet": "#c4b5fd",
+    "rose": "#fda4af",
+    "blue": "#93c5fd",
+}
+DEFAULT_MARKER_COLOR = "cyan"
 
 
 def new_id(prefix: str) -> str:
@@ -372,6 +381,93 @@ def _source_audio_asset_payload(project: ProjectDocument, track: Track) -> dict[
     }
 
 
+def marker_display_color(marker: Marker) -> str:
+    color = marker_color_key(marker)
+    return MARKER_COLOR_PALETTE[color]
+
+
+def marker_color_key(marker: Marker) -> str:
+    color = _marker_metadata(marker).get("color", "")
+    if isinstance(color, str) and color in MARKER_COLOR_PALETTE:
+        return color
+    return DEFAULT_MARKER_COLOR
+
+
+def _marker_metadata(marker: Marker) -> dict[str, Any]:
+    if isinstance(marker.metadata, Mapping):
+        return dict(marker.metadata)
+    return {}
+
+
+def _editable_track_or_raise(project: ProjectDocument, track_id: str) -> Track:
+    track = find_track(project, track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.type != TrackType.EDITABLE:
+        raise ValueError("markers can only be edited on an editable track")
+    return track
+
+
+def _editable_marker_or_raise(project: ProjectDocument, track_id: str, marker_id: str) -> Marker:
+    for marker in project.markers:
+        if marker.track_id == track_id and marker.id == marker_id:
+            return marker
+    raise ValueError(f"marker not found on track {track_id}: {marker_id}")
+
+
+def _finite_marker_timestamp(timestamp: float) -> float:
+    timestamp_value = float(timestamp)
+    if not math.isfinite(timestamp_value):
+        raise ValueError("marker timestamp must be finite")
+    return timestamp_value
+
+
+def normalize_marker_color(color: str) -> str:
+    value = str(color or DEFAULT_MARKER_COLOR).strip().lower()
+    if value not in MARKER_COLOR_PALETTE:
+        raise ValueError(f"marker color must be one of: {', '.join(MARKER_COLOR_PALETTE)}")
+    return value
+
+
+def normalize_marker_category(category: str) -> str:
+    return str(category or "cue")
+
+
+def _apply_marker_fields(
+    marker: Marker,
+    *,
+    timestamp: float | None = None,
+    label: str | None = None,
+    category: str | None = None,
+    color: str | None = None,
+) -> bool:
+    timestamp_value = _finite_marker_timestamp(timestamp) if timestamp is not None else None
+    label_value = str(label) if label is not None else None
+    category_value = normalize_marker_category(category) if category is not None else None
+    color_value = normalize_marker_color(color) if color is not None else None
+
+    changed = False
+    if timestamp_value is not None and marker.timestamp != timestamp_value:
+        marker.timestamp = timestamp_value
+        changed = True
+    if label_value is not None and marker.label != label_value:
+        marker.label = label_value
+        changed = True
+    if category_value is not None and marker.category != category_value:
+        marker.category = category_value
+        changed = True
+    if color_value is not None and (metadata := _ensure_marker_metadata(marker)).get("color") != color_value:
+        metadata["color"] = color_value
+        changed = True
+    return changed
+
+
+def _ensure_marker_metadata(marker: Marker) -> dict[str, Any]:
+    if not isinstance(marker.metadata, dict):
+        marker.metadata = {}
+    return marker.metadata
+
+
 def add_generated_track(
     project: ProjectDocument,
     parent_track_id: str,
@@ -439,28 +535,82 @@ def create_editable_track_from_markers(
                 tags=list(source_marker.tags),
                 source_transform=source_marker.source_transform,
                 source_marker_ids=[source_marker.id],
-                metadata=dict(source_marker.metadata),
+                metadata=_marker_metadata(source_marker),
             )
         )
     return track
 
 
-def add_editable_marker(project: ProjectDocument, track_id: str, timestamp: float, label: str) -> Marker:
+def update_editable_marker(
+    project: ProjectDocument,
+    track_id: str,
+    marker_id: str,
+    *,
+    timestamp: float,
+    label: str,
+    category: str,
+    color: str,
+) -> Marker:
+    _editable_track_or_raise(project, track_id)
+    marker = _editable_marker_or_raise(project, track_id, marker_id)
+    changed = _apply_marker_fields(
+        marker,
+        timestamp=timestamp,
+        label=label,
+        category=category,
+        color=color,
+    )
+    if changed:
+        mark_dependents_stale(project, track_id)
+    return marker
+
+
+def bulk_update_editable_markers(
+    project: ProjectDocument,
+    track_id: str,
+    marker_ids: list[str],
+    *,
+    label: str,
+    category: str,
+    color: str,
+) -> int:
+    _editable_track_or_raise(project, track_id)
+    selected_ids = set(marker_ids)
+    changed_count = 0
+    for marker in project.markers:
+        if marker.track_id != track_id:
+            continue
+        if selected_ids and marker.id not in selected_ids:
+            continue
+        if _apply_marker_fields(marker, label=label, category=category, color=color):
+            changed_count += 1
+    if changed_count:
+        mark_dependents_stale(project, track_id)
+    return changed_count
+
+
+def add_editable_marker(
+    project: ProjectDocument,
+    track_id: str,
+    timestamp: float,
+    label: str,
+    *,
+    category: str = "cue",
+    color: str = DEFAULT_MARKER_COLOR,
+) -> Marker:
     track = find_track(project, track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
     if track.type != TrackType.EDITABLE:
         raise ValueError("markers can only be added to an editable track")
-    timestamp_value = float(timestamp)
-    if not math.isfinite(timestamp_value):
-        raise ValueError("marker timestamp must be finite")
+    timestamp_value = _finite_marker_timestamp(timestamp)
     marker = Marker(
         id=new_id("marker"),
         track_id=track_id,
         timestamp=timestamp_value,
         label=str(label),
-        category="cue",
-        metadata={"created_by": "user"},
+        category=normalize_marker_category(category),
+        metadata={"created_by": "user", "color": normalize_marker_color(color)},
     )
     project.markers.append(marker)
     mark_dependents_stale(project, track_id)
@@ -635,7 +785,7 @@ def _project_from_json(raw: dict[str, Any]) -> ProjectDocument:
             )
             for item in raw["tracks"]
         ],
-        markers=[Marker(**item) for item in raw["markers"]],
+        markers=[_marker_from_json(item) for item in raw["markers"]],
         job_runs=[
             JobRun(
                 **{
@@ -648,3 +798,10 @@ def _project_from_json(raw: dict[str, Any]) -> ProjectDocument:
         cache_entries=[CacheEntry(**item) for item in raw["cache_entries"]],
         ui_state=raw["ui_state"],
     )
+
+
+def _marker_from_json(item: dict[str, Any]) -> Marker:
+    marker_data = dict(item)
+    metadata = marker_data.get("metadata")
+    marker_data["metadata"] = dict(metadata) if isinstance(metadata, Mapping) else {}
+    return Marker(**marker_data)

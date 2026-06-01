@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 
 from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
-from autolight.project.store import add_generated_track, import_audio_asset, new_project
+from autolight.project.store import add_generated_track, import_audio_asset, marker_display_color, new_project
 from autolight.timeline.model import TimelineTrackModel
 from tests.helpers import write_wav
 
@@ -59,6 +59,7 @@ class TimelineTrackModelTest(unittest.TestCase):
                         "duration": 0.0,
                         "label": "",
                         "category": "",
+                        "color": "#67e8f9",
                     }
                 ],
             )
@@ -178,6 +179,24 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual([span["id"] for span in spans], ["marker_early", "marker_late"])
             self.assertEqual([span["timestamp"] for span in spans], [0.75, 3.0])
             self.assertEqual([span["duration"] for span in spans], [0.0, 0.25])
+
+    def test_marker_spans_resolve_marker_color_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, _source, generated = self._project_with_generated_track(Path(tmp))
+            marker = Marker(
+                id="marker_amber",
+                track_id=generated.id,
+                timestamp=0.5,
+                label="Look",
+                metadata={"color": "amber"},
+            )
+            project.markers.append(marker)
+            model = TimelineTrackModel()
+            model.set_project(project)
+
+            span = model.data(model.index(1, 0), model.role_for_name("markerSpans"))[0]
+
+            self.assertEqual(span["color"], marker_display_color(marker))
 
     def test_marker_roles_use_cached_track_index(self):
         with tempfile.TemporaryDirectory() as tmp:

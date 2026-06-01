@@ -27,6 +27,7 @@ uv run python -m unittest discover -s tests -v
 - Create graph-backed source, generated, and editable tracks.
 - Run deterministic built-in transforms through a local background job queue.
 - Persist project tracks, markers, provenance, job summaries, and cache references as JSON.
+- Restore saved timeline zoom, horizontal scroll, and selected track when reopening a project.
 - Render project tracks and marker counts in a QML timeline shell.
 
 ## Basic Workflow
@@ -40,6 +41,8 @@ uv run python -m unittest discover -s tests -v
 7. After completion, choose `Derive Editable` to create editable cue markers from a generated track.
 8. Use `Save` or `Save As` to write a `.autolight` project file.
 9. Use `Open` to reload a saved project.
+
+Timeline zoom, horizontal scroll, and the selected track are stored in the `.autolight` project when you save.
 
 ## Cache Recovery
 

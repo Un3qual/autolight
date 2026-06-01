@@ -5,6 +5,7 @@ import math
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
 from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track
+from autolight.project.store import marker_display_color
 
 
 class TimelineTrackModel(QAbstractListModel):
@@ -197,6 +198,7 @@ class TimelineTrackModel(QAbstractListModel):
             "duration": marker.duration or 0.0,
             "label": marker.label,
             "category": marker.category,
+            "color": marker_display_color(marker),
         }
 
     def _rebuild_marker_index(self) -> None:

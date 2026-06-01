@@ -296,6 +296,13 @@ class WaveformSummaryTest(unittest.TestCase):
         )
         self.assertIn("visible: x >= root.timelineLeftPadding - width && x <= parent.width", qml)
 
+    def test_qml_waveform_uses_peak_and_rms_layers(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("modelData.peak", qml)
+        self.assertIn("modelData.rms", qml)
+        self.assertIn("id: waveformCenterLine", qml)
+
     def _track_row(self, controller, track_id: str) -> int:
         for index, track in enumerate(controller._project.tracks):
             if track.id == track_id:
