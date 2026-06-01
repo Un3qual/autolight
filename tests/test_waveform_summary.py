@@ -23,6 +23,13 @@ def write_wav(path: Path) -> None:
         handle.writeframes(b"".join(sample.to_bytes(2, "little", signed=True) for sample in samples))
 
 
+def write_empty_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8)
+
+
 class WaveformSummaryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -58,6 +65,19 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertEqual(payload["levels"][0]["bucket_count"], 2)
         self.assertGreater(payload["levels"][-1]["bucket_count"], payload["levels"][0]["bucket_count"])
 
+    def test_build_waveform_summary_zero_frame_audio_has_consistent_empty_levels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "empty.wav"
+            output_path = Path(tmp) / "waveform.json"
+            write_empty_wav(audio_path)
+
+            build_waveform_summary(audio_path, output_path, buckets=4)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["duration"], 0.0)
+        self.assertEqual(payload["samples"], [])
+        self.assertEqual(payload["levels"], [])
+
     def test_waveform_lod_selects_more_detail_when_zoomed_in(self):
         payload = {
             "version": 2,
@@ -69,14 +89,14 @@ class WaveformSummaryTest(unittest.TestCase):
         }
         store = WaveformLodStore()
 
-        overview = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=24.0)
+        overview = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=12.0)
         detail = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=200.0)
 
         self.assertEqual(overview["level_bucket_count"], 8)
         self.assertEqual(detail["level_bucket_count"], 64)
         self.assertLessEqual(len(detail["samples"]), 16)
 
-    def test_waveform_lod_uses_visible_window_for_level_selection(self):
+    def test_waveform_lod_scales_partial_window_selection_to_file_duration(self):
         payload = {
             "version": 2,
             "duration": 8.0,
@@ -87,11 +107,42 @@ class WaveformSummaryTest(unittest.TestCase):
         }
         store = WaveformLodStore()
 
-        narrow = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=48.0)
-        wide = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=8.0, pixels_per_second=48.0)
+        visible = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=48.0)
 
-        self.assertEqual(narrow["level_bucket_count"], 8)
-        self.assertEqual(wide["level_bucket_count"], 64)
+        self.assertEqual(visible["level_bucket_count"], 64)
+        self.assertGreaterEqual(len(visible["samples"]), 8)
+
+    def test_waveform_lod_normalizes_nonfinite_bucket_count(self):
+        payload = {
+            "version": 2,
+            "duration": 10.0,
+            "levels": [
+                {"bucket_count": float("inf"), "samples": [{"peak": 0.1, "rms": 0.05}] * 10},
+            ],
+        }
+        store = WaveformLodStore()
+
+        visible = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=48.0)
+
+        self.assertEqual(visible["level_bucket_count"], 10)
+        self.assertGreater(len(visible["samples"]), 0)
+
+    def test_waveform_lod_normalizes_mismatched_bucket_count_to_samples(self):
+        samples = [{"peak": index / 10.0, "rms": 0.05} for index in range(10)]
+        payload = {
+            "version": 2,
+            "duration": 10.0,
+            "levels": [
+                {"bucket_count": 100, "samples": samples},
+            ],
+        }
+        store = WaveformLodStore()
+
+        visible = store.visible_samples(payload, scroll_seconds=9.0, visible_seconds=1.0, pixels_per_second=48.0)
+
+        self.assertEqual(visible["level_bucket_count"], 10)
+        self.assertGreater(len(visible["samples"]), 0)
+        self.assertEqual(visible["samples"][-1]["peak"], 0.9)
 
     def test_waveform_lod_reads_legacy_single_sample_payload(self):
         payload = {

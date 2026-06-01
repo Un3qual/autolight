@@ -22,6 +22,7 @@ class WaveformLodStore:
             return {"duration": duration, "level_bucket_count": 0, "samples": []}
         level = self._select_level(
             levels,
+            duration=duration,
             visible_seconds=visible_seconds,
             pixels_per_second=pixels_per_second,
         )
@@ -53,12 +54,19 @@ class WaveformLodStore:
         self,
         levels: list[dict[str, Any]],
         *,
+        duration: float,
         visible_seconds: float,
         pixels_per_second: float,
     ) -> dict[str, Any]:
         visible = max(0.01, self._finite_float(visible_seconds, default=0.01))
         zoom = max(1.0, self._finite_float(pixels_per_second, default=1.0))
         desired = max(1, math.ceil(visible * zoom / TARGET_PIXELS_PER_BUCKET))
+        if duration > 0.0:
+            visible_fraction = visible / duration
+            return min(
+                levels,
+                key=lambda level: abs(int(level["bucket_count"]) * visible_fraction - desired),
+            )
         return min(levels, key=lambda level: abs(int(level["bucket_count"]) - desired))
 
     def _levels(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -74,7 +82,7 @@ class WaveformLodStore:
         samples = payload.get("samples", [])
         return [
             {"bucket_count": len(samples), "samples": list(samples)}
-        ] if isinstance(samples, list) else []
+        ] if isinstance(samples, list) and samples else []
 
     def _duration(self, payload: dict[str, Any]) -> float:
         duration = self._finite_float(payload.get("duration", 0.0), default=0.0)
@@ -86,13 +94,14 @@ class WaveformLodStore:
         samples = level.get("samples", [])
         if not isinstance(samples, list):
             return None
-        try:
-            bucket_count = int(level.get("bucket_count", len(samples)))
-        except (TypeError, ValueError):
-            bucket_count = len(samples)
-        if bucket_count < 0:
-            bucket_count = len(samples)
-        return {"bucket_count": bucket_count, "samples": list(samples)}
+        sample_list = list(samples)
+        if not sample_list:
+            return None
+        sample_count = len(sample_list)
+        bucket_count = self._bucket_count(level.get("bucket_count"), default=sample_count)
+        if bucket_count != sample_count:
+            bucket_count = sample_count
+        return {"bucket_count": bucket_count, "samples": sample_list}
 
     @staticmethod
     def _finite_float(value: Any, *, default: float) -> float:
@@ -101,6 +110,14 @@ class WaveformLodStore:
         except (OverflowError, TypeError, ValueError):
             return default
         return result if math.isfinite(result) else default
+
+    @staticmethod
+    def _bucket_count(value: Any, *, default: int) -> int:
+        try:
+            result = int(value)
+        except (OverflowError, TypeError, ValueError):
+            return default
+        return result if result > 0 else default
 
     @staticmethod
     def _sample_dict(sample: Any) -> dict[str, Any]:

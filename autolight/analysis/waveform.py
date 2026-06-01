@@ -25,22 +25,23 @@ def build_waveform_summary(
 
     _raise_if_cancelled(cancel_requested)
     sample_rate, frame_count = _audio_info(audio_path)
-    base_bucket_count = min(buckets, max(1, frame_count))
-    level_bucket_counts = _waveform_level_bucket_counts(base_bucket_count, frame_count)
     levels = []
-    for bucket_count in level_bucket_counts:
-        levels.append(
-            {
-                "bucket_count": bucket_count,
-                "samples": _summarize_samples(audio_path, bucket_count, cancel_requested),
-            }
-        )
+    if frame_count > 0:
+        base_bucket_count = min(buckets, frame_count)
+        level_bucket_counts = _waveform_level_bucket_counts(base_bucket_count, frame_count)
+        for bucket_count in level_bucket_counts:
+            levels.append(
+                {
+                    "bucket_count": bucket_count,
+                    "samples": _summarize_samples(audio_path, bucket_count, cancel_requested),
+                }
+            )
 
     payload = {
         "version": 2,
         "sample_rate": sample_rate,
         "duration": 0.0 if sample_rate == 0 else float(frame_count / sample_rate),
-        "samples": levels[0]["samples"],
+        "samples": levels[0]["samples"] if levels else [],
         "levels": levels,
     }
     Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
