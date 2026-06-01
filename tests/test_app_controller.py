@@ -1619,6 +1619,16 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.selectedTrackId, manual_id)
         self.assertTrue(controller.canUndo)
 
+    def test_controller_exposes_default_qml_slot_overloads_for_task5_slots(self):
+        controller = self._controller()
+
+        self.assertIn((), self._slot_parameter_types(controller, "add_manual_cue_track"))
+        self.assertIn(("QString",), self._slot_parameter_types(controller, "add_manual_cue_track"))
+        self.assertIn(("double",), self._slot_parameter_types(controller, "move_selected_markers"))
+        self.assertIn(("double", "bool"), self._slot_parameter_types(controller, "move_selected_markers"))
+        self.assertIn(("double",), self._slot_parameter_types(controller, "snap_timeline_time"))
+        self.assertIn(("double", "bool"), self._slot_parameter_types(controller, "snap_timeline_time"))
+
     def test_controller_moves_and_resizes_selected_editable_markers(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -1883,6 +1893,17 @@ class AppControllerTest(unittest.TestCase):
             if track.type == track_type:
                 return track
         self.fail(f"track type not found: {track_type}")
+
+    @staticmethod
+    def _slot_parameter_types(controller: AppController, slot_name: str) -> set[tuple[str, ...]]:
+        meta_object = controller.metaObject()
+        slots = set()
+        for index in range(meta_object.methodCount()):
+            method = meta_object.method(index)
+            name = bytes(method.name()).decode()
+            if name == slot_name:
+                slots.add(tuple(bytes(type_name).decode() for type_name in method.parameterTypes()))
+        return slots
 
     @staticmethod
     def _selected_track_markers(controller: AppController) -> list[dict]:

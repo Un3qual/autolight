@@ -470,6 +470,7 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return ""
 
+    @Slot(result=str)
     @Slot(str, result=str)
     def add_manual_cue_track(self, name: str = "Manual Cues") -> str:
         try:
@@ -634,6 +635,7 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return 0
 
+    @Slot(float, result=bool)
     @Slot(float, bool, result=bool)
     def move_selected_markers(self, delta_seconds: float, bypass_snap: bool = False) -> bool:
         try:
@@ -693,6 +695,7 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return False
 
+    @Slot(float, result=float)
     @Slot(float, bool, result=float)
     def snap_timeline_time(self, seconds: float, bypass_snap: bool = False) -> float:
         return self._marker_editing.snap_time(
