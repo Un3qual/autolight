@@ -626,7 +626,7 @@ class WaveformSummaryTest(unittest.TestCase):
                 (ui_root / "components" / "WaveformStrip.qml").read_text(encoding="utf-8"),
             ]
         )
-        self.assertIn("waveformSamples", qml)
+        self.assertNotIn("waveformSamples", qml)
         self.assertIn("waveformDurationSeconds", qml)
         self.assertIn("visibleWaveformSamples", qml)
         self.assertIn("sample.peak", qml)
@@ -639,7 +639,7 @@ class WaveformSummaryTest(unittest.TestCase):
             qml,
         )
         self.assertNotIn("model: waveformSamples", qml)
-        self.assertIn("visible: visibleWaveformSamples.length > 0", qml)
+        self.assertIn("visible: root.visibleWaveformSamples.length > 0", qml)
 
     def test_qml_waveform_uses_peak_and_rms_layers(self):
         qml = (

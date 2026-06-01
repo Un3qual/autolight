@@ -15,7 +15,6 @@ Row {
     required property real jobProgress
     required property string activeJobId
     required property var markerSpans
-    required property var waveformSamples
     required property var visibleWaveformSamples
     required property real waveformDurationSeconds
     property var appController
@@ -106,7 +105,6 @@ Row {
         rowIndex: root.index
         trackId: root.trackId
         markerSpans: root.markerSpans
-        waveformSamples: root.waveformSamples
         visibleWaveformSamples: root.visibleWaveformSamples
         waveformDurationSeconds: root.waveformDurationSeconds
         editable: root.trackType === "editable"

@@ -6,7 +6,6 @@ Rectangle {
     property int rowIndex: 0
     property string trackId: ""
     property var markerSpans: []
-    property var waveformSamples: []
     property var visibleWaveformSamples: []
     property real waveformDurationSeconds: 0
     property bool editable: false
@@ -40,12 +39,12 @@ Rectangle {
 
     WaveformStrip {
         anchors.fill: parent
-        samples: visibleWaveformSamples
-        durationSeconds: waveformDurationSeconds
+        samples: root.visibleWaveformSamples
+        durationSeconds: root.waveformDurationSeconds
         scrollSeconds: root.appController.timelineScrollSeconds
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
         leftPadding: root.timelineLeftPadding
-        visible: visibleWaveformSamples.length > 0
+        visible: root.visibleWaveformSamples.length > 0
     }
 
     Repeater {

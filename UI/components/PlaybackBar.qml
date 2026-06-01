@@ -14,6 +14,22 @@ RowLayout {
     signal volumeRequested(real value)
     signal seekRequested(real value)
 
+    function validPlaybackDuration(durationSeconds) {
+        var numericDuration = Number(durationSeconds)
+        if (!isFinite(numericDuration) || numericDuration <= 0) {
+            return 0.01
+        }
+        return Math.max(0.01, numericDuration)
+    }
+
+    function clampedPlaybackPosition(positionSeconds, durationSeconds) {
+        var numericPosition = Number(positionSeconds)
+        if (!isFinite(numericPosition)) {
+            numericPosition = 0
+        }
+        return Math.max(0, Math.min(root.validPlaybackDuration(durationSeconds), numericPosition))
+    }
+
     Layout.leftMargin: 12
     Layout.rightMargin: 12
     spacing: 8
@@ -70,19 +86,56 @@ RowLayout {
     Slider {
         id: playbackScrubber
         property bool scrubbing: pressed
-        property real previewValue: root.appController.playback.positionSeconds
+        property real previewValue: root.clampedPlaybackPosition(root.appController.playback.positionSeconds, root.appController.playback.durationSeconds)
+        property string pressedSourcePath: ""
+        property real pressedDurationSeconds: root.validPlaybackDuration(root.appController.playback.durationSeconds)
+
+        function resetPreview() {
+            previewValue = root.clampedPlaybackPosition(root.appController.playback.positionSeconds, root.appController.playback.durationSeconds)
+            pressedDurationSeconds = root.validPlaybackDuration(root.appController.playback.durationSeconds)
+        }
+
+        function clearPressCapture() {
+            pressedSourcePath = ""
+            resetPreview()
+        }
+
         Layout.fillWidth: true
         from: 0
-        to: Math.max(0.01, root.appController.playback.durationSeconds)
+        to: root.validPlaybackDuration(root.appController.playback.durationSeconds)
         value: scrubbing ? previewValue : root.appController.playback.positionSeconds
         live: true
         enabled: root.appController.playback.sourcePath.length > 0
-        onMoved: previewValue = value
+        onMoved: previewValue = root.clampedPlaybackPosition(value, root.appController.playback.durationSeconds)
         onPressedChanged: {
-            if (!pressed) {
-                root.appController.seek_playback(previewValue)
-            } else {
-                previewValue = value
+            if (pressed) {
+                pressedSourcePath = root.appController.playback.sourcePath
+                pressedDurationSeconds = root.validPlaybackDuration(root.appController.playback.durationSeconds)
+                previewValue = root.clampedPlaybackPosition(value, pressedDurationSeconds)
+                return
+            }
+
+            var sourceStillLoaded = pressedSourcePath.length > 0
+                && root.appController.playback.sourcePath === pressedSourcePath
+            if (sourceStillLoaded) {
+                var releaseDurationSeconds = Math.min(
+                    pressedDurationSeconds,
+                    root.validPlaybackDuration(root.appController.playback.durationSeconds)
+                )
+                root.appController.seek_playback(root.clampedPlaybackPosition(previewValue, releaseDurationSeconds))
+            }
+            clearPressCapture()
+        }
+
+        Connections {
+            target: root.appController.playback
+
+            function onSourcePathChanged() {
+                playbackScrubber.clearPressCapture()
+            }
+
+            function onDurationSecondsChanged() {
+                playbackScrubber.resetPreview()
             }
         }
     }

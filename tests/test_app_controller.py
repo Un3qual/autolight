@@ -843,10 +843,15 @@ class AppControllerTest(unittest.TestCase):
 
     def test_qml_waveform_uses_canvas_and_visible_samples(self):
         waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+        track_row_qml = Path("UI/components/TrackRow.qml").read_text(encoding="utf-8")
+        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
 
         self.assertIn("Canvas", waveform_qml)
-        self.assertIn("visibleWaveformSamples", Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8"))
+        self.assertIn("visibleWaveformSamples", lane_qml)
         self.assertNotIn("model: waveformSamples", waveform_qml)
+        self.assertNotIn("required property var waveformSamples", track_row_qml)
+        self.assertNotIn("property var waveformSamples", lane_qml)
+        self.assertNotIn("waveformSamples:", track_row_qml)
 
     def test_qml_scrubber_avoids_live_heavy_seek_binding(self):
         playback_qml = Path("UI/components/PlaybackBar.qml").read_text(encoding="utf-8")
@@ -854,6 +859,32 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("onMoved", playback_qml)
         self.assertIn("onPressedChanged", playback_qml)
         self.assertIn("seek_playback", playback_qml)
+        self.assertIn("pressedSourcePath", playback_qml)
+        self.assertIn("pressedDurationSeconds", playback_qml)
+        self.assertIn("onSourcePathChanged", playback_qml)
+        self.assertIn("onDurationSecondsChanged", playback_qml)
+        self.assertIn("root.appController.playback.sourcePath === pressedSourcePath", playback_qml)
+        self.assertLess(
+            playback_qml.index("root.appController.playback.sourcePath === pressedSourcePath"),
+            playback_qml.index("root.appController.seek_playback"),
+        )
+
+    def test_qml_waveform_strip_guards_invalid_samples(self):
+        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+
+        self.assertIn("function finiteNumber", waveform_qml)
+        self.assertIn("if (!sample || typeof sample !== \"object\")", waveform_qml)
+        self.assertIn("var sampleTime = root.finiteNumber(sample.time, NaN)", waveform_qml)
+        self.assertIn("if (!isFinite(sampleTime))", waveform_qml)
+        self.assertIn("root.clampedUnit(sample.peak)", waveform_qml)
+        self.assertIn("root.clampedUnit(sample.rms)", waveform_qml)
+
+    def test_qml_waveform_strip_repaints_render_affecting_inputs(self):
+        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+
+        self.assertIn("onLeftPaddingChanged: requestPaint()", waveform_qml)
+        self.assertIn("onPeakColorChanged: requestPaint()", waveform_qml)
+        self.assertIn("onRmsColorChanged: requestPaint()", waveform_qml)
 
     def test_qml_keeps_playback_controls_out_of_top_toolbar(self):
         toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
