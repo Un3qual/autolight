@@ -590,7 +590,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests and smoke**
+- [x] **Step 1: Run all tests and smoke**
 
 Run:
 
@@ -601,7 +601,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 
