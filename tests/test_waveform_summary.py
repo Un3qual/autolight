@@ -261,6 +261,7 @@ class WaveformSummaryTest(unittest.TestCase):
         track.result_state = ResultState.COMPLETE
         track.cache_refs = ["missing_waveform"]
         track.provenance["waveform_samples"] = [{"peak": 1.0, "rms": 1.0}]
+        track.provenance["waveform_duration_seconds"] = 12.5
         controller._project.cache_entries.append(
             CacheEntry(
                 id="missing_waveform",

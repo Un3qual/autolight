@@ -176,6 +176,18 @@ class AppControllerTest(unittest.TestCase):
             self.assertTrue(controller.selectedTrackCanPlay)
             self.assertAlmostEqual(controller.timelineDurationSeconds, 2.0, places=2)
 
+    def test_playback_duration_change_notifies_timeline_duration(self):
+        controller = self._controller()
+        duration_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+
+        controller.playback._handle_duration_changed(2_000)
+
+        self.assertEqual(duration_changes, [2.0])
+        self.assertEqual(controller.timelineDurationSeconds, 2.0)
+
     def test_play_selected_track_loads_resolved_source_audio(self):
         controller = self._controller()
         controller.playback.load_source = Mock(return_value=True)
@@ -311,7 +323,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.pause_playback()", qml)
         self.assertIn("appController.stop_playback()", qml)
         self.assertIn("appController.seek_playback", qml)
-        self.assertIn("appController.playback.play()", qml)
+        self.assertNotIn("appController.playback.play()", qml)
+        self.assertIn("appController.selectedTrackCanPlay || appController.playback.isPlaying", qml)
         self.assertIn("appController.playback.positionSeconds", qml)
         self.assertIn("appController.playback.durationSeconds", qml)
         self.assertIn("appController.timelinePixelsPerSecond", qml)

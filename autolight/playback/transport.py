@@ -105,8 +105,9 @@ class PlaybackTransport(QObject):
         self._set_position_seconds(self._finite_non_negative(milliseconds / 1000.0))
 
     def _handle_duration_changed(self, milliseconds: int) -> None:
-        if self._duration_seconds <= 0.0:
-            self._set_duration_seconds(self._finite_non_negative(milliseconds / 1000.0))
+        duration_seconds = self._finite_non_negative(milliseconds / 1000.0)
+        if duration_seconds > 0.0 or self._duration_seconds <= 0.0:
+            self._set_duration_seconds(duration_seconds)
 
     def _handle_playback_state_changed(self, state) -> None:
         playback_state = getattr(self._player, "PlaybackState", QMediaPlayer.PlaybackState)

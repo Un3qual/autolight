@@ -81,7 +81,8 @@ class PlaybackTransportTest(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
-    def _temp_audio_path(self, directory):
+    @staticmethod
+    def _temp_audio_path(directory):
         path = Path(directory) / "song.wav"
         path.write_bytes(b"fake audio")
         return str(path)
@@ -155,6 +156,19 @@ class PlaybackTransportTest(unittest.TestCase):
 
             self.assertEqual(player.position_ms, 8000)
             self.assertEqual(transport.positionSeconds, 8.0)
+
+    def test_backend_duration_can_extend_undersized_hint_for_seek_clamping(self):
+        player = FakeMediaPlayer()
+        transport = PlaybackTransport(player=player, audio_output=FakeAudioOutput())
+        with tempfile.TemporaryDirectory() as directory:
+            transport.load_source(self._temp_audio_path(directory), 8.0)
+
+            player.durationChanged.emit(12_000)
+            transport.seek_seconds(11.0)
+
+            self.assertEqual(transport.durationSeconds, 12.0)
+            self.assertEqual(player.position_ms, 11_000)
+            self.assertEqual(transport.positionSeconds, 11.0)
 
     def test_unload_clears_source_and_position(self):
         player = FakeMediaPlayer()

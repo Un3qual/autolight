@@ -57,6 +57,7 @@ class AppController(QObject):
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
         self._playback = PlaybackTransport(parent=self)
+        self._playback.durationSecondsChanged.connect(self._notify_timeline_duration_changed)
         self._timeline_pixels_per_second = 96.0
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
@@ -485,10 +486,13 @@ class AppController(QObject):
         if asset.import_status != "online":
             self._set_last_error(f"source audio is {asset.import_status}")
             return False
-        if self._playback.sourcePath != asset.path:
-            if not self._playback.load_source(asset.path, asset.duration):
-                self._set_last_error(self._playback.lastError)
-                return False
+        loaded_source_path = self._playback.property("sourcePath")
+        if loaded_source_path != asset.path and not self._playback.load_source(
+            asset.path,
+            asset.duration,
+        ):
+            self._set_last_error(self._playback.lastError)
+            return False
         self._playback.play()
         self._set_last_error("")
         return True
@@ -619,31 +623,16 @@ class AppController(QObject):
         return audio_path
 
     def _source_audio_path_for_track(self, track) -> str:
-        seen_track_ids = set()
-        pending = [track]
-        while pending:
-            current = pending.pop(0)
-            if current is None or current.id in seen_track_ids:
-                continue
-            seen_track_ids.add(current.id)
-            asset_id = current.provenance.get("asset_id")
-            asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
-            if asset is not None:
-                return asset.path
-            next_track_ids = list(current.input_track_ids)
-            source_track_id = current.provenance.get("source_track_id", "")
-            if source_track_id:
-                next_track_ids.append(source_track_id)
-            for next_track_id in next_track_ids:
-                candidate = find_track(self._project, next_track_id)
-                if candidate is not None:
-                    pending.append(candidate)
-        return ""
+        asset = self._source_audio_asset_for_track(track)
+        return asset.path if asset is not None else ""
 
     def _source_audio_asset_for_track_id(self, track_id: str) -> AudioAsset | None:
         track = find_track(self._project, track_id)
         if track is None:
             return None
+        return self._source_audio_asset_for_track(track)
+
+    def _source_audio_asset_for_track(self, track) -> AudioAsset | None:
         seen_track_ids = set()
         pending = [track]
         while pending:
@@ -684,7 +673,6 @@ class AppController(QObject):
         return self._timeline_visible_seconds
 
     def _scroll_for_visible_time(self, seconds: float) -> float:
-        duration = self._timeline_duration_seconds()
         visible_seconds = self._visible_timeline_seconds()
         if seconds < self._timeline_scroll_seconds:
             return seconds
