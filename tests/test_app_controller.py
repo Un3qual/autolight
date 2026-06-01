@@ -268,6 +268,42 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.timelinePixelsPerSecond, 120.0)
         self.assertEqual(controller.timelineScrollSeconds, 4.0)
 
+    def test_timeline_visible_seconds_controls_scroll_clamp(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller.select_track(self._track_id(controller, 2))
+        controller.add_marker_to_selected_track(20.0, "Look")
+        visible_changes = []
+        scroll_changes = []
+        controller.timelineVisibleSecondsChanged.connect(
+            lambda: visible_changes.append(controller.timelineVisibleSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        controller.set_timeline_visible_seconds(2.0)
+        controller.set_timeline_scroll_seconds(50.0)
+
+        self.assertEqual(visible_changes, [2.0])
+        self.assertEqual(controller.timelineScrollSeconds, 18.0)
+
+        controller.set_timeline_visible_seconds(8.0)
+
+        self.assertEqual(controller.timelineScrollSeconds, 12.0)
+        self.assertIn(12.0, scroll_changes)
+
+    def test_timeline_visible_seconds_ignores_non_finite_and_clamps_minimum(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(4.0)
+
+        controller.set_timeline_visible_seconds(math.nan)
+        controller.set_timeline_visible_seconds(math.inf)
+
+        self.assertEqual(controller.timelineVisibleSeconds, 4.0)
+
+        controller.set_timeline_visible_seconds(0.0)
+
+        self.assertEqual(controller.timelineVisibleSeconds, 0.01)
+
     def test_qml_exposes_transport_controls_and_playhead(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
 
@@ -292,7 +328,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("appController.timelineScrollSeconds", qml)
         self.assertIn("appController.timelineDurationSeconds", qml)
+        self.assertIn("appController.timelineVisibleSeconds", qml)
+        self.assertIn("appController.set_timeline_visible_seconds", qml)
         self.assertNotIn("readonly property real timelinePixelsPerSecond: 96", qml)
+        self.assertNotIn("property real timelineVisibleSeconds: 8.0", qml)
+        self.assertNotIn("root.timelineVisibleSeconds", qml)
 
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()

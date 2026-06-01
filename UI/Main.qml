@@ -14,10 +14,14 @@ Window {
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
-    property real timelineVisibleSeconds: 8.0
 
     function timelineX(seconds) {
         return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
+    }
+
+    function updateTimelineVisibleSeconds() {
+        var laneWidth = Math.max(0, timelineRows.width - 280 - root.timelineLeftPadding)
+        appController.set_timeline_visible_seconds(laneWidth / appController.timelinePixelsPerSecond)
     }
 
     function formatSeconds(seconds) {
@@ -77,6 +81,15 @@ Window {
         }
         discardChangesDialog.pendingAction = ""
         discardChangesDialog.pendingPath = ""
+    }
+
+    Component.onCompleted: root.updateTimelineVisibleSeconds()
+
+    Connections {
+        target: appController
+        function onTimelinePixelsPerSecondChanged() {
+            root.updateTimelineVisibleSeconds()
+        }
     }
 
     FileDialog {
@@ -297,7 +310,7 @@ Window {
                 color: "#1c1f26"
 
                 Repeater {
-                    model: Math.ceil(root.timelineVisibleSeconds) + 1
+                    model: Math.ceil(appController.timelineVisibleSeconds) + 1
                     Text {
                         x: root.timelineX(appController.timelineScrollSeconds + index)
                         y: 9
@@ -351,7 +364,7 @@ Window {
             Slider {
                 id: timelineScrollSlider
                 from: 0
-                to: Math.max(0, appController.timelineDurationSeconds - root.timelineVisibleSeconds)
+                to: Math.max(0, appController.timelineDurationSeconds - appController.timelineVisibleSeconds)
                 value: appController.timelineScrollSeconds
                 Layout.fillWidth: true
                 onMoved: appController.set_timeline_scroll_seconds(value)
@@ -369,6 +382,7 @@ Window {
                 Layout.fillHeight: true
                 model: appController.trackModel
                 clip: true
+                onWidthChanged: root.updateTimelineVisibleSeconds()
 
                 delegate: Row {
                     width: timelineRows.width

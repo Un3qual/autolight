@@ -43,6 +43,7 @@ class AppController(QObject):
     timelineDurationSecondsChanged = Signal()
     timelinePixelsPerSecondChanged = Signal()
     timelineScrollSecondsChanged = Signal()
+    timelineVisibleSecondsChanged = Signal()
     isDirtyChanged = Signal()
     _track_changed_on_main_thread = Signal(str)
 
@@ -58,6 +59,7 @@ class AppController(QObject):
         self._playback = PlaybackTransport(parent=self)
         self._timeline_pixels_per_second = 96.0
         self._timeline_scroll_seconds = 0.0
+        self._timeline_visible_seconds = 8.0
         self._track_model = TimelineTrackModel(parent=self)
         self._track_model.set_project(self._project)
         self._registry = TransformRegistry()
@@ -101,6 +103,10 @@ class AppController(QObject):
     @Property(float, notify=timelineScrollSecondsChanged)
     def timelineScrollSeconds(self) -> float:
         return self._timeline_scroll_seconds
+
+    @Property(float, notify=timelineVisibleSecondsChanged)
+    def timelineVisibleSeconds(self) -> float:
+        return self._timeline_visible_seconds
 
     @Property(str, notify=projectNameChanged)
     def projectName(self) -> str:
@@ -526,6 +532,18 @@ class AppController(QObject):
         self._timeline_scroll_seconds = clamped
         self.timelineScrollSecondsChanged.emit()
 
+    @Slot(float)
+    def set_timeline_visible_seconds(self, seconds: float) -> None:
+        value = float(seconds)
+        if not math.isfinite(value):
+            return
+        clamped = max(value, 0.01)
+        if self._timeline_visible_seconds == clamped:
+            return
+        self._timeline_visible_seconds = clamped
+        self.timelineVisibleSecondsChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
     @Slot()
     def cleanup(self) -> None:
         self._job_queue.shutdown()
@@ -663,7 +681,7 @@ class AppController(QObject):
         self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
 
     def _visible_timeline_seconds(self) -> float:
-        return 8.0
+        return self._timeline_visible_seconds
 
     def _scroll_for_visible_time(self, seconds: float) -> float:
         duration = self._timeline_duration_seconds()
