@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
-from autolight.project.models import ProjectDocument, ResultState
+if TYPE_CHECKING:
+    from autolight.project.models import ProjectDocument
 
 
 SNAP_THRESHOLD_PIXELS = 8.0
@@ -23,24 +25,26 @@ class MarkerEditingService:
             return requested
         zoom = max(1.0, self._finite_positive(pixels_per_second, fallback=96.0))
         threshold_seconds = SNAP_THRESHOLD_PIXELS / zoom
-        visible = set(visible_track_ids)
+        eligible_track_ids = self._eligible_snap_track_ids(project, set(visible_track_ids))
         candidates = [
-            marker.timestamp
+            timestamp
             for marker in project.markers
-            if marker.track_id in visible and self._track_can_snap(project, marker.track_id)
+            if marker.track_id in eligible_track_ids
+            for timestamp in [self._finite_candidate_time(marker.timestamp)]
+            if timestamp is not None
         ]
         if not candidates:
             return requested
         best = min(candidates, key=lambda value: abs(value - requested))
         return best if abs(best - requested) <= threshold_seconds else requested
 
-    def _track_can_snap(self, project: ProjectDocument, track_id: str) -> bool:
-        track = next((item for item in project.tracks if item.id == track_id), None)
-        if track is None:
-            return False
-        return track.type.value == "generated" and track.result_state in {
-            ResultState.COMPLETE,
-            ResultState.STALE,
+    def _eligible_snap_track_ids(self, project: ProjectDocument, visible_track_ids: set[str]) -> set[str]:
+        return {
+            track.id
+            for track in project.tracks
+            if track.id in visible_track_ids
+            and self._enum_value(track.type) == "generated"
+            and self._enum_value(track.result_state) in {"complete", "stale"}
         }
 
     @staticmethod
@@ -52,3 +56,15 @@ class MarkerEditingService:
     def _finite_positive(value: float, *, fallback: float) -> float:
         number = float(value)
         return number if math.isfinite(number) and number > 0.0 else fallback
+
+    @staticmethod
+    def _finite_candidate_time(value: float) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    @staticmethod
+    def _enum_value(value: object) -> object:
+        return getattr(value, "value", value)

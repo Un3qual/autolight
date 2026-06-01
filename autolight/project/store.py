@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -665,14 +666,23 @@ def move_editable_markers(
     _editable_track_or_raise(project, track_id)
     selected = _editable_markers_or_raise(project, track_id, marker_ids)
     delta = _finite_marker_delta(delta_seconds)
-    next_timestamps = [marker.timestamp + delta for marker in selected]
+    next_timestamps = [_finite_moved_marker_timestamp(marker.timestamp, delta) for marker in selected]
     if any(timestamp < 0.0 for timestamp in next_timestamps):
         raise ValueError("marker move would create a negative timestamp")
+    changed = any(marker.timestamp != timestamp for marker, timestamp in zip(selected, next_timestamps, strict=True))
     for marker, timestamp in zip(selected, next_timestamps, strict=True):
         marker.timestamp = timestamp
-    if selected:
+    if changed:
         mark_dependents_stale(project, track_id)
     return selected
+
+
+def _finite_moved_marker_timestamp(timestamp: float, delta: float) -> float:
+    timestamp_value = _finite_marker_timestamp(timestamp)
+    next_timestamp = timestamp_value + delta
+    if not math.isfinite(next_timestamp):
+        raise ValueError("marker move would create a non-finite timestamp")
+    return next_timestamp
 
 
 def resize_editable_marker(
@@ -700,10 +710,10 @@ def marker_snapshot(marker: Marker) -> dict[str, Any]:
         "label": marker.label,
         "category": marker.category,
         "confidence": marker.confidence,
-        "tags": list(marker.tags),
+        "tags": copy.deepcopy(marker.tags),
         "source_transform": marker.source_transform,
-        "source_marker_ids": list(marker.source_marker_ids),
-        "metadata": dict(marker.metadata) if isinstance(marker.metadata, dict) else {},
+        "source_marker_ids": copy.deepcopy(marker.source_marker_ids),
+        "metadata": copy.deepcopy(marker.metadata) if isinstance(marker.metadata, dict) else {},
     }
 
 

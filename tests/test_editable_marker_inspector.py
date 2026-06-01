@@ -18,6 +18,7 @@ from autolight.project.store import (
     import_audio_asset,
     marker_color_key,
     marker_display_color,
+    marker_snapshot,
     move_editable_markers,
     new_project,
     resize_editable_marker,
@@ -67,6 +68,43 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(first.timestamp, 0.25)
         self.assertEqual(second.timestamp, 1.25)
 
+    def test_move_editable_markers_rejects_non_finite_results_atomically(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1e308, "Huge")
+
+        with self.assertRaisesRegex(ValueError, "finite"):
+            move_editable_markers(project, editable.id, [marker.id], 1e308)
+
+        self.assertEqual(marker.timestamp, 1e308)
+
+        marker.timestamp = math.inf
+        with self.assertRaisesRegex(ValueError, "finite"):
+            move_editable_markers(project, editable.id, [marker.id], 0.0)
+        self.assertTrue(math.isinf(marker.timestamp))
+
+    def test_move_editable_markers_noop_does_not_mark_downstream_stale(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 0.25, "Cue")
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+
+        moved = move_editable_markers(project, editable.id, [marker.id], 0.0)
+
+        self.assertEqual(moved, [marker])
+        self.assertEqual(marker.timestamp, 0.25)
+        self.assertEqual(downstream.result_state, ResultState.COMPLETE)
+
     def test_resize_editable_marker_sets_duration_and_rejects_negative_duration(self):
         project = new_project("Demo")
         editable = self._editable_track(project)
@@ -115,6 +153,94 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             ),
             1.03,
         )
+
+    def test_marker_editing_service_snap_edge_cases(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        stale = add_generated_track(project, source.id, "Stale Beats", "timing.beats", {}, "1", "markers.v1", "dep")
+        stale.result_state = ResultState.STALE
+        project.markers.append(Marker(id="stale_beat", track_id=stale.id, timestamp=1.0, category="timing"))
+        service = MarkerEditingService()
+
+        self.assertEqual(
+            service.snap_time(
+                project,
+                requested_seconds=1.25,
+                pixels_per_second=32.0,
+                visible_track_ids=[stale.id],
+                bypass=False,
+            ),
+            1.0,
+        )
+
+        failed = add_generated_track(project, source.id, "Failed Beats", "timing.beats", {}, "1", "markers.v1", "dep")
+        failed.result_state = ResultState.FAILED
+        running = add_generated_track(project, source.id, "Running Beats", "timing.beats", {}, "1", "markers.v1", "dep")
+        running.result_state = ResultState.RUNNING
+        editable = create_manual_editable_track(project, source.id, "Manual Cues")
+        project.markers.extend(
+            [
+                Marker(id="source_marker", track_id=source.id, timestamp=2.0, category="timing"),
+                Marker(id="failed_marker", track_id=failed.id, timestamp=2.0, category="timing"),
+                Marker(id="running_marker", track_id=running.id, timestamp=2.0, category="timing"),
+                Marker(id="editable_marker", track_id=editable.id, timestamp=2.0, category="timing"),
+            ]
+        )
+
+        self.assertEqual(
+            service.snap_time(
+                project,
+                requested_seconds=2.03,
+                pixels_per_second=100.0,
+                visible_track_ids=[source.id, failed.id, running.id, editable.id],
+                bypass=False,
+            ),
+            2.03,
+        )
+
+    def test_marker_editing_service_ignores_non_finite_snap_times(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        timing = add_generated_track(project, source.id, "Beat Markers", "timing.beats", {}, "1", "markers.v1", "dep")
+        timing.result_state = ResultState.COMPLETE
+        project.markers.extend(
+            [
+                Marker(id="bad_nan", track_id=timing.id, timestamp=math.nan, category="timing"),
+                Marker(id="bad_inf", track_id=timing.id, timestamp=math.inf, category="timing"),
+            ]
+        )
+        service = MarkerEditingService()
+
+        snapped = service.snap_time(
+            project,
+            requested_seconds=math.nan,
+            pixels_per_second=100.0,
+            visible_track_ids=[timing.id],
+            bypass=False,
+        )
+
+        self.assertTrue(math.isfinite(snapped))
+        self.assertEqual(snapped, 0.0)
+
+    def test_marker_snapshot_deep_copies_mutable_marker_fields(self):
+        marker = Marker(
+            id="marker_1",
+            track_id="track_1",
+            timestamp=1.0,
+            tags=["flash"],
+            source_marker_ids=["source_1"],
+            metadata={"nested": {"color": "cyan"}, "steps": ["a"]},
+        )
+
+        snapshot = marker_snapshot(marker)
+        marker.tags.append("blackout")
+        marker.source_marker_ids.append("source_2")
+        marker.metadata["nested"]["color"] = "amber"
+        marker.metadata["steps"].append("b")
+
+        self.assertEqual(snapshot["tags"], ["flash"])
+        self.assertEqual(snapshot["source_marker_ids"], ["source_1"])
+        self.assertEqual(snapshot["metadata"], {"nested": {"color": "cyan"}, "steps": ["a"]})
 
     def test_add_editable_marker_rejects_generated_track(self):
         project = new_project("Demo")
