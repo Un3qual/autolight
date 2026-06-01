@@ -125,6 +125,18 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertNotEqual(first_path, second_path)
 
+    def test_demo_project_emits_final_timeline_duration_after_content_loads(self):
+        controller = self._controller()
+        duration_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+
+        controller.load_demo_project()
+
+        self.assertGreater(controller.timelineDurationSeconds, 0.0)
+        self.assertEqual(duration_changes[-1], controller.timelineDurationSeconds)
+
     def test_new_project_resets_project_path_and_timeline_model(self):
         controller = self._controller()
         controller.load_demo_project()

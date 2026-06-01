@@ -248,6 +248,8 @@ class AppController(QObject):
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
         self._track_model.set_project(self._project)
         self._set_selected_track_id(source.id)
+        self.timelineDurationSecondsChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
         self._set_last_error("")
         self._set_dirty(False)
 
