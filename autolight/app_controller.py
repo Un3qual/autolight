@@ -639,11 +639,13 @@ class AppController(QObject):
         try:
             if not self._selected_marker_ids:
                 raise ValueError("select at least one marker to move")
+            delta = float(delta_seconds)
+            if not math.isfinite(delta):
+                raise ValueError("marker move delta must be finite")
             before = [
                 marker_snapshot(self._editable_marker_for_selected_marker_id(marker_id))
                 for marker_id in self._selected_marker_ids
             ]
-            delta = float(delta_seconds)
             if not bypass_snap and len(self._selected_marker_ids) == 1:
                 marker = self._editable_marker_for_selected_marker_id(self._selected_marker_ids[0])
                 snapped = self.snap_timeline_time(marker.timestamp + delta, False)

@@ -1634,6 +1634,32 @@ class AppControllerTest(unittest.TestCase):
         self.assertTrue(controller.resize_marker(marker_id, 1.25))
         self.assertEqual(marker.duration, 1.25)
 
+    def test_controller_rejects_non_finite_marker_move_deltas_before_snapping(self):
+        for delta in [math.nan, math.inf, -math.inf]:
+            with self.subTest(delta=delta):
+                controller = self._controller()
+                controller.load_demo_project()
+                editable = next(track for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+                controller.select_track(editable.id)
+                marker_id = controller.add_marker_to_selected_track(0.5, "Cue", "cue", "cyan")
+                controller.toggle_marker_selection(marker_id, False)
+                marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+                before_dirty = controller.isDirty
+                before_can_undo = controller.canUndo
+                before_can_redo = controller.canRedo
+                before_undo_count = len(controller._edit_history._undo_stack)
+                before_redo_count = len(controller._edit_history._redo_stack)
+
+                self.assertFalse(controller.move_selected_markers(delta, False))
+
+                self.assertEqual(marker.timestamp, 0.5)
+                self.assertEqual(controller.isDirty, before_dirty)
+                self.assertEqual(controller.canUndo, before_can_undo)
+                self.assertEqual(controller.canRedo, before_can_redo)
+                self.assertEqual(len(controller._edit_history._undo_stack), before_undo_count)
+                self.assertEqual(len(controller._edit_history._redo_stack), before_redo_count)
+                self.assertIn("finite", controller.lastError)
+
     def test_controller_snap_time_uses_generated_timing_markers_and_bypass(self):
         controller = self._controller()
         controller.load_demo_project()
