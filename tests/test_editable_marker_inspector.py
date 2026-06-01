@@ -5,12 +5,16 @@ from pathlib import Path
 
 from autolight.project.models import Marker, ResultState
 from autolight.project.store import (
+    MARKER_COLOR_PALETTE,
     add_editable_marker,
     add_generated_track,
+    bulk_update_editable_markers,
     create_editable_track_from_markers,
     delete_editable_marker,
     import_audio_asset,
+    marker_display_color,
     new_project,
+    update_editable_marker,
 )
 from tests.helpers import write_wav
 
@@ -85,6 +89,163 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "finite"):
             add_editable_marker(project, editable.id, math.inf, "Cue")
+
+    def test_update_editable_marker_sets_label_category_color_and_timestamp(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.25, "Cue")
+
+        updated = update_editable_marker(
+            project,
+            editable.id,
+            marker.id,
+            timestamp=2.5,
+            label="Blackout",
+            category="lighting",
+            color="amber",
+        )
+
+        self.assertIs(updated, marker)
+        self.assertEqual(marker.timestamp, 2.5)
+        self.assertEqual(marker.label, "Blackout")
+        self.assertEqual(marker.category, "lighting")
+        self.assertEqual(marker.metadata["color"], "amber")
+        self.assertEqual(marker_display_color(marker), MARKER_COLOR_PALETTE["amber"])
+
+    def test_update_editable_marker_rejects_generated_track_and_invalid_color(self):
+        project = new_project("Demo")
+        generated = self._generated_track(project)
+        project.markers.append(Marker(id="marker_source", track_id=generated.id, timestamp=0.5))
+
+        with self.assertRaisesRegex(ValueError, "editable track"):
+            update_editable_marker(
+                project,
+                generated.id,
+                "marker_source",
+                timestamp=1.0,
+                label="Cue",
+                category="cue",
+                color="cyan",
+            )
+
+        editable = create_editable_track_from_markers(project, generated.id, "Editable", ["marker_source"])
+        marker = [item for item in project.markers if item.track_id == editable.id][0]
+
+        with self.assertRaisesRegex(ValueError, "marker color"):
+            update_editable_marker(
+                project,
+                editable.id,
+                marker.id,
+                timestamp=1.0,
+                label="Cue",
+                category="cue",
+                color="not-a-color",
+            )
+
+    def test_update_editable_marker_invalid_color_leaves_marker_and_downstream_unchanged(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.25, "Cue")
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+
+        with self.assertRaisesRegex(ValueError, "marker color"):
+            update_editable_marker(
+                project,
+                editable.id,
+                marker.id,
+                timestamp=2.0,
+                label="Changed",
+                category="changed",
+                color="not-a-color",
+            )
+
+        self.assertEqual(marker.timestamp, 1.25)
+        self.assertEqual(marker.label, "Cue")
+        self.assertEqual(marker.category, "cue")
+        self.assertEqual(marker.metadata["color"], "cyan")
+        self.assertEqual(downstream.result_state, ResultState.COMPLETE)
+
+    def test_update_editable_marker_marks_downstream_generated_tracks_stale(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.25, "Cue")
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+
+        update_editable_marker(
+            project,
+            editable.id,
+            marker.id,
+            timestamp=1.5,
+            label="Look",
+            category="lighting",
+            color="violet",
+        )
+
+        self.assertEqual(downstream.result_state, ResultState.STALE)
+
+    def test_bulk_update_editable_markers_updates_named_markers(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        first = add_editable_marker(project, editable.id, 1.0, "A")
+        second = add_editable_marker(project, editable.id, 2.0, "B")
+        third = add_editable_marker(project, editable.id, 3.0, "C")
+
+        updated_count = bulk_update_editable_markers(
+            project,
+            editable.id,
+            [first.id, third.id],
+            label="Hit",
+            category="accent",
+            color="rose",
+        )
+
+        self.assertEqual(updated_count, 2)
+        self.assertEqual(first.label, "Hit")
+        self.assertEqual(first.category, "accent")
+        self.assertEqual(first.metadata["color"], "rose")
+        self.assertEqual(second.label, "B")
+        self.assertEqual(second.metadata["color"], "cyan")
+        self.assertEqual(third.label, "Hit")
+
+    def test_bulk_update_with_empty_marker_ids_updates_all_markers_on_track(self):
+        project = new_project("Demo")
+        generated = self._generated_track(project)
+        editable = create_editable_track_from_markers(project, generated.id, "Editable", [])
+        first = add_editable_marker(project, editable.id, 1.0, "A")
+        second = add_editable_marker(project, editable.id, 2.0, "B")
+
+        updated_count = bulk_update_editable_markers(
+            project,
+            editable.id,
+            [],
+            label="Scene",
+            category="scene",
+            color="blue",
+        )
+
+        self.assertEqual(updated_count, 2)
+        self.assertEqual([first.label, second.label], ["Scene", "Scene"])
+        self.assertEqual([first.metadata["color"], second.metadata["color"]], ["blue", "blue"])
 
     def test_controller_adds_marker_to_selected_editable_track(self):
         from autolight.app_controller import AppController
