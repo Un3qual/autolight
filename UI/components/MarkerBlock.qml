@@ -8,6 +8,8 @@ Rectangle {
     property string markerId: root.marker.id || ""
     property real timestamp: Number(root.marker.timestamp || 0)
     property real duration: Number(root.marker.duration || 0)
+    property real baseX: root.timelineX(root.marker.timestamp)
+    property real lastPreviewDelta: 0
     property bool markerSelected: false
     property bool editable: false
     property real pixelsPerSecond: 96
@@ -24,7 +26,7 @@ Rectangle {
 
     width: Math.max(8, (root.marker.duration > 0 ? root.marker.duration : 0.08) * root.appController.timelinePixelsPerSecond)
     height: parent.height - 18
-    x: root.timelineX(root.marker.timestamp)
+    x: root.baseX + root.lastPreviewDelta * root.pixelsPerSecond
     y: 9
     visible: x + width >= root.timelineLeftPadding && x <= parent.width
     radius: 2
@@ -36,10 +38,10 @@ Rectangle {
         enabled: root.editable
         drag.target: null
         property real pressX: 0
-        property real lastPreviewDelta: 0
 
         onPressed: function(mouse) {
             pressX = mouse.x
+            root.lastPreviewDelta = 0
             var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
             root.appController.select_track(root.trackId)
             if (!root.markerSelected) {
@@ -48,20 +50,20 @@ Rectangle {
         }
 
         onPositionChanged: function(mouse) {
-            lastPreviewDelta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)
+            root.lastPreviewDelta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)
         }
 
         onReleased: function(mouse) {
             var pixelDelta = mouse.x - pressX
             if (Math.abs(pixelDelta) < root.dragThresholdPixels) {
-                lastPreviewDelta = 0
+                root.lastPreviewDelta = 0
                 return
             }
             var bypass = (mouse.modifiers & Qt.AltModifier) !== 0
             var delta = pixelDelta / Math.max(1, root.pixelsPerSecond)
             root.appController.select_track(root.trackId)
             root.appController.move_selected_markers(delta, bypass)
-            lastPreviewDelta = 0
+            root.lastPreviewDelta = 0
         }
     }
 

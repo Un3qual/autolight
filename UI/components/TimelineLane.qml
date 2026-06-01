@@ -62,7 +62,7 @@ Rectangle {
             appController: root.appController
             timelineLeftPadding: root.timelineLeftPadding
             markerLabelText: root.markerLabelText
-            x: root.timelineX(modelData.timestamp)
+            baseX: root.timelineX(modelData.timestamp)
             width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.appController.timelinePixelsPerSecond)
             height: parent.height - 18
             y: 9

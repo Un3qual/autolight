@@ -741,6 +741,26 @@ class AppControllerTest(unittest.TestCase):
             marker_qml.index("root.appController.move_selected_markers"),
         )
 
+    def test_qml_marker_drag_preview_affects_rendered_position_without_live_move(self):
+        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
+        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property real baseX", marker_qml)
+        self.assertIn("property real lastPreviewDelta", marker_qml)
+        self.assertIn("x: root.baseX + root.lastPreviewDelta * root.pixelsPerSecond", marker_qml)
+        self.assertIn("root.lastPreviewDelta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)", marker_qml)
+        self.assertIn("root.lastPreviewDelta = 0", marker_qml)
+        self.assertIn("baseX: root.timelineX(modelData.timestamp)", lane_qml)
+        self.assertNotIn("x: root.timelineX(modelData.timestamp)", lane_qml)
+        self.assertLess(
+            marker_qml.index("onReleased: function(mouse)"),
+            marker_qml.index("root.appController.move_selected_markers"),
+        )
+        self.assertLess(
+            marker_qml.index("onPositionChanged: function(mouse)"),
+            marker_qml.index("onReleased: function(mouse)"),
+        )
+
     def test_qml_marker_operations_select_track_and_preserve_selected_drags(self):
         lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
         marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
