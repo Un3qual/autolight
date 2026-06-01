@@ -240,6 +240,34 @@ class AppControllerTest(unittest.TestCase):
         self.assertAlmostEqual(loaded_duration, 1.5, places=2)
         controller.playback.play.assert_called_once()
 
+    def test_play_selected_track_copies_playback_last_error_when_load_source_fails(self):
+        controller = self._controller()
+
+        class FakePlayback:
+            def __init__(self):
+                self.load_source = Mock(return_value=False)
+                self.play = Mock()
+                self.lastError = "direct lastError should not be used"
+
+            def property(self, name):
+                if name == "sourcePath":
+                    return ""
+                if name == "lastError":
+                    return "decoder failed"
+                raise AssertionError(f"unexpected property lookup: {name}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+            controller._playback = FakePlayback()
+
+            self.assertFalse(controller.play_selected_track())
+
+        controller.playback.load_source.assert_called_once()
+        controller.playback.play.assert_not_called()
+        self.assertEqual(controller.lastError, "decoder failed")
+
     def test_play_selected_track_rejects_track_without_source_audio(self):
         controller = self._controller()
         controller.load_demo_project()

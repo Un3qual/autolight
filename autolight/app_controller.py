@@ -491,7 +491,7 @@ class AppController(QObject):
             asset.path,
             asset.duration,
         ):
-            self._set_last_error(self._playback.lastError)
+            self._set_last_error(self._playback.property("lastError"))
             return False
         self._playback.play()
         self._set_last_error("")
