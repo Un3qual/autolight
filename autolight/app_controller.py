@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 import tempfile
@@ -15,6 +16,7 @@ from autolight.app import (
     TimelineViewport,
     WaveformLodStore,
 )
+from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
@@ -33,6 +35,7 @@ from autolight.project.store import (
     delete_editable_marker,
     find_track,
     import_audio_asset,
+    marker_snapshot,
     marker_color_key,
     marker_display_color,
     new_project,
@@ -66,6 +69,8 @@ class AppController(QObject):
     timelineScrollSecondsChanged = Signal()
     timelineVisibleSecondsChanged = Signal()
     isDirtyChanged = Signal()
+    canUndoChanged = Signal()
+    canRedoChanged = Signal()
     _track_changed_on_main_thread = Signal(str)
 
     def __init__(self):
@@ -115,6 +120,14 @@ class AppController(QObject):
     @Property(QObject, constant=True)
     def playback(self):
         return self._playback
+
+    @Property(bool, notify=canUndoChanged)
+    def canUndo(self) -> bool:
+        return self._edit_history.can_undo
+
+    @Property(bool, notify=canRedoChanged)
+    def canRedo(self) -> bool:
+        return self._edit_history.can_redo
 
     @Property(list, constant=True)
     def markerColorOptions(self) -> list[dict[str, str]]:
@@ -472,9 +485,14 @@ class AppController(QObject):
                 category=normalize_marker_category(category),
                 color=normalize_marker_color(color),
             )
+            after = [marker_snapshot(marker)]
+            self._edit_history.push(
+                MarkerSnapshotCommand(track_id=self._selected_track_id, before=[], after=after)
+            )
             self._track_model.set_project(self._project)
             self._set_selected_marker_ids([marker.id], emit_marker_summary=False)
             self.selectedTrackMarkersChanged.emit()
+            self._notify_history_changed()
             self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
@@ -623,6 +641,36 @@ class AppController(QObject):
             return []
 
     @Slot(result=bool)
+    def undo(self) -> bool:
+        try:
+            if not self._edit_history.undo(self._project):
+                return False
+            self.trackModel.set_project(self._project)
+            self.selectedTrackMarkersChanged.emit()
+            self._notify_timeline_duration_changed()
+            self._notify_history_changed()
+            self._set_dirty(True)
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(result=bool)
+    def redo(self) -> bool:
+        try:
+            if not self._edit_history.redo(self._project):
+                return False
+            self.trackModel.set_project(self._project)
+            self.selectedTrackMarkersChanged.emit()
+            self._notify_timeline_duration_changed()
+            self._notify_history_changed()
+            self._set_dirty(True)
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(result=bool)
     def play_selected_track(self) -> bool:
         asset = self._source_audio_asset_for_track_id(self._selected_track_id)
         if asset is None:
@@ -749,6 +797,8 @@ class AppController(QObject):
         self.timelineScrollSecondsChanged.emit()
         if restore_ui_state:
             self._restore_timeline_ui_state()
+        self._edit_history.clear()
+        self._notify_history_changed()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
@@ -912,6 +962,19 @@ class AppController(QObject):
     def _notify_timeline_duration_changed(self) -> None:
         self.timelineDurationSecondsChanged.emit()
         self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
+    def _notify_history_changed(self) -> None:
+        self.canUndoChanged.emit()
+        self.canRedoChanged.emit()
+
+    def _push_project_snapshot_command(self, before_project) -> None:
+        self._edit_history.push(
+            ProjectSnapshotCommand(
+                before=before_project,
+                after=copy.deepcopy(self._project),
+            )
+        )
+        self._notify_history_changed()
 
     def _keep_playback_position_visible(self) -> None:
         if not self._playback.isPlaying:

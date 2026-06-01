@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from autolight.app.edit_history import EditHistory, MarkerSnapshotCommand
 from autolight.app.marker_editing import MarkerEditingService
 from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
@@ -241,6 +242,38 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(snapshot["tags"], ["flash"])
         self.assertEqual(snapshot["source_marker_ids"], ["source_1"])
         self.assertEqual(snapshot["metadata"], {"nested": {"color": "cyan"}, "steps": ["a"]})
+
+    def test_edit_history_undoes_and_redoes_marker_snapshot_command(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.0, "Cue", color="cyan")
+        before = [marker_snapshot(marker)]
+        update_editable_marker(
+            project,
+            editable.id,
+            marker.id,
+            timestamp=2.0,
+            label="Hit",
+            category="accent",
+            color="amber",
+        )
+        after = [marker_snapshot(marker)]
+        history = EditHistory()
+        history.push(MarkerSnapshotCommand(track_id=editable.id, before=before, after=after))
+
+        self.assertTrue(history.can_undo)
+        history.undo(project)
+        marker = next(item for item in project.markers if item.id == marker.id)
+        self.assertEqual(marker.timestamp, 1.0)
+        self.assertEqual(marker.label, "Cue")
+        self.assertEqual(marker.metadata["color"], "cyan")
+
+        self.assertTrue(history.can_redo)
+        history.redo(project)
+        marker = next(item for item in project.markers if item.id == marker.id)
+        self.assertEqual(marker.timestamp, 2.0)
+        self.assertEqual(marker.label, "Hit")
+        self.assertEqual(marker.metadata["color"], "amber")
 
     def test_add_editable_marker_rejects_generated_track(self):
         project = new_project("Demo")

@@ -118,6 +118,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertIsInstance(controller._viewport, TimelineViewport)
         self.assertIsInstance(controller._waveform_lod, WaveformLodStore)
 
+    def test_controller_exposes_undo_redo_state_and_clears_history_on_new_project(self):
+        controller = self._controller()
+
+        self.assertFalse(controller.canUndo)
+        self.assertFalse(controller.canRedo)
+        controller.load_demo_project()
+        editable_id = next(track.id for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(0.75, "Cue", "cue", "cyan")
+
+        self.assertTrue(controller.canUndo)
+        self.assertFalse(controller.canRedo)
+        self.assertTrue(controller.undo())
+        self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertTrue(controller.canRedo)
+
+        controller.new_project()
+        self.assertFalse(controller.canUndo)
+        self.assertFalse(controller.canRedo)
+
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()
 
