@@ -309,8 +309,56 @@ class AppControllerTest(unittest.TestCase):
 
         controller.playback._handle_position_changed(6_500)
 
-        self.assertEqual(scroll_changes, [2.5])
-        self.assertEqual(controller.timelineScrollSeconds, 2.5)
+        self.assertEqual(scroll_changes, [3.3])
+        self.assertEqual(controller.timelineScrollSeconds, 3.3)
+
+    def test_playback_follow_updates_scroll_only_when_playhead_enters_edge_band(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(10.0)
+        controller.set_timeline_scroll_seconds(20.0)
+
+        next_scroll = controller._viewport.scroll_for_follow(
+            position_seconds=25.0,
+            scroll_seconds=20.0,
+            visible_seconds=10.0,
+            duration_seconds=60.0,
+        )
+        self.assertEqual(next_scroll, 20.0)
+
+        next_scroll = controller._viewport.scroll_for_follow(
+            position_seconds=29.5,
+            scroll_seconds=20.0,
+            visible_seconds=10.0,
+            duration_seconds=60.0,
+        )
+        self.assertGreater(next_scroll, 20.0)
+        self.assertLessEqual(next_scroll, 50.0)
+
+    def test_playback_follow_throttles_scroll_updates(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(10.0)
+        controller.set_timeline_scroll_seconds(0.0)
+
+        self.assertTrue(controller._viewport.should_emit_follow_scroll(0.000))
+        self.assertFalse(controller._viewport.should_emit_follow_scroll(0.010))
+        self.assertTrue(controller._viewport.should_emit_follow_scroll(0.034))
+
+    def test_zoom_around_anchor_keeps_anchor_screen_position_stable(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(10.0)
+        controller.set_timeline_scroll_seconds(4.0)
+
+        zoom, scroll = controller._viewport.zoom_around_anchor(
+            current_zoom=100.0,
+            requested_zoom=200.0,
+            current_scroll=4.0,
+            visible_seconds=10.0,
+            duration_seconds=30.0,
+            anchor_seconds=6.0,
+        )
+
+        self.assertEqual(zoom, 200.0)
+        self.assertAlmostEqual(scroll, 5.0)
 
     def test_play_selected_track_loads_resolved_source_audio(self):
         controller = self._controller()

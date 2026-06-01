@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
@@ -663,12 +664,24 @@ class AppController(QObject):
         value = float(pixels_per_second)
         if not math.isfinite(value):
             return
-        clamped = min(max(value, 24.0), 240.0)
+        anchor = (
+            self._playback.positionSeconds
+            if self._playback.property("sourcePath")
+            else self._timeline_scroll_seconds + self._visible_timeline_seconds() / 2
+        )
+        clamped, next_scroll = self._viewport.zoom_around_anchor(
+            current_zoom=self._timeline_pixels_per_second,
+            requested_zoom=value,
+            current_scroll=self._timeline_scroll_seconds,
+            visible_seconds=self._visible_timeline_seconds(),
+            duration_seconds=self._timeline_duration_seconds(),
+            anchor_seconds=anchor,
+        )
         if self._timeline_pixels_per_second == clamped:
             return
         self._timeline_pixels_per_second = clamped
         self.timelinePixelsPerSecondChanged.emit()
-        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+        self.set_timeline_scroll_seconds(next_scroll)
 
     @Slot(float)
     def set_timeline_scroll_seconds(self, seconds: float) -> None:
@@ -880,9 +893,16 @@ class AppController(QObject):
     def _keep_playback_position_visible(self) -> None:
         if not self._playback.isPlaying:
             return
-        self.set_timeline_scroll_seconds(
-            self._scroll_for_visible_time(self._playback.positionSeconds)
+        next_scroll = self._viewport.scroll_for_follow(
+            position_seconds=self._playback.positionSeconds,
+            scroll_seconds=self._timeline_scroll_seconds,
+            visible_seconds=self._visible_timeline_seconds(),
+            duration_seconds=self._timeline_duration_seconds(),
         )
+        if next_scroll == self._timeline_scroll_seconds:
+            return
+        if self._viewport.should_emit_follow_scroll(time.monotonic()):
+            self.set_timeline_scroll_seconds(next_scroll)
 
     def _visible_timeline_seconds(self) -> float:
         return self._timeline_visible_seconds
