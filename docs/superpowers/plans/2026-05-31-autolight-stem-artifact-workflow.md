@@ -25,7 +25,7 @@
 - Modify: `autolight/timeline/model.py`
 - Create: `tests/test_stem_artifact_workflow.py`
 
-- [ ] **Step 1: Add failing artifact role tests**
+- [x] **Step 1: Add failing artifact role tests**
 
 Create `tests/test_stem_artifact_workflow.py`:
 
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run artifact role tests and verify failure**
+- [x] **Step 2: Run artifact role tests and verify failure**
 
 Run:
 
@@ -85,7 +85,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow -v
 
 Expected: FAIL with `KeyError: 'cacheRefCount'`.
 
-- [ ] **Step 3: Add artifact summary roles**
+- [x] **Step 3: Add artifact summary roles**
 
 Extend `ROLE_NAMES` in `autolight/timeline/model.py`:
 
@@ -117,7 +117,7 @@ Add helper:
         ]
 ```
 
-- [ ] **Step 4: Run stem artifact tests**
+- [x] **Step 4: Run stem artifact tests**
 
 Run:
 
@@ -127,7 +127,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow tests.test_timeline_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit artifact roles**
+- [x] **Step 5: Commit artifact roles**
 
 Run:
 

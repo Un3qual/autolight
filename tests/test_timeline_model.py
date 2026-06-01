@@ -39,6 +39,8 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("activeJobId"): b"activeJobId",
                     model.role_for_name("jobState"): b"jobState",
                     model.role_for_name("jobProgress"): b"jobProgress",
+                    model.role_for_name("cacheRefCount"): b"cacheRefCount",
+                    model.role_for_name("artifactKinds"): b"artifactKinds",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -60,6 +62,8 @@ class TimelineTrackModelTest(unittest.TestCase):
             )
             self.assertEqual(model.data(index, model.role_for_name("resultState")), "complete")
             self.assertEqual(model.data(index, model.role_for_name("error")), "analysis failed")
+            self.assertEqual(model.data(index, model.role_for_name("cacheRefCount")), 0)
+            self.assertEqual(model.data(index, model.role_for_name("artifactKinds")), "")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
 
     def test_model_exposes_latest_job_state_progress_and_id(self):

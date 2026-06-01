@@ -19,6 +19,8 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 8: b"activeJobId",
         Qt.ItemDataRole.UserRole + 9: b"jobState",
         Qt.ItemDataRole.UserRole + 10: b"jobProgress",
+        Qt.ItemDataRole.UserRole + 12: b"cacheRefCount",
+        Qt.ItemDataRole.UserRole + 13: b"artifactKinds",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -39,6 +41,10 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("activeJobId"): self._active_job_id_for_track,
             self.role_for_name("jobState"): self._job_state_for_track,
             self.role_for_name("jobProgress"): self._job_progress_for_track,
+            self.role_for_name("cacheRefCount"): lambda track: len(track.cache_refs),
+            self.role_for_name("artifactKinds"): lambda track: ", ".join(
+                self._artifact_kinds_for_track(track.cache_refs)
+            ),
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
@@ -128,6 +134,16 @@ class TimelineTrackModel(QAbstractListModel):
     def _job_progress_for_track(self, track: Track) -> float:
         latest_job = self._latest_job_for_track(track.id)
         return 0.0 if latest_job is None else latest_job.progress
+
+    def _artifact_kinds_for_track(self, cache_refs: list[str]) -> list[str]:
+        if self._project is None:
+            return []
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        return [
+            entries[cache_ref].artifact_kind
+            for cache_ref in cache_refs
+            if cache_ref in entries
+        ]
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])
