@@ -57,6 +57,45 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertTrue(Path(result.artifacts["waveform"]).name.endswith(".json"))
         self.assertEqual(result.metadata["bucket_count"], 4)
 
+    def test_controller_loads_waveform_samples_after_job_completion(self):
+        from autolight.app_controller import AppController
+        from autolight.project.store import add_generated_track, import_audio_asset
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source = import_audio_asset(controller._project, audio_path)
+            track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Waveform",
+                transform_id="waveform.summary",
+                transform_params={"audio_path": str(audio_path), "buckets": 4},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-test",
+            )
+            controller.trackModel.set_project(controller._project)
+
+            job_id = controller.run_track(track.id)
+            controller._job_queue.wait(job_id, timeout=5)
+
+        model = controller.trackModel
+        waveform_role = model.role_for_name("waveformSamples")
+        row = next(index for index, item in enumerate(controller._project.tracks) if item.id == track.id)
+        samples = model.data(model.index(row, 0), waveform_role)
+
+        self.assertEqual(len(samples), 4)
+        self.assertIn("peak", samples[0])
+
+    def test_qml_mentions_waveform_samples_role(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        self.assertIn("waveformSamples", qml)
+        self.assertIn("modelData.peak", qml)
+
 
 if __name__ == "__main__":
     unittest.main()

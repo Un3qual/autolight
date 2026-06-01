@@ -333,6 +333,17 @@ Window {
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
 
                         Repeater {
+                            model: waveformSamples
+                            Rectangle {
+                                width: 2
+                                height: Math.max(2, modelData.peak * (parent.height - 18))
+                                x: index * 3
+                                y: (parent.height - height) / 2
+                                color: "#60a5fa"
+                            }
+                        }
+
+                        Repeater {
                             model: markerSpans
                             Rectangle {
                                 width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)

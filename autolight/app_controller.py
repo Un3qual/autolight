@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -424,11 +425,31 @@ class AppController(QObject):
         self.isDirtyChanged.emit()
 
     def _handle_track_changed(self, track_id: str) -> None:
+        self._load_waveform_samples(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
+
+    def _load_waveform_samples(self, track_id: str) -> None:
+        track = find_track(self._project, track_id)
+        if track is None or track.transform_id != "waveform.summary":
+            return
+        entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
+        for cache_ref in track.cache_refs:
+            entry = entries_by_id.get(cache_ref)
+            if entry is None or entry.artifact_kind != "waveform":
+                continue
+            artifact_path = self._job_queue.cache_store.artifact_path(entry)
+            try:
+                payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
+            samples = payload.get("samples", [])
+            if isinstance(samples, list):
+                track.provenance["waveform_samples"] = samples
+            return
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         return [

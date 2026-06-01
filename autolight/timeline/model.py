@@ -19,6 +19,7 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 8: b"activeJobId",
         Qt.ItemDataRole.UserRole + 9: b"jobState",
         Qt.ItemDataRole.UserRole + 10: b"jobProgress",
+        Qt.ItemDataRole.UserRole + 11: b"waveformSamples",
         Qt.ItemDataRole.UserRole + 12: b"cacheRefCount",
         Qt.ItemDataRole.UserRole + 13: b"artifactKinds",
     }
@@ -41,6 +42,7 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("activeJobId"): self._active_job_id_for_track,
             self.role_for_name("jobState"): self._job_state_for_track,
             self.role_for_name("jobProgress"): self._job_progress_for_track,
+            self.role_for_name("waveformSamples"): lambda track: track.provenance.get("waveform_samples", []),
             self.role_for_name("cacheRefCount"): lambda track: len(track.cache_refs),
             self.role_for_name("artifactKinds"): lambda track: ", ".join(
                 self._artifact_kinds_for_track(track.cache_refs)
