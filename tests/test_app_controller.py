@@ -1,6 +1,7 @@
-import unittest
-import tempfile
+import json
 import math
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -549,6 +550,199 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.trackModel.rowCount(), 1)
         self.assertEqual(controller.lastError, "")
         self.assertFalse(controller.isDirty)
+
+    def test_save_and_open_restores_timeline_zoom_scroll_and_selected_track(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path, frames=120000)
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 15.0, 0.5)
+            controller.select_track(generated_id)
+            controller.set_timeline_visible_seconds(4.0)
+            controller.seek_playback(2.25)
+            controller.set_timeline_zoom(144.0)
+            controller.set_timeline_scroll_seconds(3.0)
+
+            self.assertTrue(controller.save_project(str(project_path)))
+            saved = json.loads(project_path.read_text(encoding="utf-8"))
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        self.assertEqual(
+            saved["ui_state"]["timeline"],
+            {
+                "selected_track_id": generated_id,
+                "pixels_per_second": 144.0,
+                "scroll_seconds": 3.0,
+            },
+        )
+        self.assertNotIn("playback", saved["ui_state"])
+        self.assertEqual(reopened.selectedTrackId, generated_id)
+        self.assertEqual(reopened.timelinePixelsPerSecond, 144.0)
+        self.assertEqual(reopened.timelineScrollSeconds, 3.0)
+        self.assertEqual(reopened.playback.positionSeconds, 0.0)
+
+    def test_open_project_ignores_missing_selected_track_in_ui_state(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path)
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            self._write_saved_ui_state(
+                project_path,
+                {
+                    "timeline": {
+                        "selected_track_id": "missing_track",
+                        "pixels_per_second": 120.0,
+                        "scroll_seconds": 1.0,
+                    }
+                },
+            )
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        self.assertEqual(reopened.selectedTrackId, "")
+        self.assertEqual(reopened.timelinePixelsPerSecond, 120.0)
+        self.assertEqual(reopened.lastError, "")
+
+    def test_ui_state_values_are_clamped_when_restored(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path, frames=80000)
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            self._write_saved_ui_state(
+                project_path,
+                {
+                    "timeline": {
+                        "selected_track_id": source_id,
+                        "pixels_per_second": 999.0,
+                        "scroll_seconds": 99.0,
+                    }
+                },
+            )
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        self.assertEqual(reopened.selectedTrackId, source_id)
+        self.assertEqual(reopened.timelinePixelsPerSecond, 240.0)
+        self.assertEqual(reopened.timelineScrollSeconds, 2.0)
+
+    def test_open_project_ignores_malformed_ui_state_containers(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path)
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+
+            for ui_state in ("bad-state", ["timeline"], {"timeline": "bad-timeline"}):
+                with self.subTest(ui_state=ui_state):
+                    self._write_saved_ui_state(project_path, ui_state)
+                    reopened = self._controller()
+
+                    self.assertTrue(reopened.open_project(str(project_path)))
+                    self.assertEqual(reopened.lastError, "")
+                    self.assertEqual(reopened.selectedTrackId, "")
+                    self.assertEqual(reopened.timelinePixelsPerSecond, 96.0)
+                    self.assertEqual(reopened.timelineScrollSeconds, 0.0)
+
+    def test_open_project_ignores_non_numeric_timeline_ui_state_values(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            self._write_saved_ui_state(
+                project_path,
+                {
+                    "timeline": {
+                        "selected_track_id": source_id,
+                        "pixels_per_second": "wide",
+                        "scroll_seconds": {"seconds": 4.0},
+                    }
+                },
+            )
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        self.assertEqual(reopened.lastError, "")
+        self.assertEqual(reopened.selectedTrackId, source_id)
+        self.assertEqual(reopened.timelinePixelsPerSecond, 96.0)
+        self.assertEqual(reopened.timelineScrollSeconds, 0.0)
+
+    def test_open_project_ignores_oversized_timeline_ui_state_values(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            oversized = 10**400
+            self._write_saved_ui_state(
+                project_path,
+                {
+                    "timeline": {
+                        "selected_track_id": source_id,
+                        "pixels_per_second": oversized,
+                        "scroll_seconds": oversized,
+                    }
+                },
+            )
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        self.assertEqual(reopened.lastError, "")
+        self.assertEqual(reopened.selectedTrackId, source_id)
+        self.assertEqual(reopened.timelinePixelsPerSecond, 96.0)
+        self.assertEqual(reopened.timelineScrollSeconds, 0.0)
+
+    def test_open_project_clears_marker_selection_when_restoring_same_track(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        marker_id = controller.selectedTrackMarkers[0]["id"]
+        controller.toggle_marker_selection(marker_id, False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp) / "show.autolight"
+            self.assertTrue(controller.save_project(str(project_path)))
+            self.assertEqual(controller.selectedTrackId, editable_id)
+            self.assertEqual(controller.selectedMarkerIds, [marker_id])
+
+            self.assertTrue(controller.open_project(str(project_path)))
+
+        self.assertEqual(controller.lastError, "")
+        self.assertEqual(controller.selectedTrackId, editable_id)
+        self.assertEqual(controller.selectedMarkerIds, [])
 
     def test_save_project_requires_path_for_unsaved_project(self):
         controller = self._controller()
@@ -1395,6 +1589,12 @@ class AppControllerTest(unittest.TestCase):
             )
         )
         return generated_id
+
+    @staticmethod
+    def _write_saved_ui_state(project_path: Path, ui_state: dict) -> None:
+        payload = json.loads(project_path.read_text(encoding="utf-8"))
+        payload["ui_state"] = ui_state
+        project_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _controller(self):
         controller = AppController()
