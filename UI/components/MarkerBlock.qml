@@ -37,10 +37,14 @@ Rectangle {
         anchors.fill: parent
         enabled: root.editable
         drag.target: null
-        property real pressX: 0
+        property real pressParentX: 0
+
+        function parentX(mouse) {
+            return mapToItem(root.parent, mouse.x, mouse.y).x
+        }
 
         onPressed: function(mouse) {
-            pressX = mouse.x
+            pressParentX = parentX(mouse)
             root.lastPreviewDelta = 0
             var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
             root.appController.select_track(root.trackId)
@@ -50,11 +54,12 @@ Rectangle {
         }
 
         onPositionChanged: function(mouse) {
-            root.lastPreviewDelta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)
+            var pixelDelta = parentX(mouse) - pressParentX
+            root.lastPreviewDelta = pixelDelta / Math.max(1, root.pixelsPerSecond)
         }
 
         onReleased: function(mouse) {
-            var pixelDelta = mouse.x - pressX
+            var pixelDelta = parentX(mouse) - pressParentX
             if (Math.abs(pixelDelta) < root.dragThresholdPixels) {
                 root.lastPreviewDelta = 0
                 return
@@ -79,15 +84,20 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.SizeHorCursor
-            property real startX: 0
+            property real startParentX: 0
             property real startDuration: 0
+
+            function parentX(mouse) {
+                return mapToItem(root.parent, mouse.x, mouse.y).x
+            }
+
             onPressed: function(mouse) {
-                startX = mouse.x
+                startParentX = parentX(mouse)
                 startDuration = root.duration
                 root.appController.select_track(root.trackId)
             }
             onReleased: function(mouse) {
-                var widthDelta = mouse.x - startX
+                var widthDelta = parentX(mouse) - startParentX
                 if (Math.abs(widthDelta) < root.dragThresholdPixels) {
                     return
                 }

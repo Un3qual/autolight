@@ -718,15 +718,17 @@ class AppControllerTest(unittest.TestCase):
     def test_qml_marker_resize_uses_drag_delta_from_press(self):
         marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
 
-        self.assertIn("property real startX", marker_qml)
+        self.assertIn("property real startParentX", marker_qml)
         self.assertIn("property real startDuration", marker_qml)
-        self.assertIn("startX = mouse.x", marker_qml)
+        self.assertIn("startParentX = parentX(mouse)", marker_qml)
         self.assertIn("startDuration = root.duration", marker_qml)
-        self.assertIn("var widthDelta = mouse.x - startX", marker_qml)
+        self.assertIn("var widthDelta = parentX(mouse) - startParentX", marker_qml)
+        self.assertIn("mapToItem(root.parent", marker_qml)
         self.assertIn("if (Math.abs(widthDelta) < root.dragThresholdPixels)", marker_qml)
         self.assertIn("startDuration + widthDelta / Math.max(1, root.pixelsPerSecond)", marker_qml)
         self.assertIn("resize_marker", marker_qml)
         self.assertNotIn("var widthDelta = mouse.x\n", marker_qml)
+        self.assertNotIn("mouse.x - startX", marker_qml)
         self.assertNotIn("property real startWidth", marker_qml)
         self.assertNotIn("startWidth + widthDelta", marker_qml)
 
@@ -734,8 +736,11 @@ class AppControllerTest(unittest.TestCase):
         marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
 
         self.assertIn("property real dragThresholdPixels", marker_qml)
-        self.assertIn("var pixelDelta = mouse.x - pressX", marker_qml)
+        self.assertIn("property real pressParentX", marker_qml)
+        self.assertIn("pressParentX = parentX(mouse)", marker_qml)
+        self.assertIn("var pixelDelta = parentX(mouse) - pressParentX", marker_qml)
         self.assertIn("if (Math.abs(pixelDelta) < root.dragThresholdPixels)", marker_qml)
+        self.assertNotIn("var pixelDelta = mouse.x - pressX", marker_qml)
         self.assertLess(
             marker_qml.index("if (Math.abs(pixelDelta) < root.dragThresholdPixels)"),
             marker_qml.index("root.appController.move_selected_markers"),
@@ -748,8 +753,9 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("property real baseX", marker_qml)
         self.assertIn("property real lastPreviewDelta", marker_qml)
         self.assertIn("x: root.baseX + root.lastPreviewDelta * root.pixelsPerSecond", marker_qml)
-        self.assertIn("root.lastPreviewDelta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)", marker_qml)
+        self.assertIn("root.lastPreviewDelta = pixelDelta / Math.max(1, root.pixelsPerSecond)", marker_qml)
         self.assertIn("root.lastPreviewDelta = 0", marker_qml)
+        self.assertIn("mapToItem(root.parent", marker_qml)
         self.assertIn("baseX: root.timelineX(modelData.timestamp)", lane_qml)
         self.assertNotIn("x: root.timelineX(modelData.timestamp)", lane_qml)
         self.assertLess(
