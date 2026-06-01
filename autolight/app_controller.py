@@ -925,8 +925,7 @@ class AppController(QObject):
         visible_end = visible_start + visible_seconds
         playback_position_visible = (
             bool(self._playback.sourcePath)
-            and playback_position >= visible_start
-            and playback_position <= visible_end
+            and visible_start <= playback_position <= visible_end
         )
         anchor = (
             playback_position
