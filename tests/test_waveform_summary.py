@@ -300,14 +300,80 @@ class WaveformSummaryTest(unittest.TestCase):
         model = controller.trackModel
         waveform_role = model.role_for_name("waveformSamples")
         waveform_duration_role = model.role_for_name("waveformDurationSeconds")
+        visible_role = model.role_for_name("visibleWaveformSamples")
+        visible_bucket_role = model.role_for_name("waveformLevelBucketCount")
         row = self._track_row(controller, track.id)
         samples = model.data(model.index(row, 0), waveform_role)
         duration = model.data(model.index(row, 0), waveform_duration_role)
+        visible_samples = model.data(model.index(row, 0), visible_role)
+        visible_bucket_count = model.data(model.index(row, 0), visible_bucket_role)
 
         self.assertEqual(len(samples), 4)
         self.assertIn("peak", samples[0])
         self.assertAlmostEqual(duration, 1.0)
         self.assertEqual(track.provenance["waveform_payload"]["version"], 2)
+        self.assertEqual(visible_bucket_count, 8)
+        self.assertIn("time", visible_samples[0])
+
+    def test_controller_refreshes_visible_waveform_for_timeline_viewport_changes(self):
+        from autolight.app_controller import AppController
+        from autolight.project.models import CacheEntry, ResultState
+        from autolight.project.store import add_generated_track, import_audio_asset
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source = import_audio_asset(controller._project, audio_path)
+            controller._project.audio_assets[0].duration = 8.0
+            track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Waveform",
+                transform_id="waveform.summary",
+                transform_params={"buckets": 8},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-test",
+            )
+
+        track.result_state = ResultState.COMPLETE
+        track.cache_refs = ["cache_waveform"]
+        track.provenance["waveform_payload"] = {
+            "version": 2,
+            "duration": 8.0,
+            "levels": [
+                {"bucket_count": 8, "samples": [{"peak": 0.1, "rms": 0.05}] * 8},
+                {"bucket_count": 256, "samples": [{"peak": 0.2, "rms": 0.10}] * 256},
+            ],
+        }
+        controller._project.cache_entries.append(
+            CacheEntry(
+                id="cache_waveform",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform/cache_waveform.bin",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        controller.trackModel.set_project(controller._project)
+
+        controller.set_timeline_zoom(24.0)
+        overview = track.provenance["visible_waveform"]
+        controller.set_timeline_zoom(240.0)
+        zoomed = track.provenance["visible_waveform"]
+        controller.set_timeline_visible_seconds(1.0)
+        detail = track.provenance["visible_waveform"]
+        controller.set_timeline_scroll_seconds(6.0)
+        scrolled = track.provenance["visible_waveform"]
+
+        self.assertEqual(overview["level_bucket_count"], 8)
+        self.assertEqual(zoomed["level_bucket_count"], 256)
+        self.assertEqual(detail["level_bucket_count"], 256)
+        self.assertGreater(scrolled["samples"][0]["time"], detail["samples"][0]["time"])
 
     def test_controller_restores_waveform_samples_after_open_project(self):
         from autolight.app_controller import AppController
@@ -380,6 +446,11 @@ class WaveformSummaryTest(unittest.TestCase):
         track.provenance["waveform_samples"] = [{"peak": 1.0, "rms": 1.0}]
         track.provenance["waveform_duration_seconds"] = 12.5
         track.provenance["waveform_payload"] = {"version": 2, "samples": []}
+        track.provenance["visible_waveform"] = {
+            "duration": 12.5,
+            "level_bucket_count": 1,
+            "samples": [],
+        }
         controller._project.cache_entries.append(
             CacheEntry(
                 id="missing_waveform",
@@ -397,6 +468,7 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertNotIn("waveform_samples", track.provenance)
         self.assertNotIn("waveform_duration_seconds", track.provenance)
         self.assertNotIn("waveform_payload", track.provenance)
+        self.assertNotIn("visible_waveform", track.provenance)
 
     def test_qml_mentions_waveform_samples_role(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

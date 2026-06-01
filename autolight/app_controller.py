@@ -323,6 +323,7 @@ class AppController(QObject):
         waveform.result_state = ResultState.COMPLETE
         self._attach_demo_waveform(waveform)
         self._track_model.set_project(self._project)
+        self._refresh_visible_waveforms()
         self._set_selected_track_id(source.id)
         self._notify_timeline_duration_changed()
         self._set_last_error("")
@@ -740,6 +741,7 @@ class AppController(QObject):
         try:
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
             self._load_all_waveform_samples()
+            self._refresh_visible_waveforms()
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
@@ -859,6 +861,7 @@ class AppController(QObject):
             self._timeline_visible_seconds = next_visible_seconds
             self.timelineVisibleSecondsChanged.emit()
         self.set_timeline_scroll_seconds(next_scroll)
+        self._refresh_visible_waveforms()
 
     @Slot(float)
     def set_timeline_scroll_seconds(self, seconds: float) -> None:
@@ -874,6 +877,7 @@ class AppController(QObject):
             return
         self._timeline_scroll_seconds = clamped
         self.timelineScrollSecondsChanged.emit()
+        self._refresh_visible_waveforms()
 
     @Slot(float)
     def set_timeline_visible_seconds(self, seconds: float) -> None:
@@ -886,6 +890,7 @@ class AppController(QObject):
         self._timeline_visible_seconds = clamped
         self.timelineVisibleSecondsChanged.emit()
         self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+        self._refresh_visible_waveforms()
 
     @Slot()
     def cleanup(self) -> None:
@@ -903,6 +908,7 @@ class AppController(QObject):
         self._track_model.set_project(self._project)
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
         self._timeline_scroll_seconds = 0.0
+        self._refresh_visible_waveforms()
         self._set_selected_track_id("")
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
@@ -911,6 +917,7 @@ class AppController(QObject):
         self.timelineScrollSecondsChanged.emit()
         if restore_ui_state:
             self._restore_timeline_ui_state()
+            self._refresh_visible_waveforms()
         self._edit_history.clear()
         self._notify_history_changed()
 
@@ -991,6 +998,7 @@ class AppController(QObject):
             return
         self._timeline_pixels_per_second = clamped
         self.timelinePixelsPerSecondChanged.emit()
+        self._refresh_visible_waveforms()
 
     @staticmethod
     def _optional_float(value) -> float | None:
@@ -1010,6 +1018,7 @@ class AppController(QObject):
     @Slot(str)
     def _handle_track_changed(self, track_id: str) -> None:
         self._load_waveform_samples(track_id)
+        self._refresh_visible_waveforms()
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         self._notify_timeline_duration_changed()
@@ -1160,6 +1169,23 @@ class AppController(QObject):
             return seconds - visible_seconds
         return self._timeline_scroll_seconds
 
+    def _refresh_visible_waveforms(self) -> None:
+        for track in self._project.tracks:
+            if track.transform_id != "waveform.summary":
+                continue
+            payload = track.provenance.get("waveform_payload")
+            if not isinstance(payload, dict):
+                if track.provenance.pop("visible_waveform", None) is not None:
+                    self.trackModel.refresh_track(track.id)
+                continue
+            track.provenance["visible_waveform"] = self._waveform_lod.visible_samples(
+                payload,
+                scroll_seconds=self._timeline_scroll_seconds,
+                visible_seconds=self._visible_timeline_seconds(),
+                pixels_per_second=self._timeline_pixels_per_second,
+            )
+            self.trackModel.refresh_track(track.id)
+
     def _load_waveform_samples(self, track_id: str) -> None:
         track = find_track(self._project, track_id)
         if track is None or track.transform_id != "waveform.summary":
@@ -1168,6 +1194,7 @@ class AppController(QObject):
             track.provenance.pop("waveform_samples", None)
             track.provenance.pop("waveform_duration_seconds", None)
             track.provenance.pop("waveform_payload", None)
+            track.provenance.pop("visible_waveform", None)
             return
         entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
         for cache_ref in track.cache_refs:
@@ -1181,6 +1208,7 @@ class AppController(QObject):
                 track.provenance.pop("waveform_samples", None)
                 track.provenance.pop("waveform_duration_seconds", None)
                 track.provenance.pop("waveform_payload", None)
+                track.provenance.pop("visible_waveform", None)
                 return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
@@ -1191,10 +1219,12 @@ class AppController(QObject):
                 track.provenance.pop("waveform_samples", None)
                 track.provenance.pop("waveform_duration_seconds", None)
                 track.provenance.pop("waveform_payload", None)
+                track.provenance.pop("visible_waveform", None)
             return
         track.provenance.pop("waveform_samples", None)
         track.provenance.pop("waveform_duration_seconds", None)
         track.provenance.pop("waveform_payload", None)
+        track.provenance.pop("visible_waveform", None)
 
     def _load_all_waveform_samples(self) -> None:
         for track in list(self._project.tracks):

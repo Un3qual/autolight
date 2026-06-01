@@ -4,7 +4,7 @@ import math
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
-from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track
+from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import marker_display_color
 
 
@@ -26,6 +26,9 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 12: b"cacheRefCount",
         Qt.ItemDataRole.UserRole + 13: b"artifactKinds",
         Qt.ItemDataRole.UserRole + 14: b"waveformDurationSeconds",
+        Qt.ItemDataRole.UserRole + 15: b"editable",
+        Qt.ItemDataRole.UserRole + 16: b"visibleWaveformSamples",
+        Qt.ItemDataRole.UserRole + 17: b"waveformLevelBucketCount",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -52,6 +55,9 @@ class TimelineTrackModel(QAbstractListModel):
                 self._artifact_kinds_for_track(track.cache_refs)
             ),
             self.role_for_name("waveformDurationSeconds"): self._waveform_duration_seconds_for_track,
+            self.role_for_name("editable"): lambda track: track.type == TrackType.EDITABLE,
+            self.role_for_name("visibleWaveformSamples"): self._visible_waveform_samples_for_track,
+            self.role_for_name("waveformLevelBucketCount"): self._waveform_level_bucket_count_for_track,
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
@@ -127,7 +133,7 @@ class TimelineTrackModel(QAbstractListModel):
     def _marker_count_for_track(self, track: Track) -> int:
         return len(self._markers_by_track.get(track.id, []))
 
-    def _marker_spans_for_track(self, track: Track) -> list[dict[str, str | float]]:
+    def _marker_spans_for_track(self, track: Track) -> list[dict[str, str | float | bool]]:
         return [self._marker_span(marker) for marker in self._markers_for_track(track.id)]
 
     def _active_job_id_for_track(self, track: Track) -> str:
@@ -171,6 +177,22 @@ class TimelineTrackModel(QAbstractListModel):
             return 0.0
         return duration if math.isfinite(duration) and duration >= 0.0 else 0.0
 
+    def _visible_waveform_samples_for_track(self, track: Track) -> list:
+        visible = track.provenance.get("visible_waveform", {})
+        if not isinstance(visible, dict):
+            return []
+        samples = visible.get("samples", [])
+        return samples if isinstance(samples, list) else []
+
+    def _waveform_level_bucket_count_for_track(self, track: Track) -> int:
+        visible = track.provenance.get("visible_waveform", {})
+        if not isinstance(visible, dict):
+            return 0
+        try:
+            return int(visible.get("level_bucket_count", 0))
+        except (TypeError, ValueError):
+            return 0
+
     def _has_valid_waveform_cache(self, cache_refs: list[str]) -> bool:
         if self._project is None:
             return False
@@ -191,7 +213,7 @@ class TimelineTrackModel(QAbstractListModel):
         jobs = [run for run in self._project.job_runs if run.track_id == track_id]
         return jobs[-1] if jobs else None
 
-    def _marker_span(self, marker: Marker) -> dict[str, str | float]:
+    def _marker_span(self, marker: Marker) -> dict[str, str | float | bool]:
         return {
             "id": marker.id,
             "timestamp": marker.timestamp,
@@ -199,6 +221,11 @@ class TimelineTrackModel(QAbstractListModel):
             "label": marker.label,
             "category": marker.category,
             "color": marker_display_color(marker),
+            "selected": (
+                bool(marker.metadata.get("selected", False))
+                if isinstance(marker.metadata, dict)
+                else False
+            ),
         }
 
     def _rebuild_marker_index(self) -> None:

@@ -43,6 +43,9 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("waveformDurationSeconds"): b"waveformDurationSeconds",
                     model.role_for_name("cacheRefCount"): b"cacheRefCount",
                     model.role_for_name("artifactKinds"): b"artifactKinds",
+                    model.role_for_name("editable"): b"editable",
+                    model.role_for_name("visibleWaveformSamples"): b"visibleWaveformSamples",
+                    model.role_for_name("waveformLevelBucketCount"): b"waveformLevelBucketCount",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -60,6 +63,7 @@ class TimelineTrackModelTest(unittest.TestCase):
                         "label": "",
                         "category": "",
                         "color": "#67e8f9",
+                        "selected": False,
                     }
                 ],
             )
@@ -70,6 +74,63 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual(model.data(index, model.role_for_name("cacheRefCount")), 0)
             self.assertEqual(model.data(index, model.role_for_name("artifactKinds")), "")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
+
+    def test_model_exposes_editability_and_marker_duration(self):
+        project = new_project("Demo")
+        editable = Track(
+            id="track_edit",
+            type=TrackType.EDITABLE,
+            name="Editable",
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.append(editable)
+        project.markers.append(
+            Marker(id="marker_1", track_id=editable.id, timestamp=1.0, duration=0.5)
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        index = model.index(0, 0)
+        self.assertTrue(model.data(index, model.role_for_name("editable")))
+        spans = model.data(index, model.role_for_name("markerSpans"))
+        self.assertEqual(spans[0]["duration"], 0.5)
+        self.assertFalse(spans[0]["selected"])
+
+    def test_model_exposes_visible_waveform_samples(self):
+        project = new_project("Demo")
+        waveform = Track(
+            id="track_wave",
+            type=TrackType.GENERATED,
+            name="Waveform",
+            transform_id="waveform.summary",
+            result_state=ResultState.COMPLETE,
+            provenance={
+                "visible_waveform": {
+                    "duration": 2.0,
+                    "level_bucket_count": 8,
+                    "samples": [{"time": 0.0, "peak": 0.2, "rms": 0.1}],
+                }
+            },
+        )
+        project.tracks.append(waveform)
+        project.cache_entries.append(
+            CacheEntry(
+                id="cache_1",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform.json",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        waveform.cache_refs = ["cache_1"]
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        index = model.index(0, 0)
+        visible = model.data(index, model.role_for_name("visibleWaveformSamples"))
+        self.assertEqual(visible[0]["time"], 0.0)
+        self.assertEqual(model.data(index, model.role_for_name("waveformLevelBucketCount")), 8)
 
     def test_model_exposes_latest_job_state_progress_and_id(self):
         project = ProjectDocument(id="project_1", name="Demo")
