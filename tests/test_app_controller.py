@@ -282,6 +282,18 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
 
+    def test_qml_exposes_timeline_zoom_and_scroll_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("id: timelineZoomSlider", qml)
+        self.assertIn("appController.set_timeline_zoom", qml)
+        self.assertIn("id: timelineScrollSlider", qml)
+        self.assertIn("appController.set_timeline_scroll_seconds", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
+        self.assertIn("appController.timelineScrollSeconds", qml)
+        self.assertIn("appController.timelineDurationSeconds", qml)
+        self.assertNotIn("readonly property real timelinePixelsPerSecond: 96", qml)
+
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
 
@@ -1008,9 +1020,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: timelineRows", qml)
         self.assertIn("model: markerSpans", qml)
         self.assertIn("modelData.timestamp", qml)
-        self.assertIn("spacing: appController.timelinePixelsPerSecond", qml)
-        self.assertIn("anchors.leftMargin: root.timelineLeftPadding", qml)
         self.assertIn("root.timelineX(modelData.timestamp)", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("modelData.duration : 0.08) * appController.timelinePixelsPerSecond", qml)
         self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)

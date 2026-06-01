@@ -296,19 +296,14 @@ Window {
                 Layout.fillHeight: true
                 color: "#1c1f26"
 
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: root.timelineLeftPadding
-                    spacing: appController.timelinePixelsPerSecond
-
-                    Repeater {
-                        model: 9
-                        Text {
-                            text: index + "s"
-                            color: "#a1a1aa"
-                            font.pixelSize: 12
-                        }
+                Repeater {
+                    model: Math.ceil(root.timelineVisibleSeconds) + 1
+                    Text {
+                        x: root.timelineX(appController.timelineScrollSeconds + index)
+                        y: 9
+                        text: Math.floor(appController.timelineScrollSeconds + index) + "s"
+                        color: "#a1a1aa"
+                        font.pixelSize: 12
                     }
                 }
             }
@@ -323,6 +318,44 @@ Window {
             enabled: appController.playback.sourcePath.length > 0
             live: true
             onMoved: appController.seek_playback(value)
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            spacing: 10
+
+            Label {
+                text: "Zoom"
+                color: "#d4d4d8"
+                font.pixelSize: 12
+            }
+
+            Slider {
+                id: timelineZoomSlider
+                from: 24
+                to: 240
+                value: appController.timelinePixelsPerSecond
+                Layout.preferredWidth: 180
+                onMoved: appController.set_timeline_zoom(value)
+            }
+
+            Label {
+                text: Math.round(appController.timelinePixelsPerSecond) + " px/s"
+                color: "#a1a1aa"
+                font.pixelSize: 12
+                Layout.preferredWidth: 64
+            }
+
+            Slider {
+                id: timelineScrollSlider
+                from: 0
+                to: Math.max(0, appController.timelineDurationSeconds - root.timelineVisibleSeconds)
+                value: appController.timelineScrollSeconds
+                Layout.fillWidth: true
+                onMoved: appController.set_timeline_scroll_seconds(value)
+            }
         }
 
         RowLayout {
@@ -415,8 +448,9 @@ Window {
                             Rectangle {
                                 width: 2
                                 height: Math.max(2, modelData.peak * (parent.height - 18))
-                                x: root.timelineLeftPadding + (waveformSamples.length > 1 ? index * Math.max(0, parent.width - root.timelineLeftPadding - width) / (waveformSamples.length - 1) : 0)
+                                x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)
                                 y: (parent.height - height) / 2
+                                visible: x >= root.timelineLeftPadding - width && x <= parent.width
                                 color: "#60a5fa"
                             }
                         }
