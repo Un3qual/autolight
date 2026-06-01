@@ -69,12 +69,21 @@ RowLayout {
 
     Slider {
         id: playbackScrubber
+        property bool scrubbing: pressed
+        property real previewValue: root.appController.playback.positionSeconds
         Layout.fillWidth: true
         from: 0
         to: Math.max(0.01, root.appController.playback.durationSeconds)
-        value: root.appController.playback.positionSeconds
-        enabled: root.appController.playback.sourcePath.length > 0
+        value: scrubbing ? previewValue : root.appController.playback.positionSeconds
         live: true
-        onMoved: root.seekRequested(value)
+        enabled: root.appController.playback.sourcePath.length > 0
+        onMoved: previewValue = value
+        onPressedChanged: {
+            if (!pressed) {
+                root.appController.seek_playback(previewValue)
+            } else {
+                previewValue = value
+            }
+        }
     }
 }

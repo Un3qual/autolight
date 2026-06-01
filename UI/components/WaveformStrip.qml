@@ -1,50 +1,48 @@
 import QtQuick
 
-Item {
+Canvas {
     id: root
-    property var appController
-    property var waveformSamples: []
-    property real waveformDurationSeconds: 0
-    property real timelineLeftPadding: 24
-    property color borderSubtle: "#2f333d"
+    property var samples: []
+    property real durationSeconds: 0
+    property real scrollSeconds: 0
+    property real pixelsPerSecond: 96
+    property real leftPadding: 24
+    property color peakColor: "#60a5fa"
+    property color rmsColor: "#bfdbfe"
 
-    function timelineX(seconds) {
-        return root.timelineLeftPadding + (seconds - root.appController.timelineScrollSeconds) * root.appController.timelinePixelsPerSecond
-    }
+    onSamplesChanged: requestPaint()
+    onScrollSecondsChanged: requestPaint()
+    onPixelsPerSecondChanged: requestPaint()
+    onWidthChanged: requestPaint()
+    onHeightChanged: requestPaint()
 
-    Rectangle {
-        id: waveformCenterLine
-        x: root.timelineLeftPadding
-        y: Math.round(parent.height / 2)
-        width: Math.max(0, parent.width - root.timelineLeftPadding)
-        height: 1
-        color: root.borderSubtle
-        visible: root.waveformSamples.length > 0
-    }
-
-    Repeater {
-        model: waveformSamples
-        Item {
-            width: 3
-            height: parent.height
-            x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)
-            visible: x >= root.timelineLeftPadding - width && x <= parent.width
-
-            Rectangle {
-                width: 2
-                height: Math.max(2, modelData.peak * (parent.height - 18))
-                y: (parent.height - height) / 2
-                color: "#60a5fa"
-                opacity: 0.75
+    onPaint: {
+        var ctx = getContext("2d")
+        ctx.clearRect(0, 0, width, height)
+        if (!samples || samples.length === 0) {
+            return
+        }
+        var centerY = height / 2
+        ctx.strokeStyle = rmsColor
+        ctx.lineWidth = 1
+        for (var i = 0; i < samples.length; i++) {
+            var sample = samples[i]
+            var x = leftPadding + (sample.time - scrollSeconds) * pixelsPerSecond
+            if (x < leftPadding - 2 || x > width + 2) {
+                continue
             }
-
-            Rectangle {
-                width: 2
-                height: Math.max(2, modelData.rms * (parent.height - 18))
-                y: (parent.height - height) / 2
-                color: "#bfdbfe"
-                opacity: 0.95
-            }
+            var peakHeight = Math.max(1, sample.peak * (height - 18))
+            var rmsHeight = Math.max(1, sample.rms * (height - 18))
+            ctx.strokeStyle = peakColor
+            ctx.beginPath()
+            ctx.moveTo(x, centerY - peakHeight / 2)
+            ctx.lineTo(x, centerY + peakHeight / 2)
+            ctx.stroke()
+            ctx.strokeStyle = rmsColor
+            ctx.beginPath()
+            ctx.moveTo(x + 1, centerY - rmsHeight / 2)
+            ctx.lineTo(x + 1, centerY + rmsHeight / 2)
+            ctx.stroke()
         }
     }
 }

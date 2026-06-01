@@ -16,6 +16,7 @@ Row {
     required property string activeJobId
     required property var markerSpans
     required property var waveformSamples
+    required property var visibleWaveformSamples
     required property real waveformDurationSeconds
     property var appController
     property real timelineLeftPadding: 24
@@ -106,6 +107,7 @@ Row {
         trackId: root.trackId
         markerSpans: root.markerSpans
         waveformSamples: root.waveformSamples
+        visibleWaveformSamples: root.visibleWaveformSamples
         waveformDurationSeconds: root.waveformDurationSeconds
         editable: root.trackType === "editable"
         timelineLeftPadding: root.timelineLeftPadding

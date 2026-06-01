@@ -628,27 +628,29 @@ class WaveformSummaryTest(unittest.TestCase):
         )
         self.assertIn("waveformSamples", qml)
         self.assertIn("waveformDurationSeconds", qml)
-        self.assertIn("modelData.peak", qml)
+        self.assertIn("visibleWaveformSamples", qml)
+        self.assertIn("sample.peak", qml)
         self.assertIn("clip: true", qml)
         self.assertIn("root.timelineLeftPadding", qml)
-        self.assertIn(
-            "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)",
-            qml,
-        )
+        self.assertIn("scrollSeconds: root.appController.timelineScrollSeconds", qml)
+        self.assertIn("pixelsPerSecond: root.appController.timelinePixelsPerSecond", qml)
         self.assertNotIn(
             "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)",
             qml,
         )
-        self.assertIn("visible: x >= root.timelineLeftPadding - width && x <= parent.width", qml)
+        self.assertNotIn("model: waveformSamples", qml)
+        self.assertIn("visible: visibleWaveformSamples.length > 0", qml)
 
     def test_qml_waveform_uses_peak_and_rms_layers(self):
         qml = (
             Path(__file__).resolve().parents[1] / "UI" / "components" / "WaveformStrip.qml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("modelData.peak", qml)
-        self.assertIn("modelData.rms", qml)
-        self.assertIn("id: waveformCenterLine", qml)
+        self.assertIn("Canvas", qml)
+        self.assertIn("sample.peak", qml)
+        self.assertIn("sample.rms", qml)
+        self.assertIn("ctx.strokeStyle = peakColor", qml)
+        self.assertIn("ctx.strokeStyle = rmsColor", qml)
 
     def _track_row(self, controller, track_id: str) -> int:
         for index, track in enumerate(controller._project.tracks):

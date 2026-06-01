@@ -837,8 +837,23 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.nudge_playback", qml)
         self.assertIn("appController.playback.set_volume", qml)
         self.assertIn("root.seekTimelineAtX", qml)
-        self.assertIn("modelData.rms", qml)
-        self.assertIn("id: waveformCenterLine", qml)
+        self.assertIn("Canvas", qml)
+        self.assertIn("sample.rms", qml)
+        self.assertIn("var centerY = height / 2", qml)
+
+    def test_qml_waveform_uses_canvas_and_visible_samples(self):
+        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+
+        self.assertIn("Canvas", waveform_qml)
+        self.assertIn("visibleWaveformSamples", Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8"))
+        self.assertNotIn("model: waveformSamples", waveform_qml)
+
+    def test_qml_scrubber_avoids_live_heavy_seek_binding(self):
+        playback_qml = Path("UI/components/PlaybackBar.qml").read_text(encoding="utf-8")
+
+        self.assertIn("onMoved", playback_qml)
+        self.assertIn("onPressedChanged", playback_qml)
+        self.assertIn("seek_playback", playback_qml)
 
     def test_qml_keeps_playback_controls_out_of_top_toolbar(self):
         toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
