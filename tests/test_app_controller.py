@@ -80,6 +80,11 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertIs(controller.trackModel.parent(), controller)
 
+    def test_job_queue_track_notifications_use_qt_queue_bridge(self):
+        controller = self._controller()
+
+        self.assertEqual(controller._job_queue._on_track_changed.__name__, "_queue_track_changed")
+
     def test_controller_demo_project_exposes_expected_track_roles(self):
         controller = self._controller()
 

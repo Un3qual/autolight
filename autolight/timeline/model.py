@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
-from autolight.project.models import JobRun, Marker, ProjectDocument, Track
+from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track
 
 
 class TimelineTrackModel(QAbstractListModel):
@@ -42,7 +42,7 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("activeJobId"): self._active_job_id_for_track,
             self.role_for_name("jobState"): self._job_state_for_track,
             self.role_for_name("jobProgress"): self._job_progress_for_track,
-            self.role_for_name("waveformSamples"): lambda track: track.provenance.get("waveform_samples", []),
+            self.role_for_name("waveformSamples"): self._waveform_samples_for_track,
             self.role_for_name("cacheRefCount"): lambda track: len(track.cache_refs),
             self.role_for_name("artifactKinds"): lambda track: ", ".join(
                 self._artifact_kinds_for_track(track.cache_refs)
@@ -146,6 +146,25 @@ class TimelineTrackModel(QAbstractListModel):
             for cache_ref in cache_refs
             if cache_ref in entries
         ]
+
+    def _waveform_samples_for_track(self, track: Track) -> list:
+        if self._project is None or track.result_state != ResultState.COMPLETE:
+            return []
+        if not self._has_valid_waveform_cache(track.cache_refs):
+            return []
+        samples = track.provenance.get("waveform_samples", [])
+        return samples if isinstance(samples, list) else []
+
+    def _has_valid_waveform_cache(self, cache_refs: list[str]) -> bool:
+        if self._project is None:
+            return False
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        return any(
+            (entry := entries.get(cache_ref)) is not None
+            and entry.artifact_kind == "waveform"
+            and entry.validation_status == "valid"
+            for cache_ref in cache_refs
+        )
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])

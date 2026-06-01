@@ -20,6 +20,7 @@ class _JobSnapshot:
     track_id: str
     transform_id: str
     transform_version: str
+    track_transform_params: dict[str, Any]
     transform_params: dict[str, Any]
     dependency_hash: str
 
@@ -44,7 +45,12 @@ class LocalJobQueue:
         self._cancel_events: dict[str, Event] = {}
         self._active_job_by_track: dict[str, str] = {}
 
-    def submit(self, project: ProjectDocument, track_id: str) -> str:
+    def submit(
+        self,
+        project: ProjectDocument,
+        track_id: str,
+        transform_params: dict[str, Any] | None = None,
+    ) -> str:
         with self._lock:
             track = find_track(project, track_id)
             if track is None:
@@ -65,7 +71,10 @@ class LocalJobQueue:
                 track_id=track_id,
                 transform_id=track.transform_id,
                 transform_version=track.transform_version,
-                transform_params=copy.deepcopy(track.transform_params),
+                track_transform_params=copy.deepcopy(track.transform_params),
+                transform_params=copy.deepcopy(
+                    track.transform_params if transform_params is None else transform_params
+                ),
                 dependency_hash=track.dependency_hash,
             )
             run = JobRun(
@@ -358,7 +367,7 @@ class LocalJobQueue:
             and track.result_state == ResultState.RUNNING
             and track.transform_id == snapshot.transform_id
             and track.transform_version == snapshot.transform_version
-            and track.transform_params == snapshot.transform_params
+            and track.transform_params == snapshot.track_transform_params
             and track.dependency_hash == snapshot.dependency_hash
         )
 

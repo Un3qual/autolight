@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
@@ -38,6 +38,7 @@ class AppController(QObject):
     selectedTrackHasRunningJobChanged = Signal()
     selectedTrackCanRerunChanged = Signal()
     isDirtyChanged = Signal()
+    _track_changed_on_main_thread = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -56,7 +57,11 @@ class AppController(QObject):
         self._job_queue = LocalJobQueue(
             self._registry,
             artifact_root=Path(self._runtime_temp_dir.name) / "artifacts",
-            on_track_changed=self._handle_track_changed,
+            on_track_changed=self._queue_track_changed,
+        )
+        self._track_changed_on_main_thread.connect(
+            self._handle_track_changed,
+            Qt.ConnectionType.QueuedConnection,
         )
 
     @Property(QObject, constant=True)
@@ -413,6 +418,7 @@ class AppController(QObject):
     def refresh_cache_status(self) -> list[str]:
         try:
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
+            self._load_all_waveform_samples()
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
@@ -435,6 +441,7 @@ class AppController(QObject):
 
     def _set_project(self, project) -> None:
         self._project = project
+        self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
@@ -466,6 +473,10 @@ class AppController(QObject):
         self._is_dirty = dirty
         self.isDirtyChanged.emit()
 
+    def _queue_track_changed(self, track_id: str) -> None:
+        self._track_changed_on_main_thread.emit(track_id)
+
+    @Slot(str)
     def _handle_track_changed(self, track_id: str) -> None:
         self._load_waveform_samples(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
@@ -480,7 +491,6 @@ class AppController(QObject):
             audio_path = self._source_audio_path_for_track(parent)
             if not audio_path:
                 raise ValueError("audio transform requires a source audio track")
-            enriched["audio_path"] = audio_path
         return enriched
 
     def _source_audio_path_for_track(self, track) -> str:
@@ -509,20 +519,32 @@ class AppController(QObject):
         track = find_track(self._project, track_id)
         if track is None or track.transform_id != "waveform.summary":
             return
+        if track.result_state != ResultState.COMPLETE:
+            track.provenance.pop("waveform_samples", None)
+            return
         entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
         for cache_ref in track.cache_refs:
             entry = entries_by_id.get(cache_ref)
-            if entry is None or entry.artifact_kind != "waveform":
+            if entry is None or entry.artifact_kind != "waveform" or entry.validation_status != "valid":
                 continue
             artifact_path = self._job_queue.cache_store.artifact_path(entry)
             try:
                 payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+            except (OSError, ValueError, TypeError):
+                track.provenance.pop("waveform_samples", None)
                 return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
                 track.provenance["waveform_samples"] = samples
+            else:
+                track.provenance.pop("waveform_samples", None)
             return
+        track.provenance.pop("waveform_samples", None)
+
+    def _load_all_waveform_samples(self) -> None:
+        for track in list(self._project.tracks):
+            if track.transform_id == "waveform.summary":
+                self._load_waveform_samples(track.id)
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         return [
@@ -564,10 +586,24 @@ class AppController(QObject):
             names = ", ".join(input_track.name for input_track in incomplete_inputs)
             raise ValueError(f"input track is not complete: {names}")
         self._refresh_dependency_hash(track)
-        job_id = self._job_queue.submit(self._project, track_id)
+        job_id = self._job_queue.submit(
+            self._project,
+            track_id,
+            transform_params=self._runtime_transform_params_for_track(track),
+        )
         self._set_last_error("")
         self._set_dirty(True)
         return job_id
+
+    def _runtime_transform_params_for_track(self, track) -> dict:
+        params = dict(track.transform_params)
+        spec = self._registry.get(track.transform_id, version=track.transform_version)
+        if spec.input_schema == "audio.v1" and "audio_path" not in params:
+            audio_path = self._source_audio_path_for_track(track)
+            if not audio_path:
+                raise ValueError("audio transform requires a source audio track")
+            params["audio_path"] = audio_path
+        return params
 
     def _can_replace_project(self) -> bool:
         try:

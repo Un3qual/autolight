@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 
@@ -81,7 +83,7 @@ class TransformPickerTest(unittest.TestCase):
         )
 
         self.assertNotEqual(track_id, "")
-        track = next(track for track in controller._project.tracks if track.id == track_id)
+        track = self._track_by_id(controller, track_id)
         self.assertEqual(track.transform_id, "markers.fixed_interval")
         self.assertEqual(track.transform_version, "1")
         self.assertEqual(track.transform_params, {"duration": 3.0, "interval": 1.0})
@@ -113,9 +115,8 @@ class TransformPickerTest(unittest.TestCase):
 
         track_id = controller.add_transform_track(source_id, "test.audio_path", "1", "{}")
 
-        track = next(track for track in controller._project.tracks if track.id == track_id)
-        self.assertIn("audio_path", track.transform_params)
-        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+        track = self._track_by_id(controller, track_id)
+        self.assertNotIn("audio_path", track.transform_params)
 
     def test_controller_add_transform_track_resolves_audio_path_from_parent_chain(self):
         from autolight.app_controller import AppController
@@ -150,9 +151,8 @@ class TransformPickerTest(unittest.TestCase):
 
         track_id = controller.add_transform_track(generated_id, "test.audio_path", "1", "{}")
 
-        track = next(track for track in controller._project.tracks if track.id == track_id)
-        self.assertIn("audio_path", track.transform_params)
-        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+        track = self._track_by_id(controller, track_id)
+        self.assertNotIn("audio_path", track.transform_params)
 
     def test_controller_add_transform_track_searches_all_parent_branches_for_audio(self):
         from autolight.app_controller import AppController
@@ -189,9 +189,8 @@ class TransformPickerTest(unittest.TestCase):
 
         track_id = controller.add_transform_track(multi_parent.id, "test.audio_path", "1", "{}")
 
-        track = next(track for track in controller._project.tracks if track.id == track_id)
-        self.assertIn("audio_path", track.transform_params)
-        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+        track = self._track_by_id(controller, track_id)
+        self.assertNotIn("audio_path", track.transform_params)
 
     def test_controller_add_transform_track_rejects_audio_transform_without_source_audio(self):
         from autolight.app_controller import AppController
@@ -221,6 +220,48 @@ class TransformPickerTest(unittest.TestCase):
         self.assertEqual(track_id, "")
         self.assertIn("source audio track", controller.lastError)
 
+    def test_controller_resolves_audio_path_at_submission_time(self):
+        from autolight.app_controller import AppController
+        from tests.helpers import write_wav
+
+        seen_paths = []
+
+        def capture_path(context, params):
+            seen_paths.append(params["audio_path"])
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.runtime_audio_path",
+                version="1",
+                name="Runtime Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=capture_path,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_path = root / "song.wav"
+            relinked_path = root / "song_relinked.wav"
+            write_wav(original_path)
+            write_wav(relinked_path)
+            source_id = controller.import_audio(str(original_path))
+            track_id = controller.add_transform_track(source_id, "test.runtime_audio_path", "1", "{}")
+            track = self._track_by_id(controller, track_id)
+            controller._project.audio_assets[0].path = str(relinked_path)
+
+            job_id = controller.run_track(track_id)
+            controller._job_queue.wait(job_id, timeout=5)
+            QCoreApplication.processEvents()
+
+        self.assertEqual(seen_paths, [str(relinked_path)])
+        self.assertNotIn("audio_path", track.transform_params)
+
     def test_qml_uses_transform_model_and_generic_add_action(self):
         from pathlib import Path
 
@@ -230,6 +271,12 @@ class TransformPickerTest(unittest.TestCase):
         self.assertIn("appController.add_transform_track(", qml)
         self.assertIn("appController.transformModel.version_at(transformPicker.currentIndex)", qml)
         self.assertIn("transformParamsField.text", qml)
+
+    def _track_by_id(self, controller, track_id: str):
+        for track in controller._project.tracks:
+            if track.id == track_id:
+                return track
+        self.fail(f"track not found: {track_id}")
 
 
 if __name__ == "__main__":

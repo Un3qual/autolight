@@ -357,13 +357,14 @@ Window {
                         height: parent.height
                         color: index % 2 === 0 ? "#171a20" : "#14171d"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
+                        clip: true
 
                         Repeater {
                             model: waveformSamples
                             Rectangle {
                                 width: 2
                                 height: Math.max(2, modelData.peak * (parent.height - 18))
-                                x: index * 3
+                                x: root.timelineLeftPadding + (waveformSamples.length > 1 ? index * Math.max(0, parent.width - root.timelineLeftPadding - width) / (waveformSamples.length - 1) : 0)
                                 y: (parent.height - height) / 2
                                 color: "#60a5fa"
                             }

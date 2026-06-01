@@ -52,7 +52,7 @@ class StemArtifactWorkflowTest(unittest.TestCase):
         stem_id = controller.add_vocals_stem_track(source_id)
 
         self.assertNotEqual(stem_id, "")
-        stem = next(track for track in controller._project.tracks if track.id == stem_id)
+        stem = self._track_by_id(controller, stem_id)
         self.assertEqual(stem.transform_id, "stems.vocals_stand_in")
         self.assertEqual(stem.output_schema, "artifact.stem.v1")
 
@@ -63,6 +63,12 @@ class StemArtifactWorkflowTest(unittest.TestCase):
         self.assertIn("appController.add_vocals_stem_track(appController.selectedTrackId)", qml)
         self.assertIn("artifactKinds", qml)
         self.assertIn("cacheRefCount", qml)
+
+    def _track_by_id(self, controller, track_id: str):
+        for track in controller._project.tracks:
+            if track.id == track_id:
+                return track
+        self.fail(f"track not found: {track_id}")
 
 
 if __name__ == "__main__":
