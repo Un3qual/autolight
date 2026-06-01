@@ -23,7 +23,7 @@
 - Create: `autolight/analysis/timing.py`
 - Create: `tests/test_timing_analysis.py`
 
-- [ ] **Step 1: Write failing timing helper tests**
+- [x] **Step 1: Write failing timing helper tests**
 
 Create `tests/test_timing_analysis.py`:
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run timing tests and verify failure**
+- [x] **Step 2: Run timing tests and verify failure**
 
 Run:
 
@@ -84,7 +84,7 @@ uv run python -m unittest tests.test_timing_analysis -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.analysis.timing'`.
 
-- [ ] **Step 3: Implement timing helpers**
+- [x] **Step 3: Implement timing helpers**
 
 Create `autolight/analysis/timing.py`:
 
@@ -129,7 +129,7 @@ def detect_beat_markers(audio_path: str | Path) -> list[dict]:
     ]
 ```
 
-- [ ] **Step 4: Run timing helper tests**
+- [x] **Step 4: Run timing helper tests**
 
 Run:
 
@@ -139,7 +139,7 @@ uv run python -m unittest tests.test_timing_analysis -v
 
 Expected: PASS for the helper tests.
 
-- [ ] **Step 5: Commit timing helpers**
+- [x] **Step 5: Commit timing helpers**
 
 Run:
 
