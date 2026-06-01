@@ -715,6 +715,15 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("resize_marker", marker_qml)
         self.assertIn("AltModifier", marker_qml)
 
+    def test_qml_marker_resize_uses_drag_delta_from_press(self):
+        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property real startX", marker_qml)
+        self.assertIn("startX = mouse.x", marker_qml)
+        self.assertIn("var widthDelta = mouse.x - startX", marker_qml)
+        self.assertIn("resize_marker", marker_qml)
+        self.assertNotIn("var widthDelta = mouse.x\n", marker_qml)
+
     def test_qml_exposes_undo_redo_actions(self):
         qml = Path("UI/Main.qml").read_text(encoding="utf-8")
         toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")

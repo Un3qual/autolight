@@ -65,9 +65,13 @@ Rectangle {
             anchors.fill: parent
             cursorShape: Qt.SizeHorCursor
             property real startWidth: 0
-            onPressed: startWidth = root.width
+            property real startX: 0
+            onPressed: function(mouse) {
+                startWidth = root.width
+                startX = mouse.x
+            }
             onReleased: function(mouse) {
-                var widthDelta = mouse.x
+                var widthDelta = mouse.x - startX
                 var nextDuration = Math.max(0, (startWidth + widthDelta) / Math.max(1, root.pixelsPerSecond))
                 root.appController.resize_marker(root.markerId, nextDuration)
             }
