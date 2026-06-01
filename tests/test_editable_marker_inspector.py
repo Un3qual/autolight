@@ -505,8 +505,11 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         controller.clear_marker_selection()
         self.assertEqual(controller.bulk_update_selected_markers("All", "scene", "blue"), 2)
         summaries = self._selected_track_markers(controller)
-        self.assertEqual([item["label"] for item in summaries], ["All", "All"])
-        self.assertEqual([item["colorKey"] for item in summaries], ["blue", "blue"])
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(summaries[0]["label"], "All")
+        self.assertEqual(summaries[1]["label"], "All")
+        self.assertEqual(summaries[0]["colorKey"], "blue")
+        self.assertEqual(summaries[1]["colorKey"], "blue")
 
     def test_controller_noop_bulk_update_selected_markers_does_not_dirty_or_refresh(self):
         from autolight.app_controller import AppController
@@ -584,8 +587,11 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         summaries = self._selected_track_markers(controller)
 
-        self.assertEqual([item["color"] for item in summaries], [MARKER_COLOR_PALETTE["cyan"]] * 2)
-        self.assertEqual([item["colorKey"] for item in summaries], ["cyan", "cyan"])
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(summaries[0]["color"], MARKER_COLOR_PALETTE["cyan"])
+        self.assertEqual(summaries[1]["color"], MARKER_COLOR_PALETTE["cyan"])
+        self.assertEqual(summaries[0]["colorKey"], "cyan")
+        self.assertEqual(summaries[1]["colorKey"], "cyan")
 
     def test_qml_exposes_editable_marker_inspector(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
