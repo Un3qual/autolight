@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import math
 from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -193,6 +194,40 @@ class AppControllerTest(unittest.TestCase):
         self.assertAlmostEqual(loaded_duration, 1.5, places=2)
         controller.playback.play.assert_called_once()
 
+    def test_play_selected_track_reuses_loaded_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+            controller.playback._source_path = str(audio_path)
+
+            self.assertTrue(controller.play_selected_track())
+
+        controller.playback.load_source.assert_not_called()
+        controller.playback.play.assert_called_once()
+
+    def test_play_selected_generated_track_loads_resolved_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            source_id = controller.import_audio(str(audio_path))
+            controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+
+            self.assertTrue(controller.play_selected_track())
+
+        loaded_path, loaded_duration = controller.playback.load_source.call_args.args
+        self.assertEqual(loaded_path, str(audio_path))
+        self.assertAlmostEqual(loaded_duration, 1.5, places=2)
+        controller.playback.play.assert_called_once()
+
     def test_play_selected_track_rejects_track_without_source_audio(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -216,6 +251,22 @@ class AppControllerTest(unittest.TestCase):
 
         controller.set_timeline_scroll_seconds(-10.0)
         self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_timeline_zoom_and_scroll_ignore_non_finite_values(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller.select_track(self._track_id(controller, 2))
+        controller.add_marker_to_selected_track(20.0, "Look")
+        controller.set_timeline_zoom(120.0)
+        controller.set_timeline_scroll_seconds(4.0)
+
+        controller.set_timeline_zoom(math.nan)
+        controller.set_timeline_zoom(math.inf)
+        controller.set_timeline_scroll_seconds(math.nan)
+        controller.set_timeline_scroll_seconds(math.inf)
+
+        self.assertEqual(controller.timelinePixelsPerSecond, 120.0)
+        self.assertEqual(controller.timelineScrollSeconds, 4.0)
 
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
@@ -857,6 +908,18 @@ class AppControllerTest(unittest.TestCase):
         self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
 
         self.assertEqual(duration_changes, [1.0])
+        self.assertEqual(scroll_changes, [0.0])
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_handle_track_changed_reclamps_timeline_scroll_after_duration_change(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._timeline_scroll_seconds = 50.0
+        scroll_changes = []
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        controller._handle_track_changed(controller.selectedTrackId)
+
         self.assertEqual(scroll_changes, [0.0])
         self.assertEqual(controller.timelineScrollSeconds, 0.0)
 

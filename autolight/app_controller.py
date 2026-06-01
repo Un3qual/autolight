@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from pathlib import Path
 
@@ -202,7 +203,7 @@ class AppController(QObject):
             track = import_audio_asset(self._project, audio_path)
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self.timelineDurationSecondsChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -248,8 +249,7 @@ class AppController(QObject):
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
         self._track_model.set_project(self._project)
         self._set_selected_track_id(source.id)
-        self.timelineDurationSecondsChanged.emit()
-        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+        self._notify_timeline_duration_changed()
         self._set_last_error("")
         self._set_dirty(False)
 
@@ -288,7 +288,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self.timelineDurationSecondsChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -324,7 +324,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self.timelineDurationSecondsChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -361,7 +361,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self.timelineDurationSecondsChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -387,7 +387,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self.timelineDurationSecondsChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -401,8 +401,7 @@ class AppController(QObject):
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
             self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
-            self.timelineDurationSecondsChanged.emit()
-            self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return marker.id
@@ -418,8 +417,7 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             if deleted:
-                self.timelineDurationSecondsChanged.emit()
-                self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+                self._notify_timeline_duration_changed()
                 self._set_dirty(True)
             return deleted
         except Exception as exc:
@@ -481,9 +479,10 @@ class AppController(QObject):
         if asset.import_status != "online":
             self._set_last_error(f"source audio is {asset.import_status}")
             return False
-        if not self._playback.load_source(asset.path, asset.duration):
-            self._set_last_error(self._playback.lastError)
-            return False
+        if self._playback.sourcePath != asset.path:
+            if not self._playback.load_source(asset.path, asset.duration):
+                self._set_last_error(self._playback.lastError)
+                return False
         self._playback.play()
         self._set_last_error("")
         return True
@@ -503,7 +502,10 @@ class AppController(QObject):
 
     @Slot(float)
     def set_timeline_zoom(self, pixels_per_second: float) -> None:
-        clamped = min(max(float(pixels_per_second), 24.0), 240.0)
+        value = float(pixels_per_second)
+        if not math.isfinite(value):
+            return
+        clamped = min(max(value, 24.0), 240.0)
         if self._timeline_pixels_per_second == clamped:
             return
         self._timeline_pixels_per_second = clamped
@@ -512,10 +514,13 @@ class AppController(QObject):
 
     @Slot(float)
     def set_timeline_scroll_seconds(self, seconds: float) -> None:
+        value = float(seconds)
+        if not math.isfinite(value):
+            return
         duration = self._timeline_duration_seconds()
         visible_seconds = self._visible_timeline_seconds()
         maximum = max(0.0, duration - visible_seconds)
-        clamped = min(max(float(seconds), 0.0), maximum)
+        clamped = min(max(value, 0.0), maximum)
         if self._timeline_scroll_seconds == clamped:
             return
         self._timeline_scroll_seconds = clamped
@@ -538,7 +543,7 @@ class AppController(QObject):
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
         self.selectedTrackCanPlayChanged.emit()
-        self.timelineDurationSecondsChanged.emit()
+        self._notify_timeline_duration_changed()
         self.timelineScrollSecondsChanged.emit()
 
     def _set_project_path(self, path: str) -> None:
@@ -577,7 +582,7 @@ class AppController(QObject):
         self._load_waveform_samples(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
-        self.timelineDurationSecondsChanged.emit()
+        self._notify_timeline_duration_changed()
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
@@ -652,6 +657,10 @@ class AppController(QObject):
             default=0.0,
         )
         return max(audio_duration, marker_duration, self._playback.durationSeconds)
+
+    def _notify_timeline_duration_changed(self) -> None:
+        self.timelineDurationSecondsChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
 
     def _visible_timeline_seconds(self) -> float:
         return 8.0
