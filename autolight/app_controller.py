@@ -32,17 +32,20 @@ from autolight.project.store import (
     add_generated_track,
     bulk_update_editable_markers,
     create_editable_track_from_markers,
+    create_manual_editable_track,
     delete_editable_marker,
     find_track,
     import_audio_asset,
     marker_snapshot,
     marker_color_key,
     marker_display_color,
+    move_editable_markers,
     new_project,
     normalize_marker_category,
     normalize_marker_color,
     refresh_audio_asset_status,
     refresh_audio_track_status,
+    resize_editable_marker,
     track_dependency_inputs,
     update_editable_marker,
 )
@@ -467,6 +470,26 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return ""
 
+    @Slot(str, result=str)
+    def add_manual_cue_track(self, name: str = "Manual Cues") -> str:
+        try:
+            before_project = copy.deepcopy(self._project)
+            track = create_manual_editable_track(
+                self._project,
+                self._selected_track_id,
+                name or "Manual Cues",
+            )
+            self.trackModel.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_dirty(True)
+            self._notify_timeline_duration_changed()
+            self._push_project_snapshot_command(before_project)
+            self._set_last_error("")
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
     @Slot(float, str, result=str)
     @Slot(float, str, str, str, result=str)
     def add_marker_to_selected_track(
@@ -610,6 +633,73 @@ class AppController(QObject):
         except Exception as exc:
             self._set_last_error(str(exc))
             return 0
+
+    @Slot(float, bool, result=bool)
+    def move_selected_markers(self, delta_seconds: float, bypass_snap: bool = False) -> bool:
+        try:
+            if not self._selected_marker_ids:
+                raise ValueError("select at least one marker to move")
+            before = [
+                marker_snapshot(self._editable_marker_for_selected_marker_id(marker_id))
+                for marker_id in self._selected_marker_ids
+            ]
+            delta = float(delta_seconds)
+            if not bypass_snap and len(self._selected_marker_ids) == 1:
+                marker = self._editable_marker_for_selected_marker_id(self._selected_marker_ids[0])
+                snapped = self.snap_timeline_time(marker.timestamp + delta, False)
+                delta = snapped - marker.timestamp
+            moved = move_editable_markers(
+                self._project,
+                self._selected_track_id,
+                self._selected_marker_ids,
+                delta,
+            )
+            after = [marker_snapshot(marker) for marker in moved]
+            self._push_marker_snapshot_command(self._selected_track_id, before=before, after=after)
+            if before != after:
+                self.trackModel.refresh_track(self._selected_track_id)
+                self.selectedTrackMarkersChanged.emit()
+                self._notify_timeline_duration_changed()
+                self._set_dirty(True)
+            self._set_last_error("")
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(str, float, result=bool)
+    def resize_marker(self, marker_id: str, duration: float) -> bool:
+        try:
+            marker = self._editable_marker_for_selected_marker_id(marker_id)
+            before = [marker_snapshot(marker)]
+            updated = resize_editable_marker(
+                self._project,
+                self._selected_track_id,
+                marker_id,
+                duration,
+            )
+            after = [marker_snapshot(updated)]
+            self._push_marker_snapshot_command(self._selected_track_id, before=before, after=after)
+            if before != after:
+                self.trackModel.refresh_track(self._selected_track_id)
+                self.selectedTrackMarkersChanged.emit()
+                self._notify_timeline_duration_changed()
+                self._set_dirty(True)
+            self._set_last_error("")
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(float, bool, result=float)
+    def snap_timeline_time(self, seconds: float, bypass_snap: bool = False) -> float:
+        return self._marker_editing.snap_time(
+            self._project,
+            requested_seconds=seconds,
+            pixels_per_second=self._timeline_pixels_per_second,
+            visible_track_ids=[track.id for track in self._project.tracks],
+            bypass=bypass_snap,
+        )
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:

@@ -1604,6 +1604,46 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(editable.input_track_ids, [generated_id])
         self.assertEqual(editable.result_state, ResultState.COMPLETE)
 
+    def test_controller_adds_manual_cue_track_from_selected_source_context(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        controller.select_track(source.id)
+
+        manual_id = controller.add_manual_cue_track("Manual Cues")
+
+        self.assertNotEqual(manual_id, "")
+        manual = self._track_by_id(controller, manual_id)
+        self.assertEqual(manual.type, TrackType.EDITABLE)
+        self.assertEqual(manual.input_track_ids, [source.id])
+        self.assertEqual(controller.selectedTrackId, manual_id)
+        self.assertTrue(controller.canUndo)
+
+    def test_controller_moves_and_resizes_selected_editable_markers(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable = next(track for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+        controller.select_track(editable.id)
+        marker_id = controller.add_marker_to_selected_track(0.5, "Cue", "cue", "cyan")
+        controller.toggle_marker_selection(marker_id, False)
+
+        self.assertTrue(controller.move_selected_markers(0.25, False))
+        marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+        self.assertEqual(marker.timestamp, 0.75)
+
+        self.assertTrue(controller.resize_marker(marker_id, 1.25))
+        self.assertEqual(marker.duration, 1.25)
+
+    def test_controller_snap_time_uses_generated_timing_markers_and_bypass(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        timing = next(track for track in controller._project.tracks if track.name == "Beat Markers")
+
+        self.assertEqual(controller.snap_timeline_time(0.53, False), 0.5)
+        self.assertEqual(controller.snap_timeline_time(0.53, True), 0.53)
+        controller.select_track(timing.id)
+        self.assertEqual(controller.snap_timeline_time(1.03, False), 1.0)
+
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
         FakeEngine.root_objects = [object()]
