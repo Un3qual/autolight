@@ -942,6 +942,31 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.selectedTrackId, editable_id)
         self.assertEqual(controller.selectedMarkerIds, [])
 
+    def test_marker_span_selection_follows_controller_selection_state(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(1.25, "Hit")
+        controller.clear_marker_selection()
+
+        def marker_span_selected() -> bool:
+            model = controller.trackModel
+            spans = model.data(model.index(2, 0), model.role_for_name("markerSpans"))
+            return next(span["selected"] for span in spans if span["id"] == marker_id)
+
+        self.assertFalse(marker_span_selected())
+
+        controller.toggle_marker_selection(marker_id, False)
+
+        self.assertTrue(marker_span_selected())
+        marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+        self.assertNotIn("selected", marker.metadata)
+
+        controller.toggle_marker_selection(marker_id, True)
+
+        self.assertFalse(marker_span_selected())
+
     def test_save_project_requires_path_for_unsaved_project(self):
         controller = self._controller()
 
@@ -1567,6 +1592,24 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(scroll_changes, [0.0])
         self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_non_waveform_track_change_does_not_refresh_waveform_rows(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        waveform_row = next(
+            index
+            for index, track in enumerate(controller._project.tracks)
+            if track.transform_id == "waveform.summary"
+        )
+        source_id = self._track_id(controller, 0)
+        emissions = []
+        controller.trackModel.dataChanged.connect(
+            lambda top_left, _bottom_right, _roles: emissions.append(top_left.row())
+        )
+
+        controller._handle_track_changed(source_id)
+
+        self.assertNotIn(waveform_row, emissions)
 
     def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
         controller = self._controller()

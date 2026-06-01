@@ -960,6 +960,7 @@ class AppController(QObject):
         if self._selected_marker_ids == marker_ids:
             return
         self._selected_marker_ids = list(marker_ids)
+        self._track_model.set_selected_marker_ids(self._selected_marker_ids)
         self.selectedMarkerIdsChanged.emit()
         if emit_marker_summary:
             self.selectedTrackMarkersChanged.emit()
@@ -1030,7 +1031,7 @@ class AppController(QObject):
     @Slot(str)
     def _handle_track_changed(self, track_id: str) -> None:
         self._load_waveform_samples(track_id)
-        self._refresh_visible_waveforms()
+        self._refresh_visible_waveforms(track_ids={track_id})
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         self._notify_timeline_duration_changed()
@@ -1181,8 +1182,10 @@ class AppController(QObject):
             return seconds - visible_seconds
         return self._timeline_scroll_seconds
 
-    def _refresh_visible_waveforms(self) -> None:
+    def _refresh_visible_waveforms(self, track_ids: set[str] | None = None) -> None:
         for track in self._project.tracks:
+            if track_ids is not None and track.id not in track_ids:
+                continue
             if track.transform_id != "waveform.summary":
                 continue
             if (
@@ -1197,13 +1200,15 @@ class AppController(QObject):
                 if track.provenance.pop("visible_waveform", None) is not None:
                     self.trackModel.refresh_track(track.id)
                 continue
-            track.provenance["visible_waveform"] = self._waveform_lod.visible_samples(
+            visible_waveform = self._waveform_lod.visible_samples(
                 payload,
                 scroll_seconds=self._timeline_scroll_seconds,
                 visible_seconds=self._visible_timeline_seconds(),
                 pixels_per_second=self._timeline_pixels_per_second,
             )
-            self.trackModel.refresh_track(track.id)
+            if track.provenance.get("visible_waveform") != visible_waveform:
+                track.provenance["visible_waveform"] = visible_waveform
+                self.trackModel.refresh_track(track.id)
 
     def _has_valid_waveform_cache(self, track) -> bool:
         entries = {entry.id: entry for entry in self._project.cache_entries}

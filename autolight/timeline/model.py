@@ -35,6 +35,7 @@ class TimelineTrackModel(QAbstractListModel):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
         self._markers_by_track: dict[str, list[Marker]] = {}
+        self._selected_marker_ids: set[str] = set()
         self._role_by_name = {
             role_name.decode("utf-8"): role for role, role_name in self.ROLE_NAMES.items()
         }
@@ -115,6 +116,16 @@ class TimelineTrackModel(QAbstractListModel):
 
     def role_for_name(self, name: str) -> int:
         return self._role_by_name[name]
+
+    def set_selected_marker_ids(self, marker_ids: list[str]) -> None:
+        selected_ids = set(marker_ids)
+        if self._selected_marker_ids == selected_ids:
+            return
+        changed_ids = self._selected_marker_ids ^ selected_ids
+        affected_track_ids = self._track_ids_for_marker_ids(changed_ids)
+        self._selected_marker_ids = selected_ids
+        for track_id in affected_track_ids:
+            self.refresh_track(track_id)
 
     def _track_for_index(self, index: QModelIndex) -> Track | None:
         if (
@@ -235,11 +246,17 @@ class TimelineTrackModel(QAbstractListModel):
             "label": marker.label,
             "category": marker.category,
             "color": marker_display_color(marker),
-            "selected": (
-                bool(marker.metadata.get("selected", False))
-                if isinstance(marker.metadata, dict)
-                else False
-            ),
+            "selected": marker.id in self._selected_marker_ids,
+        }
+
+    def _track_ids_for_marker_ids(self, marker_ids: set[str]) -> set[str]:
+        if not marker_ids:
+            return set()
+        return {
+            marker.track_id
+            for markers in self._markers_by_track.values()
+            for marker in markers
+            if marker.id in marker_ids
         }
 
     def _rebuild_marker_index(self) -> None:
