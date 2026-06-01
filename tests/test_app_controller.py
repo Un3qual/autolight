@@ -1490,6 +1490,20 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("Layout.preferredHeight: root.timelineRulerHeight", qml)
         self.assertIn("Layout.maximumHeight: root.timelineRulerHeight", qml)
 
+    def test_qml_uses_grouped_toolbar_and_stable_lane_dimensions(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        toolbar_start = qml.index("ToolBar {")
+        toolbar_shell = qml[toolbar_start : qml.index("RowLayout {", toolbar_start)]
+
+        self.assertIn("id: fileActions", qml)
+        self.assertIn("id: transformActions", qml)
+        self.assertIn("id: timelineControls", qml)
+        self.assertIn("readonly property int timelineRowHeight", qml)
+        self.assertIn("height: root.timelineRowHeight", qml)
+        self.assertIn("elide: Text.ElideRight", qml)
+        self.assertIn("clip: true", qml)
+        self.assertNotIn("background:", toolbar_shell)
+
     def test_qml_exposes_project_workflow_actions(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
 

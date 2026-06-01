@@ -563,6 +563,7 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("selectedMarkerIds.length", qml)
         self.assertIn("function syncMarkerEditorFromSelection()", qml)
         self.assertIn("root.syncMarkerEditorFromSelection()", qml)
+        self.assertIn("No track selected", qml)
         self.assertNotIn("root.syncMarkerEditor(modelData)", qml)
 
     @staticmethod

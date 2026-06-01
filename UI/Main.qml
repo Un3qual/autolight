@@ -13,10 +13,19 @@ Window {
     readonly property real timelineLeftPadding: 24
     readonly property real timelineLabelWidth: 280
     readonly property real timelineRulerHeight: 32
+    readonly property int timelineRowHeight: 76
+    readonly property int compactButtonHeight: 30
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
-    readonly property color controlTextColor: "#f4f4f5"
-    readonly property color controlMutedTextColor: "#a1a1aa"
+    readonly property color panelBackground: "#1c1f26"
+    readonly property color laneBackground: "#171a20"
+    readonly property color laneBackgroundAlt: "#14171d"
+    readonly property color borderSubtle: "#2f333d"
+    readonly property color textPrimary: "#f4f4f5"
+    readonly property color textMuted: "#a1a1aa"
+    readonly property color focusAccent: "#facc15"
+    readonly property color controlTextColor: root.textPrimary
+    readonly property color controlMutedTextColor: root.textMuted
     readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
     readonly property var markerColorOptions: [
         { key: "cyan", label: "Cyan", color: "#67e8f9" },
@@ -182,7 +191,7 @@ Window {
 
         contentItem: Text {
             text: "This project has unsaved changes."
-            color: "#f4f4f5"
+            color: root.textPrimary
             wrapMode: Text.WordWrap
             font.pixelSize: 13
         }
@@ -218,7 +227,7 @@ Window {
 
                 Label {
                     text: appController.projectName
-                    color: "#f4f4f5"
+                    color: "#111318"
                     font.pixelSize: 16
                     font.bold: true
                     Layout.leftMargin: 12
@@ -226,37 +235,79 @@ Window {
 
                 Item { Layout.fillWidth: true }
 
-                Button {
-                    text: "New"
-                    onClicked: root.newProjectWithConfirmation()
+                RowLayout {
+                    id: fileActions
+                    spacing: 6
+
+                    Button {
+                        text: "New"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: root.newProjectWithConfirmation()
+                    }
+
+                    Button {
+                        text: "Open"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: openProjectDialog.open()
+                    }
+
+                    Button {
+                        text: "Save"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: appController.projectPath.length > 0 ? appController.save_project("") : saveProjectDialog.open()
+                    }
+
+                    Button {
+                        text: "Save As"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: saveProjectDialog.open()
+                    }
+
+                    Button {
+                        text: "Demo"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: root.demoProjectWithConfirmation()
+                    }
                 }
 
-                Button {
-                    text: "Open"
-                    onClicked: openProjectDialog.open()
-                }
+                RowLayout {
+                    id: transformActions
+                    spacing: 6
 
-                Button {
-                    text: "Save"
-                    onClicked: appController.projectPath.length > 0 ? appController.save_project("") : saveProjectDialog.open()
-                }
+                    Button {
+                        text: "Import Audio"
+                        implicitHeight: root.compactButtonHeight
+                        onClicked: importAudioDialog.open()
+                    }
 
-                Button {
-                    text: "Save As"
-                    onClicked: saveProjectDialog.open()
-                }
+                    Button {
+                        text: "Add Markers"
+                        implicitHeight: root.compactButtonHeight
+                        enabled: appController.selectedTrackId.length > 0
+                        onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
+                    }
 
-                Button {
-                    text: "Import Audio"
-                    onClicked: importAudioDialog.open()
-                }
+                    Button {
+                        text: "Run"
+                        implicitHeight: root.compactButtonHeight
+                        enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
+                        onClicked: appController.run_track(appController.selectedTrackId)
+                    }
 
-                Button {
-                    text: "Add Markers"
-                    enabled: appController.selectedTrackId.length > 0
-                    onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
-                }
+                    Button {
+                        text: "Rerun"
+                        implicitHeight: root.compactButtonHeight
+                        enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
+                        onClicked: appController.rerun_track(appController.selectedTrackId)
+                    }
 
+                    Button {
+                        text: "Cancel"
+                        implicitHeight: root.compactButtonHeight
+                        enabled: appController.selectedTrackHasRunningJob
+                        onClicked: appController.cancel_selected_job()
+                    }
+                }
             }
         }
 
@@ -271,14 +322,14 @@ Window {
             Rectangle {
                 Layout.preferredWidth: root.timelineLabelWidth
                 Layout.fillHeight: true
-                color: "#1c1f26"
-                border.color: "#2f333d"
+                color: root.panelBackground
+                border.color: root.borderSubtle
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#1c1f26"
+                color: root.panelBackground
 
                 Repeater {
                     model: Math.ceil(appController.timelineVisibleSeconds) + 1
@@ -287,7 +338,7 @@ Window {
                         x: root.timelineX(tickSecond)
                         y: 9
                         text: tickSecond + "s"
-                        color: "#a1a1aa"
+                        color: root.textMuted
                         font.pixelSize: 12
                     }
                 }
@@ -295,18 +346,20 @@ Window {
         }
 
         RowLayout {
-            id: trackActionControls
+            id: transformDetailBar
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
-            spacing: 6
+            Layout.topMargin: 6
+            Layout.bottomMargin: 6
+            spacing: 8
 
             ComboBox {
                 id: transformPicker
                 model: appController.transformModel
                 textRole: "name"
                 valueRole: "transformId"
-                Layout.preferredWidth: 150
+                Layout.preferredWidth: 190
                 palette.text: root.controlTextColor
                 palette.buttonText: root.controlTextColor
             }
@@ -315,7 +368,7 @@ Window {
                 id: transformParamsField
                 text: "{\"duration\": 8.0, \"interval\": 0.5}"
                 placeholderText: "JSON params"
-                Layout.preferredWidth: 150
+                Layout.preferredWidth: 210
                 color: root.controlTextColor
                 placeholderTextColor: root.controlMutedTextColor
                 selectedTextColor: root.controlTextColor
@@ -323,7 +376,7 @@ Window {
             }
 
             Button {
-                text: "Transform"
+                text: "Add Transform"
                 palette.buttonText: root.controlTextColor
                 enabled: appController.selectedTrackId.length > 0 && transformPicker.currentIndex >= 0
                 onClicked: appController.add_transform_track(
@@ -335,51 +388,26 @@ Window {
             }
 
             Button {
-                text: "Vocals"
+                text: "Add Vocals Stem"
                 palette.buttonText: root.controlTextColor
                 enabled: appController.selectedTrackId.length > 0
                 onClicked: appController.add_vocals_stem_track(appController.selectedTrackId)
             }
 
             Button {
-                text: "Run"
-                palette.buttonText: root.controlTextColor
-                enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
-                onClicked: appController.run_track(appController.selectedTrackId)
-            }
-
-            Button {
-                text: "Cancel"
-                palette.buttonText: root.controlTextColor
-                enabled: appController.selectedTrackHasRunningJob
-                onClicked: appController.cancel_selected_job()
-            }
-
-            Button {
-                text: "Rerun"
-                palette.buttonText: root.controlTextColor
-                enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
-                onClicked: appController.rerun_track(appController.selectedTrackId)
-            }
-
-            Button {
-                text: "Cache"
+                text: "Check Cache"
                 palette.buttonText: root.controlTextColor
                 onClicked: appController.refresh_cache_status()
             }
 
             Button {
-                text: "Editable"
+                text: "Derive Editable"
                 palette.buttonText: root.controlTextColor
                 enabled: appController.selectedTrackId.length > 0
                 onClicked: appController.create_editable_track_from_track(appController.selectedTrackId)
             }
 
-            Button {
-                text: "Demo"
-                palette.buttonText: root.controlTextColor
-                onClicked: root.demoProjectWithConfirmation()
-            }
+            Item { Layout.fillWidth: true }
         }
 
         RowLayout {
@@ -450,6 +478,7 @@ Window {
         }
 
         RowLayout {
+            id: timelineControls
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
@@ -472,7 +501,7 @@ Window {
 
             Label {
                 text: Math.round(appController.timelinePixelsPerSecond) + " px/s"
-                color: "#a1a1aa"
+                color: root.textMuted
                 font.pixelSize: 12
                 Layout.preferredWidth: 64
             }
@@ -502,14 +531,14 @@ Window {
 
                 delegate: Row {
                     width: timelineRows.width
-                    height: 74
+                    height: root.timelineRowHeight
                     spacing: 0
 
                     Rectangle {
                         width: root.timelineLabelWidth
                         height: parent.height
-                        color: index % 2 === 0 ? "#23262d" : "#1f2229"
-                        border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
+                        color: index % 2 === 0 ? root.panelBackground : root.laneBackground
+                        border.color: appController.selectedTrackId === trackId ? root.focusAccent : root.borderSubtle
 
                         Column {
                             anchors.fill: parent
@@ -518,7 +547,7 @@ Window {
 
                             Text {
                                 text: name
-                                color: "#f4f4f5"
+                                color: root.textPrimary
                                 font.pixelSize: 14
                                 elide: Text.ElideRight
                                 width: parent.width
@@ -526,7 +555,7 @@ Window {
 
                             Text {
                                 text: trackType + " - " + resultState + " - " + markerCount + " markers"
-                                color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
+                                color: resultState === "failed" || resultState === "stale" ? "#f87171" : root.textMuted
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                                 width: parent.width
@@ -569,8 +598,8 @@ Window {
                     Rectangle {
                         width: Math.max(0, parent.width - root.timelineLabelWidth)
                         height: parent.height
-                        color: index % 2 === 0 ? "#171a20" : "#14171d"
-                        border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
+                        color: index % 2 === 0 ? root.laneBackground : root.laneBackgroundAlt
+                        border.color: appController.selectedTrackId === trackId ? root.focusAccent : root.borderSubtle
                         clip: true
 
                         Rectangle {
@@ -579,7 +608,7 @@ Window {
                             y: Math.round(parent.height / 2)
                             width: Math.max(0, parent.width - root.timelineLeftPadding)
                             height: 1
-                            color: "#2f333d"
+                            color: root.borderSubtle
                             visible: waveformSamples.length > 0
                         }
 
@@ -639,7 +668,7 @@ Window {
                             width: 2
                             height: parent.height
                             x: root.timelineX(appController.playback.positionSeconds)
-                            color: "#facc15"
+                            color: root.focusAccent
                             visible: appController.playback.sourcePath.length > 0
                                 && x >= root.timelineLeftPadding
                                 && x <= parent.width
@@ -662,8 +691,8 @@ Window {
                 id: inspectorPanel
                 Layout.preferredWidth: 260
                 Layout.fillHeight: true
-                color: "#1c1f26"
-                border.color: "#2f333d"
+                color: root.panelBackground
+                border.color: root.borderSubtle
                 property string selectedMarkerId: ""
 
                 Connections {
@@ -683,14 +712,24 @@ Window {
 
                     Label {
                         text: "Inspector"
-                        color: "#f4f4f5"
+                        color: root.textPrimary
                         font.bold: true
+                    }
+
+                    Text {
+                        text: appController.selectedTrackId.length === 0 ? "No track selected" : ""
+                        visible: appController.selectedTrackId.length === 0
+                        color: root.textMuted
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        width: parent.width
                     }
 
                     TextField {
                         id: markerTimestampField
                         placeholderText: "Timestamp"
                         text: "0.0"
+                        enabled: appController.selectedTrackIsEditable
                         width: parent.width
                     }
 
@@ -698,6 +737,7 @@ Window {
                         id: markerLabelField
                         placeholderText: "Label"
                         text: "Cue"
+                        enabled: appController.selectedTrackIsEditable
                         width: parent.width
                     }
 
@@ -705,6 +745,7 @@ Window {
                         id: markerCategoryField
                         placeholderText: "Category"
                         text: "cue"
+                        enabled: appController.selectedTrackIsEditable
                         width: parent.width
                     }
 
@@ -713,6 +754,7 @@ Window {
                         model: root.markerColorOptions
                         textRole: "label"
                         valueRole: "key"
+                        enabled: appController.selectedTrackIsEditable
                         width: parent.width
                         delegate: ItemDelegate {
                             width: markerColorPicker.width
@@ -728,7 +770,7 @@ Window {
                                 }
                                 Text {
                                     text: modelData.label
-                                    color: "#f4f4f5"
+                                    color: root.textPrimary
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                             }
@@ -774,7 +816,7 @@ Window {
                                         anchors.rightMargin: 4
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
-                                        color: "#f4f4f5"
+                                        color: root.textPrimary
                                         elide: Text.ElideRight
                                     }
 
@@ -839,7 +881,7 @@ Window {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
             color: "#111318"
-            border.color: "#2f333d"
+            border.color: root.borderSubtle
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -849,7 +891,7 @@ Window {
                 text: root.statusError.length > 0
                     ? root.statusError
                     : (appController.projectPath.length > 0 ? appController.projectPath : "Unsaved project")
-                color: root.statusError.length > 0 ? "#f87171" : "#a1a1aa"
+                color: root.statusError.length > 0 ? "#f87171" : root.textMuted
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }
