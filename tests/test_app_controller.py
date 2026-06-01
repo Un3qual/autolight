@@ -275,8 +275,10 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.pause_playback()", qml)
         self.assertIn("appController.stop_playback()", qml)
         self.assertIn("appController.seek_playback", qml)
+        self.assertIn("appController.playback.play()", qml)
         self.assertIn("appController.playback.positionSeconds", qml)
         self.assertIn("appController.playback.durationSeconds", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
 

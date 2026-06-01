@@ -28,6 +28,16 @@ Window {
         return minutes + ":" + (remaining < 10 ? "0" + remaining : remaining)
     }
 
+    function togglePlayback() {
+        if (appController.playback.isPlaying) {
+            appController.pause_playback()
+        } else if (appController.selectedTrackCanPlay) {
+            appController.play_selected_track()
+        } else {
+            appController.playback.play()
+        }
+    }
+
     function newProjectWithConfirmation() {
         if (appController.isDirty) {
             discardChangesDialog.pendingAction = "new"
@@ -152,7 +162,7 @@ Window {
                 Button {
                     text: appController.playback.isPlaying ? "Pause" : "Play"
                     enabled: appController.selectedTrackCanPlay || appController.playback.sourcePath.length > 0
-                    onClicked: appController.playback.isPlaying ? appController.pause_playback() : appController.play_selected_track()
+                    onClicked: root.togglePlayback()
                 }
 
                 Button {
