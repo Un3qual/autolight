@@ -262,6 +262,41 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(controller.lastError, "")
         self.assertTrue(any(marker.id == marker_id for marker in controller._project.markers))
 
+    def test_controller_invalid_add_marker_color_is_atomic(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        downstream = add_generated_track(
+            controller._project,
+            editable_id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        downstream.result_state = ResultState.COMPLETE
+        before_marker_ids = [
+            marker.id for marker in controller._project.markers if marker.track_id == editable_id
+        ]
+        controller._set_dirty(False)
+
+        marker_id = controller.add_marker_to_selected_track(1.5, "Broken", "cue", "not-a-color")
+
+        after_marker_ids = [
+            marker.id for marker in controller._project.markers if marker.track_id == editable_id
+        ]
+        self.assertEqual(marker_id, "")
+        self.assertIn("marker color", controller.lastError)
+        self.assertEqual(after_marker_ids, before_marker_ids)
+        self.assertFalse(controller.isDirty)
+        self.assertEqual(downstream.result_state, ResultState.COMPLETE)
+
     def test_controller_rejects_non_finite_marker_timestamp(self):
         from autolight.app_controller import AppController
 
@@ -514,6 +549,21 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             "enabled: inspectorPanel.selectedMarkerId.length > 0 && appController.selectedTrackIsEditable",
             qml,
         )
+
+    def test_qml_exposes_marker_label_color_and_bulk_edit_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("id: markerColorPicker", qml)
+        self.assertIn("id: markerCategoryField", qml)
+        self.assertIn("appController.toggle_marker_selection", qml)
+        self.assertIn("appController.update_selected_marker", qml)
+        self.assertIn("appController.bulk_update_selected_markers", qml)
+        self.assertIn("modelData.color", qml)
+        self.assertIn("modelData.selected", qml)
+        self.assertIn("selectedMarkerIds.length", qml)
+        self.assertIn("function syncMarkerEditorFromSelection()", qml)
+        self.assertIn("root.syncMarkerEditorFromSelection()", qml)
+        self.assertNotIn("root.syncMarkerEditor(modelData)", qml)
 
     @staticmethod
     def _generated_track(project):

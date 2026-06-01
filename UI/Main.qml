@@ -16,9 +16,54 @@ Window {
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
     readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
+    readonly property var markerColorOptions: [
+        { key: "cyan", label: "Cyan", color: "#67e8f9" },
+        { key: "green", label: "Green", color: "#a7f3d0" },
+        { key: "amber", label: "Amber", color: "#fbbf24" },
+        { key: "violet", label: "Violet", color: "#c4b5fd" },
+        { key: "rose", label: "Rose", color: "#fda4af" },
+        { key: "blue", label: "Blue", color: "#93c5fd" }
+    ]
 
     function timelineX(seconds) {
         return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
+    }
+
+    function markerColorIndex(colorKey) {
+        for (var i = 0; i < root.markerColorOptions.length; i++) {
+            if (root.markerColorOptions[i].key === colorKey) {
+                return i
+            }
+        }
+        return 0
+    }
+
+    function selectedMarkerCount() {
+        return appController.selectedMarkerIds.length
+    }
+
+    function syncMarkerEditor(marker) {
+        markerTimestampField.text = Number(marker.timestamp).toFixed(2)
+        markerLabelField.text = marker.label.length > 0 ? marker.label : "Cue"
+        markerCategoryField.text = marker.category.length > 0 ? marker.category : "cue"
+        markerColorPicker.currentIndex = root.markerColorIndex(marker.colorKey)
+    }
+
+    function syncMarkerEditorFromSelection() {
+        inspectorPanel.selectedMarkerId = ""
+        if (appController.selectedMarkerIds.length !== 1) {
+            return
+        }
+
+        var markerId = appController.selectedMarkerIds[0]
+        for (var i = 0; i < appController.selectedTrackMarkers.length; i++) {
+            var marker = appController.selectedTrackMarkers[i]
+            if (marker.id === markerId && marker.selected) {
+                inspectorPanel.selectedMarkerId = marker.id
+                root.syncMarkerEditor(marker)
+                return
+            }
+        }
     }
 
     function updateTimelineVisibleSeconds() {
@@ -481,7 +526,19 @@ Window {
                                 y: 9
                                 visible: x + width >= root.timelineLeftPadding && x <= parent.width
                                 radius: 2
-                                color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
+                                color: modelData.color
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - 6
+                                    text: modelData.label
+                                    color: "#111318"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                    visible: parent.width >= 36 && modelData.label.length > 0
+                                }
                             }
                         }
 
@@ -519,6 +576,9 @@ Window {
                     function onSelectedTrackIdChanged() {
                         inspectorPanel.selectedMarkerId = ""
                     }
+                    function onSelectedMarkerIdsChanged() {
+                        root.syncMarkerEditorFromSelection()
+                    }
                 }
 
                 Column {
@@ -536,12 +596,48 @@ Window {
                         id: markerTimestampField
                         placeholderText: "Timestamp"
                         text: "0.0"
+                        width: parent.width
                     }
 
                     TextField {
                         id: markerLabelField
                         placeholderText: "Label"
                         text: "Cue"
+                        width: parent.width
+                    }
+
+                    TextField {
+                        id: markerCategoryField
+                        placeholderText: "Category"
+                        text: "cue"
+                        width: parent.width
+                    }
+
+                    ComboBox {
+                        id: markerColorPicker
+                        model: root.markerColorOptions
+                        textRole: "label"
+                        valueRole: "key"
+                        width: parent.width
+                        delegate: ItemDelegate {
+                            width: markerColorPicker.width
+                            text: modelData.label
+                            contentItem: Row {
+                                spacing: 8
+                                Rectangle {
+                                    width: 12
+                                    height: 12
+                                    radius: 6
+                                    color: modelData.color
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: modelData.label
+                                    color: "#f4f4f5"
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                        }
                     }
 
                     ScrollView {
@@ -560,20 +656,39 @@ Window {
                                 delegate: Rectangle {
                                     required property var modelData
                                     width: markerList.width
-                                    height: 28
-                                    color: inspectorPanel.selectedMarkerId === modelData.id ? "#2f4366" : "transparent"
+                                    height: 34
+                                    radius: 3
+                                    color: modelData.selected ? "#2f4366" : "transparent"
+                                    border.color: modelData.selected ? modelData.color : "transparent"
+
+                                    Rectangle {
+                                        id: markerColorSwatch
+                                        width: 10
+                                        height: 10
+                                        radius: 5
+                                        color: modelData.color
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
 
                                     Text {
+                                        anchors.left: markerColorSwatch.right
+                                        anchors.leftMargin: 8
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
                                         color: "#f4f4f5"
                                         elide: Text.ElideRight
-                                        width: parent.width
                                     }
 
                                     MouseArea {
                                         anchors.fill: parent
-                                        onClicked: inspectorPanel.selectedMarkerId = modelData.id
+                                        onClicked: function(mouse) {
+                                            appController.toggle_marker_selection(modelData.id, (mouse.modifiers & Qt.ShiftModifier) !== 0)
+                                            root.syncMarkerEditorFromSelection()
+                                        }
                                     }
                                 }
                             }
@@ -585,7 +700,9 @@ Window {
                         enabled: appController.selectedTrackId.length > 0 && appController.selectedTrackIsEditable
                         onClicked: appController.add_marker_to_selected_track(
                             Number(markerTimestampField.text),
-                            markerLabelField.text
+                            markerLabelField.text,
+                            markerCategoryField.text,
+                            markerColorPicker.currentValue
                         )
                     }
 
@@ -597,6 +714,27 @@ Window {
                                 inspectorPanel.selectedMarkerId = ""
                             }
                         }
+                    }
+
+                    Button {
+                        text: "Update Cue"
+                        enabled: appController.selectedTrackIsEditable && root.selectedMarkerCount() === 1
+                        onClicked: appController.update_selected_marker(
+                            Number(markerTimestampField.text),
+                            markerLabelField.text,
+                            markerCategoryField.text,
+                            markerColorPicker.currentValue
+                        )
+                    }
+
+                    Button {
+                        text: root.selectedMarkerCount() > 0 ? "Apply To Selected" : "Apply To Track"
+                        enabled: appController.selectedTrackIsEditable && appController.selectedTrackMarkers.length > 0
+                        onClicked: appController.bulk_update_selected_markers(
+                            markerLabelField.text,
+                            markerCategoryField.text,
+                            markerColorPicker.currentValue
+                        )
                     }
                 }
             }

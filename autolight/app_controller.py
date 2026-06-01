@@ -416,10 +416,29 @@ class AppController(QObject):
             return ""
 
     @Slot(float, str, result=str)
-    def add_marker_to_selected_track(self, timestamp: float, label: str) -> str:
+    @Slot(float, str, str, str, result=str)
+    def add_marker_to_selected_track(
+        self,
+        timestamp: float,
+        label: str,
+        category: str = "cue",
+        color: str = DEFAULT_MARKER_COLOR,
+    ) -> str:
         try:
+            category_value = self._normalized_marker_category(category)
+            color_value = self._normalized_marker_color(color)
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
+            update_editable_marker(
+                self._project,
+                self._selected_track_id,
+                marker.id,
+                timestamp=marker.timestamp,
+                label=marker.label,
+                category=category_value,
+                color=color_value,
+            )
             self._track_model.set_project(self._project)
+            self._set_selected_marker_ids([marker.id], emit_marker_summary=False)
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -858,6 +877,17 @@ class AppController(QObject):
         if isinstance(color, str) and color in MARKER_COLOR_PALETTE:
             return color
         return DEFAULT_MARKER_COLOR
+
+    @staticmethod
+    def _normalized_marker_category(category: str) -> str:
+        return str(category or "cue")
+
+    @staticmethod
+    def _normalized_marker_color(color: str) -> str:
+        value = str(color or DEFAULT_MARKER_COLOR).strip().lower()
+        if value not in MARKER_COLOR_PALETTE:
+            raise ValueError(f"marker color must be one of: {', '.join(MARKER_COLOR_PALETTE)}")
+        return value
 
     def _refresh_dependency_hash(self, track) -> None:
         if not track.transform_id or not track.input_track_ids:
