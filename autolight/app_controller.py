@@ -16,7 +16,7 @@ from autolight.app import (
     TimelineViewport,
     WaveformLodStore,
 )
-from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand
+from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand, TrackSnapshotCommand
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
@@ -304,9 +304,9 @@ class AppController(QObject):
         beats.result_state = ResultState.COMPLETE
         self._project.markers.extend(
             [
-                Marker(id="marker_demo_1", track_id=beats.id, timestamp=0.0, label="Beat"),
-                Marker(id="marker_demo_2", track_id=beats.id, timestamp=0.5, label="Beat"),
-                Marker(id="marker_demo_3", track_id=beats.id, timestamp=1.0, label="Beat"),
+                Marker(id="marker_demo_1", track_id=beats.id, timestamp=0.0, label="Beat", category="timing"),
+                Marker(id="marker_demo_2", track_id=beats.id, timestamp=0.5, label="Beat", category="timing"),
+                Marker(id="marker_demo_3", track_id=beats.id, timestamp=1.0, label="Beat", category="timing"),
             ]
         )
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
@@ -475,17 +475,17 @@ class AppController(QObject):
     @Slot(str, result=str)
     def add_manual_cue_track(self, name: str = "Manual Cues") -> str:
         try:
-            before_project = copy.deepcopy(self._project)
             track = create_manual_editable_track(
                 self._project,
                 self._selected_track_id,
                 name or "Manual Cues",
             )
+            track_index = self._project.tracks.index(track)
             self.trackModel.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._set_dirty(True)
             self._notify_timeline_duration_changed()
-            self._push_project_snapshot_command(before_project)
+            self._push_track_creation_command(track, track_index)
             self._set_last_error("")
             return track.id
         except Exception as exc:
@@ -1116,6 +1116,17 @@ class AppController(QObject):
             ProjectSnapshotCommand(
                 before=before_project,
                 after=copy.deepcopy(self._project),
+            )
+        )
+        self._notify_history_changed()
+
+    def _push_track_creation_command(self, track, index: int) -> None:
+        self._edit_history.push(
+            TrackSnapshotCommand(
+                track_id=track.id,
+                before=None,
+                after=track,
+                index=index,
             )
         )
         self._notify_history_changed()

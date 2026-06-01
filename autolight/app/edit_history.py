@@ -61,6 +61,45 @@ class MarkerSnapshotCommand:
 
 
 @dataclass(slots=True)
+class TrackSnapshotCommand:
+    track_id: str
+    before: Any | None
+    after: Any | None
+    index: int
+
+    def __post_init__(self) -> None:
+        self.before = copy.deepcopy(self.before)
+        self.after = copy.deepcopy(self.after)
+
+    def undo(self, project: ProjectDocument) -> None:
+        self._restore(project, self.before)
+
+    def redo(self, project: ProjectDocument) -> None:
+        self._restore(project, self.after)
+
+    def _restore(self, project: ProjectDocument, snapshot: Any | None) -> None:
+        if snapshot is None:
+            dependent = next(
+                (
+                    track
+                    for track in project.tracks
+                    if track.id != self.track_id and self.track_id in track.input_track_ids
+                ),
+                None,
+            )
+            if dependent is not None:
+                raise ValueError(f"cannot remove track with dependent track: {dependent.id}")
+            project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
+            project.markers[:] = [marker for marker in project.markers if marker.track_id != self.track_id]
+            project.job_runs[:] = [job for job in project.job_runs if job.track_id != self.track_id]
+            return
+
+        project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
+        insert_at = min(max(0, self.index), len(project.tracks))
+        project.tracks.insert(insert_at, copy.deepcopy(snapshot))
+
+
+@dataclass(slots=True)
 class ProjectSnapshotCommand:
     before: ProjectDocument
     after: ProjectDocument

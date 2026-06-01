@@ -30,6 +30,7 @@ class MarkerEditingService:
             timestamp
             for marker in project.markers
             if marker.track_id in eligible_track_ids
+            and marker.category == "timing"
             for timestamp in [self._finite_candidate_time(marker.timestamp)]
             if timestamp is not None
         ]

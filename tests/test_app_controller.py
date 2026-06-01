@@ -1910,6 +1910,28 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.selectedTrackId, manual_id)
         self.assertTrue(controller.canUndo)
 
+    def test_manual_track_undo_preserves_later_imported_audio_track(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        controller.select_track(source.id)
+        manual_id = controller.add_manual_cue_track("Manual Cues")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "later.wav"
+            write_wav(audio_path)
+            imported_id = controller.import_audio(str(audio_path))
+
+        self.assertNotEqual(manual_id, "")
+        self.assertNotEqual(imported_id, "")
+        self.assertTrue(controller.undo())
+        self.assertIsNone(self._optional_track_by_id(controller, manual_id))
+        self.assertIsNotNone(self._optional_track_by_id(controller, imported_id))
+
+        self.assertTrue(controller.redo())
+        self.assertIsNotNone(self._optional_track_by_id(controller, manual_id))
+        self.assertIsNotNone(self._optional_track_by_id(controller, imported_id))
+
     def test_controller_exposes_default_qml_slot_overloads_for_task5_slots(self):
         controller = self._controller()
 
@@ -2208,6 +2230,10 @@ class AppControllerTest(unittest.TestCase):
             if track.id == track_id:
                 return track
         self.fail(f"track not found: {track_id}")
+
+    @staticmethod
+    def _optional_track_by_id(controller: AppController, track_id: str):
+        return next((track for track in controller._project.tracks if track.id == track_id), None)
 
     def _track_by_type(self, controller: AppController, track_type: TrackType):
         for track in controller._project.tracks:

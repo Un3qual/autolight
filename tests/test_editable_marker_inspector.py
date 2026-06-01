@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autolight.app.edit_history import EditHistory, MarkerSnapshotCommand, ProjectSnapshotCommand
+from autolight.app.edit_history import (
+    EditHistory,
+    MarkerSnapshotCommand,
+    ProjectSnapshotCommand,
+    TrackSnapshotCommand,
+)
 from autolight.app.marker_editing import MarkerEditingService
 from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
@@ -155,6 +160,33 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             1.03,
         )
 
+    def test_marker_editing_service_ignores_non_timing_generated_markers(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        generated = add_generated_track(
+            project,
+            source.id,
+            "Fixed Markers",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        generated.result_state = ResultState.COMPLETE
+        project.markers.append(Marker(id="cue_1", track_id=generated.id, timestamp=0.5, category="cue"))
+        service = MarkerEditingService()
+
+        snapped = service.snap_time(
+            project,
+            requested_seconds=0.53,
+            pixels_per_second=100.0,
+            visible_track_ids=[generated.id],
+            bypass=False,
+        )
+
+        self.assertEqual(snapped, 0.53)
+
     def test_marker_editing_service_snap_edge_cases(self):
         project = new_project("Demo")
         source = self._source_track(project)
@@ -304,6 +336,30 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         self.assertIs(project.ui_state, ui_state)
         self.assertEqual(project.ui_state, {"timeline": {"scroll_seconds": 1.0}})
+
+    def test_track_snapshot_command_removes_only_created_track(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        manual = create_manual_editable_track(project, source.id, "Manual Cues")
+        command = TrackSnapshotCommand(
+            track_id=manual.id,
+            before=None,
+            after=manual,
+            index=project.tracks.index(manual),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "later.wav"
+            write_wav(audio_path)
+            imported = import_audio_asset(project, audio_path)
+
+        command.undo(project)
+
+        self.assertNotIn(manual.id, [track.id for track in project.tracks])
+        self.assertIn(imported.id, [track.id for track in project.tracks])
+
+        command.redo(project)
+        self.assertIn(manual.id, [track.id for track in project.tracks])
+        self.assertIn(imported.id, [track.id for track in project.tracks])
 
     def test_add_editable_marker_rejects_generated_track(self):
         project = new_project("Demo")
