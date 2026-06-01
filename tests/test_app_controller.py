@@ -1008,7 +1008,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("modelData.timestamp", qml)
         self.assertIn("spacing: root.timelinePixelsPerSecond", qml)
         self.assertIn("anchors.leftMargin: root.timelineLeftPadding", qml)
-        self.assertIn("modelData.timestamp * root.timelinePixelsPerSecond", qml)
+        self.assertIn("root.timelineX(modelData.timestamp)", qml)
         self.assertNotIn("spacing: 48", qml)
         self.assertNotIn("pixelsPerSecond: 96", qml)
         self.assertNotIn("model: markerCount", qml)
