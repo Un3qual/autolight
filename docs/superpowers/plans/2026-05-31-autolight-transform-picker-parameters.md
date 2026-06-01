@@ -27,7 +27,7 @@
 - Create: `autolight/timeline/transform_model.py`
 - Create: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Write failing transform model tests**
+- [x] **Step 1: Write failing transform model tests**
 
 Create `tests/test_transform_picker.py`:
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run transform picker tests and verify failure**
+- [x] **Step 2: Run transform picker tests and verify failure**
 
 Run:
 
@@ -111,7 +111,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.timeline.transform_model'`.
 
-- [ ] **Step 3: Implement registry spec listing and `TransformSpecModel`**
+- [x] **Step 3: Implement registry spec listing and `TransformSpecModel`**
 
 Add this method to `TransformRegistry` in `autolight/analysis/registry.py`:
 
@@ -182,7 +182,7 @@ class TransformSpecModel(QAbstractListModel):
         return self._specs[row].version
 ```
 
-- [ ] **Step 4: Run transform picker tests**
+- [x] **Step 4: Run transform picker tests**
 
 Run:
 
@@ -192,7 +192,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit transform spec model**
+- [x] **Step 5: Commit transform spec model**
 
 Run:
 
