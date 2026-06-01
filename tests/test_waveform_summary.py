@@ -11,6 +11,7 @@ import soundfile
 from autolight.analysis.builtin import MAX_WAVEFORM_BUCKETS, register_builtin_transforms
 from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
 from autolight.analysis.waveform import build_waveform_summary
+from autolight.app.waveform_lod import WaveformLodStore
 
 
 def write_wav(path: Path) -> None:
@@ -36,11 +37,57 @@ class WaveformSummaryTest(unittest.TestCase):
             build_waveform_summary(audio_path, output_path, buckets=4)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["version"], 2)
         self.assertEqual(payload["sample_rate"], 8)
         self.assertEqual(len(payload["samples"]), 4)
         self.assertTrue(all(0.0 <= item["peak"] <= 1.0 for item in payload["samples"]))
         self.assertTrue(all(0.0 <= item["rms"] <= 1.0 for item in payload["samples"]))
+
+    def test_build_waveform_summary_writes_pyramid_levels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            output_path = Path(tmp) / "waveform.json"
+            write_wav(audio_path)
+
+            build_waveform_summary(audio_path, output_path, buckets=2)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["version"], 2)
+        self.assertIn("levels", payload)
+        self.assertGreaterEqual(len(payload["levels"]), 2)
+        self.assertEqual(payload["levels"][0]["bucket_count"], 2)
+        self.assertGreater(payload["levels"][-1]["bucket_count"], payload["levels"][0]["bucket_count"])
+
+    def test_waveform_lod_selects_more_detail_when_zoomed_in(self):
+        payload = {
+            "version": 2,
+            "duration": 8.0,
+            "levels": [
+                {"bucket_count": 8, "samples": [{"peak": 0.1, "rms": 0.05}] * 8},
+                {"bucket_count": 64, "samples": [{"peak": 0.2, "rms": 0.10}] * 64},
+            ],
+        }
+        store = WaveformLodStore()
+
+        overview = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=8.0, pixels_per_second=48.0)
+        detail = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=200.0)
+
+        self.assertEqual(overview["level_bucket_count"], 8)
+        self.assertEqual(detail["level_bucket_count"], 64)
+        self.assertLessEqual(len(detail["samples"]), 16)
+
+    def test_waveform_lod_reads_legacy_single_sample_payload(self):
+        payload = {
+            "version": 1,
+            "duration": 1.0,
+            "samples": [{"peak": 0.25, "rms": 0.10}],
+        }
+        store = WaveformLodStore()
+
+        visible = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=96.0)
+
+        self.assertEqual(visible["level_bucket_count"], 1)
+        self.assertEqual(visible["samples"][0]["peak"], 0.25)
 
     def test_build_waveform_summary_does_not_use_whole_file_read(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -192,6 +239,7 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertEqual(len(samples), 4)
         self.assertIn("peak", samples[0])
         self.assertAlmostEqual(duration, 1.0)
+        self.assertEqual(track.provenance["waveform_payload"]["version"], 2)
 
     def test_controller_restores_waveform_samples_after_open_project(self):
         from autolight.app_controller import AppController
@@ -222,6 +270,7 @@ class WaveformSummaryTest(unittest.TestCase):
             QCoreApplication.processEvents()
             track.provenance.pop("waveform_samples", None)
             track.provenance.pop("waveform_duration_seconds", None)
+            track.provenance.pop("waveform_payload", None)
             self.assertTrue(controller.save_project(str(project_path)))
 
             self.assertTrue(controller.open_project(str(project_path)))
@@ -262,6 +311,7 @@ class WaveformSummaryTest(unittest.TestCase):
         track.cache_refs = ["missing_waveform"]
         track.provenance["waveform_samples"] = [{"peak": 1.0, "rms": 1.0}]
         track.provenance["waveform_duration_seconds"] = 12.5
+        track.provenance["waveform_payload"] = {"version": 2, "samples": []}
         controller._project.cache_entries.append(
             CacheEntry(
                 id="missing_waveform",
@@ -278,6 +328,7 @@ class WaveformSummaryTest(unittest.TestCase):
 
         self.assertNotIn("waveform_samples", track.provenance)
         self.assertNotIn("waveform_duration_seconds", track.provenance)
+        self.assertNotIn("waveform_payload", track.provenance)
 
     def test_qml_mentions_waveform_samples_role(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

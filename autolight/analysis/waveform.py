@@ -11,6 +11,7 @@ import soundfile
 from autolight.analysis.registry import TransformCancelled
 
 WAVEFORM_READ_BLOCK_FRAMES = 65_536
+MAX_WAVEFORM_LOD_BUCKETS = 4_096
 
 
 def build_waveform_summary(
@@ -23,26 +24,77 @@ def build_waveform_summary(
         raise ValueError("buckets must be greater than zero")
 
     _raise_if_cancelled(cancel_requested)
-    try:
-        sample_rate, frame_count, samples = _build_soundfile_summary(
-            audio_path,
-            buckets,
-            cancel_requested,
-        )
-    except (soundfile.SoundFileError, RuntimeError):
-        sample_rate, frame_count, samples = _build_audioread_summary(
-            audio_path,
-            buckets,
-            cancel_requested,
+    sample_rate, frame_count = _audio_info(audio_path)
+    base_bucket_count = min(buckets, max(1, frame_count))
+    level_bucket_counts = _waveform_level_bucket_counts(base_bucket_count, frame_count)
+    levels = []
+    for bucket_count in level_bucket_counts:
+        levels.append(
+            {
+                "bucket_count": bucket_count,
+                "samples": _summarize_samples(audio_path, bucket_count, cancel_requested),
+            }
         )
 
     payload = {
-        "version": 1,
+        "version": 2,
         "sample_rate": sample_rate,
         "duration": 0.0 if sample_rate == 0 else float(frame_count / sample_rate),
-        "samples": samples,
+        "samples": levels[0]["samples"],
+        "levels": levels,
     }
     Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _audio_info(audio_path: str | Path) -> tuple[int, int]:
+    try:
+        with soundfile.SoundFile(str(audio_path)) as audio:
+            return int(audio.samplerate), int(audio.frames)
+    except (soundfile.SoundFileError, RuntimeError):
+        pass
+
+    try:
+        import audioread
+    except ImportError as exc:
+        raise RuntimeError(
+            "audioread is required to summarize this unsupported audio container"
+        ) from exc
+
+    with audioread.audio_open(str(audio_path)) as reader:
+        sample_rate = int(reader.samplerate)
+        frame_count = max(0, int(round(float(reader.duration) * sample_rate)))
+        return sample_rate, frame_count
+
+
+def _waveform_level_bucket_counts(base_bucket_count: int, frame_count: int) -> list[int]:
+    maximum = min(MAX_WAVEFORM_LOD_BUCKETS, max(1, frame_count))
+    counts = [max(1, min(base_bucket_count, maximum))]
+    while counts[-1] < maximum:
+        next_count = min(maximum, counts[-1] * 4)
+        if next_count == counts[-1]:
+            break
+        counts.append(next_count)
+    return counts
+
+
+def _summarize_samples(
+    audio_path: str | Path,
+    bucket_count: int,
+    cancel_requested: Callable[[], bool] | None,
+) -> list[dict[str, float]]:
+    try:
+        _sample_rate, _frame_count, samples = _build_soundfile_summary(
+            audio_path,
+            bucket_count,
+            cancel_requested,
+        )
+    except (soundfile.SoundFileError, RuntimeError):
+        _sample_rate, _frame_count, samples = _build_audioread_summary(
+            audio_path,
+            bucket_count,
+            cancel_requested,
+        )
+    return samples
 
 
 def _build_soundfile_summary(

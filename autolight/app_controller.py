@@ -1167,6 +1167,7 @@ class AppController(QObject):
         if track.result_state != ResultState.COMPLETE:
             track.provenance.pop("waveform_samples", None)
             track.provenance.pop("waveform_duration_seconds", None)
+            track.provenance.pop("waveform_payload", None)
             return
         entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
         for cache_ref in track.cache_refs:
@@ -1179,17 +1180,21 @@ class AppController(QObject):
             except (OSError, ValueError, TypeError):
                 track.provenance.pop("waveform_samples", None)
                 track.provenance.pop("waveform_duration_seconds", None)
+                track.provenance.pop("waveform_payload", None)
                 return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
+                track.provenance["waveform_payload"] = payload
                 track.provenance["waveform_samples"] = samples
                 track.provenance["waveform_duration_seconds"] = payload.get("duration", 0.0)
             else:
                 track.provenance.pop("waveform_samples", None)
                 track.provenance.pop("waveform_duration_seconds", None)
+                track.provenance.pop("waveform_payload", None)
             return
         track.provenance.pop("waveform_samples", None)
         track.provenance.pop("waveform_duration_seconds", None)
+        track.provenance.pop("waveform_payload", None)
 
     def _load_all_waveform_samples(self) -> None:
         for track in list(self._project.tracks):
@@ -1198,14 +1203,16 @@ class AppController(QObject):
 
     def _attach_demo_waveform(self, waveform_track) -> None:
         samples = self._demo_waveform_samples()
-        payload = json.dumps({"version": 1, "duration": 1.0, "samples": samples}).encode("utf-8")
+        payload = {"version": 1, "duration": 1.0, "samples": samples}
+        payload_bytes = json.dumps(payload).encode("utf-8")
         entry = self._job_queue.cache_store.write_bytes(
             "waveform",
             "demo-waveform",
-            payload,
+            payload_bytes,
             "1",
         )
         waveform_track.cache_refs = [entry.id]
+        waveform_track.provenance["waveform_payload"] = payload
         waveform_track.provenance["waveform_samples"] = samples
         waveform_track.provenance["waveform_duration_seconds"] = 1.0
         self._project.cache_entries.append(entry)
