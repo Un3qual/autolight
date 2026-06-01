@@ -137,7 +137,7 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             "dep",
         )
         timing.result_state = ResultState.COMPLETE
-        project.markers.append(Marker(id="beat_1", track_id=timing.id, timestamp=1.0, category="timing"))
+        project.markers.append(Marker(id="beat_1", track_id=timing.id, timestamp=1.0, category="beat"))
         service = MarkerEditingService()
 
         snapped = service.snap_time(
@@ -149,6 +149,28 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         )
 
         self.assertEqual(snapped, 1.0)
+        timing_onsets = add_generated_track(
+            project,
+            source.id,
+            "Onset Markers",
+            "timing.onsets",
+            {},
+            "1",
+            "markers.v1",
+            "dep-onsets",
+        )
+        timing_onsets.result_state = ResultState.COMPLETE
+        project.markers.append(Marker(id="onset_1", track_id=timing_onsets.id, timestamp=1.5, category="onset"))
+        self.assertEqual(
+            service.snap_time(
+                project,
+                requested_seconds=1.53,
+                pixels_per_second=100.0,
+                visible_track_ids=[timing_onsets.id],
+                bypass=False,
+            ),
+            1.5,
+        )
         self.assertEqual(
             service.snap_time(
                 project,

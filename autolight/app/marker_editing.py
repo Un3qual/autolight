@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 
 SNAP_THRESHOLD_PIXELS = 8.0
+TIMING_SNAP_CATEGORIES = {"timing", "beat", "onset"}
 
 
 class MarkerEditingService:
@@ -30,7 +31,7 @@ class MarkerEditingService:
             timestamp
             for marker in project.markers
             if marker.track_id in eligible_track_ids
-            and marker.category == "timing"
+            and self._is_timing_snap_category(marker.category)
             for timestamp in [self._finite_candidate_time(marker.timestamp)]
             if timestamp is not None
         ]
@@ -65,6 +66,10 @@ class MarkerEditingService:
         except (TypeError, ValueError):
             return None
         return number if math.isfinite(number) else None
+
+    @staticmethod
+    def _is_timing_snap_category(value: object) -> bool:
+        return str(value).strip().lower() in TIMING_SNAP_CATEGORIES
 
     @staticmethod
     def _enum_value(value: object) -> object:
