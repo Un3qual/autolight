@@ -56,8 +56,9 @@ class WaveformLodStore:
         visible_seconds: float,
         pixels_per_second: float,
     ) -> dict[str, Any]:
+        visible = max(0.01, self._finite_float(visible_seconds, default=0.01))
         zoom = max(1.0, self._finite_float(pixels_per_second, default=1.0))
-        desired = max(1, math.ceil(zoom / TARGET_PIXELS_PER_BUCKET))
+        desired = max(1, math.ceil(visible * zoom / TARGET_PIXELS_PER_BUCKET))
         return min(levels, key=lambda level: abs(int(level["bucket_count"]) - desired))
 
     def _levels(self, payload: dict[str, Any]) -> list[dict[str, Any]]:

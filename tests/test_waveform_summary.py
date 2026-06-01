@@ -69,12 +69,29 @@ class WaveformSummaryTest(unittest.TestCase):
         }
         store = WaveformLodStore()
 
-        overview = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=8.0, pixels_per_second=48.0)
+        overview = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=24.0)
         detail = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=200.0)
 
         self.assertEqual(overview["level_bucket_count"], 8)
         self.assertEqual(detail["level_bucket_count"], 64)
         self.assertLessEqual(len(detail["samples"]), 16)
+
+    def test_waveform_lod_uses_visible_window_for_level_selection(self):
+        payload = {
+            "version": 2,
+            "duration": 8.0,
+            "levels": [
+                {"bucket_count": 8, "samples": [{"peak": 0.1, "rms": 0.05}] * 8},
+                {"bucket_count": 64, "samples": [{"peak": 0.2, "rms": 0.10}] * 64},
+            ],
+        }
+        store = WaveformLodStore()
+
+        narrow = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=1.0, pixels_per_second=48.0)
+        wide = store.visible_samples(payload, scroll_seconds=0.0, visible_seconds=8.0, pixels_per_second=48.0)
+
+        self.assertEqual(narrow["level_bucket_count"], 8)
+        self.assertEqual(wide["level_bucket_count"], 64)
 
     def test_waveform_lod_reads_legacy_single_sample_payload(self):
         payload = {
