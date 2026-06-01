@@ -1,3 +1,4 @@
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -131,6 +132,35 @@ class TimelineTrackModelTest(unittest.TestCase):
         visible = model.data(index, model.role_for_name("visibleWaveformSamples"))
         self.assertEqual(visible[0]["time"], 0.0)
         self.assertEqual(model.data(index, model.role_for_name("waveformLevelBucketCount")), 8)
+
+    def test_waveform_level_bucket_count_returns_zero_for_malformed_values(self):
+        malformed_values = [float("inf"), math.nan, {"bad": "type"}]
+        malformed_visibles = [{"level_bucket_count": value} for value in malformed_values]
+        malformed_visibles.append({})
+
+        for visible in malformed_visibles:
+            with self.subTest(visible=visible):
+                project = new_project("Demo")
+                project.tracks.append(
+                    Track(
+                        id="track_wave",
+                        type=TrackType.GENERATED,
+                        name="Waveform",
+                        transform_id="waveform.summary",
+                        result_state=ResultState.COMPLETE,
+                        provenance={"visible_waveform": visible},
+                    )
+                )
+                model = TimelineTrackModel()
+                model.set_project(project)
+
+                self.assertEqual(
+                    model.data(
+                        model.index(0, 0),
+                        model.role_for_name("waveformLevelBucketCount"),
+                    ),
+                    0,
+                )
 
     def test_model_exposes_latest_job_state_progress_and_id(self):
         project = ProjectDocument(id="project_1", name="Demo")

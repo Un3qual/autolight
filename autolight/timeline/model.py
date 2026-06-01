@@ -189,9 +189,12 @@ class TimelineTrackModel(QAbstractListModel):
         if not isinstance(visible, dict):
             return 0
         try:
-            return int(visible.get("level_bucket_count", 0))
-        except (TypeError, ValueError):
+            bucket_count = float(visible.get("level_bucket_count", 0))
+        except (OverflowError, TypeError, ValueError):
             return 0
+        if not math.isfinite(bucket_count) or bucket_count < 0:
+            return 0
+        return int(bucket_count)
 
     def _has_valid_waveform_cache(self, cache_refs: list[str]) -> bool:
         if self._project is None:
