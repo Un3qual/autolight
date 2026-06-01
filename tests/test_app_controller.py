@@ -1,3 +1,4 @@
+import copy
 import importlib
 import json
 import math
@@ -139,6 +140,74 @@ class AppControllerTest(unittest.TestCase):
         controller.new_project()
         self.assertFalse(controller.canUndo)
         self.assertFalse(controller.canRedo)
+
+    def test_undo_redo_recomputes_visible_waveform_for_current_scroll(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=800000)
+            source_id = controller.import_audio(str(audio_path))
+
+        waveform = add_generated_track(
+            controller._project,
+            parent_track_id=source_id,
+            name="Waveform",
+            transform_id="waveform.summary",
+            transform_params={"buckets": 100},
+            transform_version="1",
+            output_schema="artifact.waveform.v1",
+            dependency_hash="waveform-test",
+        )
+        waveform.result_state = ResultState.COMPLETE
+        waveform.cache_refs = ["cache_waveform"]
+        waveform.provenance["waveform_payload"] = {
+            "version": 2,
+            "duration": 100.0,
+            "levels": [
+                {"bucket_count": 100, "samples": [{"peak": 0.2, "rms": 0.1}] * 100}
+            ],
+        }
+        controller._project.cache_entries.append(
+            CacheEntry(
+                id="cache_waveform",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform/cache_waveform.bin",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        controller.trackModel.set_project(controller._project)
+        controller._refresh_visible_waveforms()
+        before_project = copy.deepcopy(controller._project)
+        controller._project.name = "Changed"
+        controller._push_project_snapshot_command(before_project)
+
+        def first_visible_time() -> float:
+            model = controller.trackModel
+            row = next(
+                index
+                for index, track in enumerate(controller._project.tracks)
+                if track.transform_id == "waveform.summary"
+            )
+            samples = model.data(
+                model.index(row, 0),
+                model.role_for_name("visibleWaveformSamples"),
+            )
+            return samples[0]["time"]
+
+        self.assertEqual(first_visible_time(), 0.0)
+        controller.set_timeline_scroll_seconds(50.0)
+        scrolled_time = first_visible_time()
+        self.assertGreater(scrolled_time, 40.0)
+
+        self.assertTrue(controller.undo())
+        self.assertAlmostEqual(first_visible_time(), scrolled_time)
+
+        self.assertTrue(controller.redo())
+        self.assertAlmostEqual(first_visible_time(), scrolled_time)
 
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()

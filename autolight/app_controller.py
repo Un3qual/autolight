@@ -761,6 +761,7 @@ class AppController(QObject):
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
+            self._refresh_visible_waveforms()
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
@@ -777,6 +778,7 @@ class AppController(QObject):
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
+            self._refresh_visible_waveforms()
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
