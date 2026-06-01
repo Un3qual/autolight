@@ -1,3 +1,4 @@
+import importlib
 import json
 import math
 import tempfile
@@ -62,6 +63,27 @@ class AppControllerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QCoreApplication.instance() or QCoreApplication([])
+
+    def test_app_layer_modules_exist_for_milestone_2_boundaries(self):
+        module_names = [
+            "autolight.app.session",
+            "autolight.app.marker_editing",
+            "autolight.app.edit_history",
+            "autolight.app.timeline_viewport",
+            "autolight.app.waveform_lod",
+        ]
+
+        for module_name in module_names:
+            with self.subTest(module_name=module_name):
+                self.assertIsNotNone(importlib.import_module(module_name))
+
+    def test_app_controller_constructs_app_layer_collaborators(self):
+        controller = self._controller()
+
+        self.assertEqual(type(controller._session).__name__, "ProjectSession")
+        self.assertEqual(type(controller._edit_history).__name__, "EditHistory")
+        self.assertEqual(type(controller._viewport).__name__, "TimelineViewport")
+        self.assertEqual(type(controller._waveform_lod).__name__, "WaveformLodStore")
 
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()

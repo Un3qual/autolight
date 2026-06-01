@@ -7,6 +7,13 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
 
+from autolight.app import (
+    EditHistory,
+    MarkerEditingService,
+    ProjectSession,
+    TimelineViewport,
+    WaveformLodStore,
+)
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
@@ -63,6 +70,11 @@ class AppController(QObject):
     def __init__(self):
         super().__init__()
         self._project = new_project("Untitled")
+        self._session = ProjectSession(self._project)
+        self._marker_editing = MarkerEditingService()
+        self._edit_history = EditHistory()
+        self._viewport = TimelineViewport()
+        self._waveform_lod = WaveformLodStore()
         self._project_path = ""
         self._last_error = ""
         self._selected_track_id = ""
