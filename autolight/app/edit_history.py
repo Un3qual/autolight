@@ -93,28 +93,44 @@ class TrackSnapshotCommand:
         job_runs: list[Any],
     ) -> None:
         if snapshot is None:
-            dependent = next(
-                (
-                    track
-                    for track in project.tracks
-                    if track.id != self.track_id and self.track_id in track.input_track_ids
-                ),
-                None,
-            )
-            if dependent is not None:
-                raise ValueError(f"cannot remove track with dependent track: {dependent.id}")
-            project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
-            project.markers[:] = [marker for marker in project.markers if marker.track_id != self.track_id]
-            project.job_runs[:] = [job for job in project.job_runs if job.track_id != self.track_id]
+            self._remove_track(project)
             return
 
-        project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
-        project.markers[:] = [marker for marker in project.markers if marker.track_id != self.track_id]
-        project.job_runs[:] = [job for job in project.job_runs if job.track_id != self.track_id]
+        self._replace_track(project, snapshot, markers, job_runs)
+
+    def _remove_track(self, project: ProjectDocument) -> None:
+        dependent = self._dependent_track(project)
+        if dependent is not None:
+            raise ValueError(f"cannot remove track with dependent track: {dependent.id}")
+        self._discard_track_state(project)
+
+    def _replace_track(
+        self,
+        project: ProjectDocument,
+        snapshot: Any,
+        markers: list[Any],
+        job_runs: list[Any],
+    ) -> None:
+        self._discard_track_state(project)
         insert_at = min(max(0, self.index), len(project.tracks))
         project.tracks.insert(insert_at, copy.deepcopy(snapshot))
         project.markers.extend(copy.deepcopy(markers))
         project.job_runs.extend(copy.deepcopy(job_runs))
+
+    def _dependent_track(self, project: ProjectDocument) -> Any | None:
+        return next(
+            (
+                track
+                for track in project.tracks
+                if track.id != self.track_id and self.track_id in track.input_track_ids
+            ),
+            None,
+        )
+
+    def _discard_track_state(self, project: ProjectDocument) -> None:
+        project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
+        project.markers[:] = [marker for marker in project.markers if marker.track_id != self.track_id]
+        project.job_runs[:] = [job for job in project.job_runs if job.track_id != self.track_id]
 
 
 @dataclass(slots=True)

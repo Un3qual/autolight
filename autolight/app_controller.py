@@ -920,12 +920,13 @@ class AppController(QObject):
         if not math.isfinite(value):
             return
         visible_seconds = self._visible_timeline_seconds()
-        playback_position = float(self._playback.property("positionSeconds") or 0.0)
+        playback_position = float(self._playback.positionSeconds)
+        visible_start = self._timeline_scroll_seconds
+        visible_end = visible_start + visible_seconds
         playback_position_visible = (
-            bool(self._playback.property("sourcePath"))
-            and self._timeline_scroll_seconds
-            <= playback_position
-            <= self._timeline_scroll_seconds + visible_seconds
+            bool(self._playback.sourcePath)
+            and playback_position >= visible_start
+            and playback_position <= visible_end
         )
         anchor = (
             playback_position

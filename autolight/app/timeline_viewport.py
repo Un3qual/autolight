@@ -13,7 +13,8 @@ class TimelineViewport:
     def __init__(self):
         self._last_follow_emit_seconds = -math.inf
 
-    def clamp_zoom(self, pixels_per_second: float) -> float:
+    @staticmethod
+    def clamp_zoom(pixels_per_second: float) -> float:
         value = float(pixels_per_second)
         if not math.isfinite(value):
             value = 96.0
