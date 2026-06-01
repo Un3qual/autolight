@@ -11,6 +11,7 @@ Window {
     title: appController.projectName
     color: "#181a1f"
     readonly property real timelineLeftPadding: 24
+    readonly property real timelineLabelWidth: 280
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
@@ -21,7 +22,7 @@ Window {
     }
 
     function updateTimelineVisibleSeconds() {
-        var laneWidth = Math.max(0, timelineRows.width - 280 - root.timelineLeftPadding)
+        var laneWidth = Math.max(0, timelineRows.width - root.timelineLabelWidth - root.timelineLeftPadding)
         appController.set_timeline_visible_seconds(laneWidth / appController.timelinePixelsPerSecond)
     }
 
@@ -35,6 +36,8 @@ Window {
     function togglePlayback() {
         if (appController.playback.isPlaying) {
             appController.pause_playback()
+        } else if (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) {
+            appController.playback.play()
         } else {
             appController.play_selected_track()
         }
@@ -172,7 +175,7 @@ Window {
 
                 Button {
                     text: appController.playback.isPlaying ? "Pause" : "Play"
-                    enabled: appController.selectedTrackCanPlay || appController.playback.isPlaying
+                    enabled: appController.selectedTrackCanPlay || (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) || appController.playback.isPlaying
                     onClicked: root.togglePlayback()
                 }
 
@@ -297,7 +300,7 @@ Window {
             spacing: 0
 
             Rectangle {
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: root.timelineLabelWidth
                 Layout.fillHeight: true
                 color: "#1c1f26"
                 border.color: "#2f333d"
@@ -390,7 +393,7 @@ Window {
                     spacing: 0
 
                     Rectangle {
-                        width: 280
+                        width: root.timelineLabelWidth
                         height: parent.height
                         color: index % 2 === 0 ? "#23262d" : "#1f2229"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
@@ -451,7 +454,7 @@ Window {
                     }
 
                     Rectangle {
-                        width: Math.max(0, parent.width - 280)
+                        width: Math.max(0, parent.width - root.timelineLabelWidth)
                         height: parent.height
                         color: index % 2 === 0 ? "#171a20" : "#14171d"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"

@@ -323,13 +323,31 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.pause_playback()", qml)
         self.assertIn("appController.stop_playback()", qml)
         self.assertIn("appController.seek_playback", qml)
-        self.assertNotIn("appController.playback.play()", qml)
-        self.assertIn("appController.selectedTrackCanPlay || appController.playback.isPlaying", qml)
+        self.assertIn("appController.selectedTrackCanPlay", qml)
+        self.assertIn("appController.playback.isPlaying", qml)
         self.assertIn("appController.playback.positionSeconds", qml)
         self.assertIn("appController.playback.durationSeconds", qml)
         self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
+
+    def test_qml_playback_fallback_only_runs_without_selected_track(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        no_selected_track_guard = (
+            "appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0"
+        )
+        self.assertIn(no_selected_track_guard, qml)
+        self.assertIn(
+            "appController.selectedTrackCanPlay || (" + no_selected_track_guard + ") || appController.playback.isPlaying",
+            qml,
+        )
+        self.assertIn("} else if (" + no_selected_track_guard + ") {", qml)
+        self.assertIn("appController.playback.play()", qml)
+        self.assertLess(
+            qml.index("} else if (" + no_selected_track_guard + ") {"),
+            qml.index("appController.playback.play()"),
+        )
 
     def test_qml_exposes_timeline_zoom_and_scroll_controls(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
@@ -1091,6 +1109,18 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("model: markerCount", qml)
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)
+
+    def test_qml_uses_named_timeline_label_width(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("readonly property real timelineLabelWidth: 280", qml)
+        self.assertIn("timelineRows.width - root.timelineLabelWidth - root.timelineLeftPadding", qml)
+        self.assertIn("Layout.preferredWidth: root.timelineLabelWidth", qml)
+        self.assertIn("width: root.timelineLabelWidth", qml)
+        self.assertIn("parent.width - root.timelineLabelWidth", qml)
+        self.assertNotIn("timelineRows.width - 280 - root.timelineLeftPadding", qml)
+        self.assertNotIn("Layout.preferredWidth: 280", qml)
+        self.assertNotIn("width: 280", qml)
 
     def test_qml_timeline_ruler_has_fixed_height(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

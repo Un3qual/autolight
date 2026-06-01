@@ -93,7 +93,7 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(model.data(index, model.role_for_name("jobState")), "running")
         self.assertEqual(model.data(index, model.role_for_name("jobProgress")), 0.25)
 
-    def test_waveform_samples_are_hidden_when_cache_is_invalid(self):
+    def test_waveform_roles_are_hidden_when_cache_is_invalid(self):
         project = ProjectDocument(id="project_1", name="Demo")
         project.tracks.append(
             Track(
@@ -103,7 +103,10 @@ class TimelineTrackModelTest(unittest.TestCase):
                 transform_id="waveform.summary",
                 result_state=ResultState.COMPLETE,
                 cache_refs=["cache_waveform"],
-                provenance={"waveform_samples": [{"peak": 1.0, "rms": 1.0}]},
+                provenance={
+                    "waveform_samples": [{"peak": 1.0, "rms": 1.0}],
+                    "waveform_duration_seconds": 1.25,
+                },
             )
         )
         project.cache_entries.append(
@@ -120,9 +123,12 @@ class TimelineTrackModelTest(unittest.TestCase):
         model = TimelineTrackModel()
         model.set_project(project)
 
-        samples = model.data(model.index(0, 0), model.role_for_name("waveformSamples"))
+        index = model.index(0, 0)
+        samples = model.data(index, model.role_for_name("waveformSamples"))
+        duration = model.data(index, model.role_for_name("waveformDurationSeconds"))
 
         self.assertEqual(samples, [])
+        self.assertEqual(duration, 0.0)
 
     def test_waveform_duration_seconds_is_exposed_for_complete_valid_waveform_track(self):
         project = ProjectDocument(id="project_1", name="Demo")
