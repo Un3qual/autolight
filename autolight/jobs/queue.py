@@ -14,6 +14,8 @@ from autolight.cache.store import CacheStore
 from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track
 from autolight.project.store import find_track, mark_dependents_stale, new_id
 
+RUNTIME_ONLY_TRANSFORM_PARAM_KEYS = {"audio_path"}
+
 
 @dataclass(frozen=True, slots=True)
 class _JobSnapshot:
@@ -65,16 +67,24 @@ class LocalJobQueue:
             if active_job_id is not None:
                 self._active_job_by_track.pop(track_id, None)
 
+            track_transform_params = copy.deepcopy(track.transform_params)
+            execution_transform_params = copy.deepcopy(
+                track.transform_params if transform_params is None else transform_params
+            )
+            if not self._runtime_params_match_cached_identity(
+                track_transform_params,
+                execution_transform_params,
+            ):
+                raise ValueError("runtime transform params cannot change cached identity")
+
             job_id = new_id("job")
             cancel_event = Event()
             snapshot = _JobSnapshot(
                 track_id=track_id,
                 transform_id=track.transform_id,
                 transform_version=track.transform_version,
-                track_transform_params=copy.deepcopy(track.transform_params),
-                transform_params=copy.deepcopy(
-                    track.transform_params if transform_params is None else transform_params
-                ),
+                track_transform_params=track_transform_params,
+                transform_params=execution_transform_params,
                 dependency_hash=track.dependency_hash,
             )
             run = JobRun(
@@ -120,6 +130,13 @@ class LocalJobQueue:
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True)
+
+    @staticmethod
+    def _runtime_params_match_cached_identity(
+        track_transform_params: dict[str, Any],
+        execution_transform_params: dict[str, Any],
+    ) -> bool:
+        return _identity_params(track_transform_params) == _identity_params(execution_transform_params)
 
     def refresh_cache_validity(self, project: ProjectDocument) -> list[str]:
         entry_snapshots = self._cache_entry_snapshots(project)
@@ -464,3 +481,11 @@ class LocalJobQueue:
             if self._futures.get(job_id) is future:
                 self._futures.pop(job_id, None)
                 self._cancel_events.pop(job_id, None)
+
+
+def _identity_params(params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(value)
+        for key, value in params.items()
+        if key not in RUNTIME_ONLY_TRANSFORM_PARAM_KEYS
+    }

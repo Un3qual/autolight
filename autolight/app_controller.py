@@ -272,6 +272,7 @@ class AppController(QObject):
             transform_id = "stems.vocals_stand_in"
             transform_version = "1"
             params = {"label": "vocals"}
+            self._require_source_audio_path_for_track(parent)
             dependency_hash = track_dependency_hash(
                 track_dependency_inputs(self._project, parent),
                 transform_id,
@@ -487,11 +488,16 @@ class AppController(QObject):
 
     def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
         enriched = dict(params)
-        if spec.input_schema == "audio.v1" and "audio_path" not in enriched:
-            audio_path = self._source_audio_path_for_track(parent)
-            if not audio_path:
-                raise ValueError("audio transform requires a source audio track")
+        if spec.input_schema == "audio.v1":
+            self._require_source_audio_path_for_track(parent)
+            enriched.pop("audio_path", None)
         return enriched
+
+    def _require_source_audio_path_for_track(self, track) -> str:
+        audio_path = self._source_audio_path_for_track(track)
+        if not audio_path:
+            raise ValueError("audio transform requires a source audio track")
+        return audio_path
 
     def _source_audio_path_for_track(self, track) -> str:
         seen_track_ids = set()
@@ -566,11 +572,12 @@ class AppController(QObject):
         parent = find_track(self._project, track.input_track_ids[0])
         if parent is None:
             raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+        params = self._dependency_transform_params_for_track(track)
         track.dependency_hash = track_dependency_hash(
             track_dependency_inputs(self._project, parent),
             track.transform_id,
             track.transform_version,
-            track.transform_params,
+            params,
         )
 
     def _submit_track(self, track_id: str) -> str:
@@ -598,11 +605,16 @@ class AppController(QObject):
     def _runtime_transform_params_for_track(self, track) -> dict:
         params = dict(track.transform_params)
         spec = self._registry.get(track.transform_id, version=track.transform_version)
-        if spec.input_schema == "audio.v1" and "audio_path" not in params:
-            audio_path = self._source_audio_path_for_track(track)
-            if not audio_path:
-                raise ValueError("audio transform requires a source audio track")
-            params["audio_path"] = audio_path
+        if spec.input_schema == "audio.v1":
+            params.pop("audio_path", None)
+            params["audio_path"] = self._require_source_audio_path_for_track(track)
+        return params
+
+    def _dependency_transform_params_for_track(self, track) -> dict:
+        params = dict(track.transform_params)
+        spec = self._registry.get(track.transform_id, version=track.transform_version)
+        if spec.input_schema == "audio.v1":
+            params.pop("audio_path", None)
         return params
 
     def _can_replace_project(self) -> bool:

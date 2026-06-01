@@ -157,7 +157,12 @@ def _waveform_summary(context: TransformContext, params: dict) -> TransformResul
     _raise_if_cancelled(context)
     context.progress(0.1)
     output_path = Path(context.artifact_dir) / "waveform.json"
-    build_waveform_summary(audio_path, output_path, buckets=buckets)
+    build_waveform_summary(
+        audio_path,
+        output_path,
+        buckets=buckets,
+        cancel_requested=context.cancel_requested,
+    )
     _raise_if_cancelled(context)
     context.progress(1.0)
     return TransformResult(

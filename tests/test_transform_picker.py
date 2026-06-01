@@ -220,6 +220,39 @@ class TransformPickerTest(unittest.TestCase):
         self.assertEqual(track_id, "")
         self.assertIn("source audio track", controller.lastError)
 
+    def test_controller_add_transform_track_rejects_supplied_audio_path_without_source_audio(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        controller._project.tracks.append(no_audio)
+
+        track_id = controller.add_transform_track(
+            no_audio.id,
+            "test.audio_path",
+            "1",
+            '{"audio_path": "/tmp/other.wav"}',
+        )
+
+        self.assertEqual(track_id, "")
+        self.assertIn("source audio track", controller.lastError)
+
     def test_controller_resolves_audio_path_at_submission_time(self):
         from autolight.app_controller import AppController
         from tests.helpers import write_wav
@@ -261,6 +294,67 @@ class TransformPickerTest(unittest.TestCase):
 
         self.assertEqual(seen_paths, [str(relinked_path)])
         self.assertNotIn("audio_path", track.transform_params)
+
+    def test_controller_runtime_audio_path_replaces_saved_audio_path(self):
+        from autolight.app_controller import AppController
+        from tests.helpers import write_wav
+
+        seen_paths = []
+
+        def capture_path(context, params):
+            seen_paths.append(params["audio_path"])
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.runtime_audio_path",
+                version="1",
+                name="Runtime Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=capture_path,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_path = root / "song.wav"
+            relinked_path = root / "song_relinked.wav"
+            write_wav(original_path)
+            write_wav(relinked_path)
+            source_id = controller.import_audio(str(original_path))
+            track_id = controller.add_transform_track(
+                source_id,
+                "test.runtime_audio_path",
+                "1",
+                '{"audio_path": "/stale/song.wav"}',
+            )
+            track = self._track_by_id(controller, track_id)
+            controller._project.audio_assets[0].path = str(relinked_path)
+
+            job_id = controller.run_track(track_id)
+            controller._job_queue.wait(job_id, timeout=5)
+            QCoreApplication.processEvents()
+
+        self.assertEqual(seen_paths, [str(relinked_path)])
+        self.assertNotIn("audio_path", track.transform_params)
+
+    def test_controller_add_vocals_stem_track_rejects_parent_without_source_audio(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        controller._project.tracks.append(no_audio)
+
+        track_id = controller.add_vocals_stem_track(no_audio.id)
+
+        self.assertEqual(track_id, "")
+        self.assertIn("source audio track", controller.lastError)
 
     def test_qml_uses_transform_model_and_generic_add_action(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

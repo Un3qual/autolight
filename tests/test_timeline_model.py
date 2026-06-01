@@ -99,7 +99,7 @@ class TimelineTrackModelTest(unittest.TestCase):
                 type=TrackType.GENERATED,
                 name="Waveform",
                 transform_id="waveform.summary",
-                result_state=ResultState.STALE,
+                result_state=ResultState.COMPLETE,
                 cache_refs=["cache_waveform"],
                 provenance={"waveform_samples": [{"peak": 1.0, "rms": 1.0}]},
             )

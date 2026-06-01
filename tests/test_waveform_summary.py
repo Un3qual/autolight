@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
 
+import soundfile
 from autolight.analysis.builtin import MAX_WAVEFORM_BUCKETS, register_builtin_transforms
 from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
 from autolight.analysis.waveform import build_waveform_summary
@@ -51,6 +52,51 @@ class WaveformSummaryTest(unittest.TestCase):
                 build_waveform_summary(audio_path, output_path, buckets=4)
 
             self.assertTrue(output_path.exists())
+
+    def test_build_waveform_summary_falls_back_when_soundfile_rejects_container(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.unsupported"
+            output_path = Path(tmp) / "waveform.json"
+            audio_path.write_bytes(b"unsupported container")
+
+            with (
+                patch(
+                    "autolight.analysis.waveform.soundfile.SoundFile",
+                    side_effect=soundfile.SoundFileError("unsupported"),
+                ),
+                patch("audioread.audio_open", return_value=FakeAudioRead()),
+            ):
+                build_waveform_summary(audio_path, output_path, buckets=2)
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["sample_rate"], 4)
+        self.assertEqual(len(payload["samples"]), 2)
+        self.assertGreater(payload["samples"][0]["peak"], 0.0)
+
+    def test_build_waveform_summary_checks_cancel_between_reads(self):
+        cancel_checks = 0
+
+        def cancel_after_first_check():
+            nonlocal cancel_checks
+            cancel_checks += 1
+            return cancel_checks > 1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            output_path = Path(tmp) / "waveform.json"
+            write_wav(audio_path)
+
+            with self.assertRaises(TransformCancelled):
+                build_waveform_summary(
+                    audio_path,
+                    output_path,
+                    buckets=4,
+                    cancel_requested=cancel_after_first_check,
+                )
+
+            self.assertFalse(output_path.exists())
+        self.assertGreater(cancel_checks, 1)
 
     def test_waveform_summary_transform_writes_artifact(self):
         registry = TransformRegistry()
@@ -235,6 +281,22 @@ class WaveformSummaryTest(unittest.TestCase):
             if track.id == track_id:
                 return index
         self.fail(f"track not found: {track_id}")
+
+
+class FakeAudioRead:
+    samplerate = 4
+    channels = 1
+    duration = 1.0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def __iter__(self):
+        for sample in (0, 8000, -8000, 16000):
+            yield sample.to_bytes(2, "little", signed=True)
 
 
 if __name__ == "__main__":
