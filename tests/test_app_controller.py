@@ -378,6 +378,17 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.timelinePixelsPerSecond, 200.0)
         self.assertAlmostEqual(controller.timelineScrollSeconds, 62.6)
 
+    def test_zoom_near_timeline_end_preserves_post_zoom_scroll_anchor(self):
+        controller = self._controller()
+        controller._timeline_duration_seconds = Mock(return_value=100.0)
+        controller.set_timeline_visible_seconds(10.0)
+        controller.set_timeline_scroll_seconds(90.0)
+
+        controller.set_timeline_zoom(200.0)
+
+        self.assertEqual(controller.timelinePixelsPerSecond, 200.0)
+        self.assertAlmostEqual(controller.timelineScrollSeconds, 92.6)
+
     def test_play_selected_track_loads_resolved_source_audio(self):
         controller = self._controller()
         controller.playback.load_source = Mock(return_value=True)

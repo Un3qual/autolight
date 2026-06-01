@@ -687,8 +687,15 @@ class AppController(QObject):
         )
         if self._timeline_pixels_per_second == clamped:
             return
+        next_visible_seconds = max(
+            0.01,
+            visible_seconds * self._timeline_pixels_per_second / clamped,
+        )
         self._timeline_pixels_per_second = clamped
         self.timelinePixelsPerSecondChanged.emit()
+        if self._timeline_visible_seconds != next_visible_seconds:
+            self._timeline_visible_seconds = next_visible_seconds
+            self.timelineVisibleSecondsChanged.emit()
         self.set_timeline_scroll_seconds(next_scroll)
 
     @Slot(float)
@@ -797,7 +804,7 @@ class AppController(QObject):
         if not isinstance(state, dict):
             return
         pixels_per_second = self._optional_float(state.get("pixels_per_second"))
-        self.set_timeline_zoom(
+        self._restore_timeline_zoom(
             pixels_per_second
             if pixels_per_second is not None
             else TIMELINE_DEFAULT_PIXELS_PER_SECOND
@@ -813,6 +820,13 @@ class AppController(QObject):
         scroll_seconds = self._optional_float(state.get("scroll_seconds"))
         if scroll_seconds is not None:
             self.set_timeline_scroll_seconds(scroll_seconds)
+
+    def _restore_timeline_zoom(self, pixels_per_second: float) -> None:
+        clamped = self._viewport.clamp_zoom(pixels_per_second)
+        if self._timeline_pixels_per_second == clamped:
+            return
+        self._timeline_pixels_per_second = clamped
+        self.timelinePixelsPerSecondChanged.emit()
 
     @staticmethod
     def _optional_float(value) -> float | None:
