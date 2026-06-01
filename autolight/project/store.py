@@ -456,11 +456,9 @@ def _apply_marker_fields(
     if category_value is not None and marker.category != category_value:
         marker.category = category_value
         changed = True
-    if color_value is not None:
-        metadata = _ensure_marker_metadata(marker)
-        if metadata.get("color") != color_value:
-            metadata["color"] = color_value
-            changed = True
+    if color_value is not None and (metadata := _ensure_marker_metadata(marker)).get("color") != color_value:
+        metadata["color"] = color_value
+        changed = True
     return changed
 
 

@@ -763,8 +763,11 @@ class AppController(QObject):
         if not isinstance(state, dict):
             return
         pixels_per_second = self._optional_float(state.get("pixels_per_second"))
-        if pixels_per_second is not None:
-            self.set_timeline_zoom(pixels_per_second)
+        self.set_timeline_zoom(
+            pixels_per_second
+            if pixels_per_second is not None
+            else TIMELINE_DEFAULT_PIXELS_PER_SECOND
+        )
         selected_track_id = state.get("selected_track_id", "")
         if (
             isinstance(selected_track_id, str)
