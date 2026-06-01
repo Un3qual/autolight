@@ -249,7 +249,8 @@ class AppControllerTest(unittest.TestCase):
                 self.play = Mock()
                 self.lastError = "direct lastError should not be used"
 
-            def property(self, name):
+            @staticmethod
+            def property(name):
                 if name == "sourcePath":
                     return ""
                 if name == "lastError":
