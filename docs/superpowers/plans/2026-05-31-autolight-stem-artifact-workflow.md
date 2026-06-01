@@ -144,7 +144,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_stem_artifact_workflow.py`
 
-- [ ] **Step 1: Add failing controller stem test**
+- [x] **Step 1: Add failing controller stem test**
 
 Add this test:
 
@@ -168,7 +168,7 @@ Add this test:
         self.assertEqual(stem.output_schema, "artifact.stem.v1")
 ```
 
-- [ ] **Step 2: Run controller stem test and verify failure**
+- [x] **Step 2: Run controller stem test and verify failure**
 
 Run:
 
@@ -178,7 +178,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow.StemArtifactWorkflow
 
 Expected: FAIL because `add_vocals_stem_track` is missing.
 
-- [ ] **Step 3: Implement stem track action**
+- [x] **Step 3: Implement stem track action**
 
 Add imports to `autolight/app_controller.py`:
 
@@ -219,7 +219,7 @@ Add slot to `autolight/app_controller.py`:
             return ""
 ```
 
-- [ ] **Step 4: Run stem workflow tests**
+- [x] **Step 4: Run stem workflow tests**
 
 Run:
 
@@ -229,7 +229,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit stem controller action**
+- [x] **Step 5: Commit stem controller action**
 
 Run:
 

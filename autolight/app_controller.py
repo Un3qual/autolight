@@ -252,6 +252,40 @@ class AppController(QObject):
             return ""
 
     @Slot(str, result=str)
+    def add_vocals_stem_track(self, parent_track_id: str) -> str:
+        try:
+            parent = find_track(self._project, parent_track_id)
+            if parent is None:
+                raise ValueError(f"parent track not found: {parent_track_id}")
+            transform_id = "stems.vocals_stand_in"
+            transform_version = "1"
+            params = {"label": "vocals"}
+            dependency_hash = track_dependency_hash(
+                track_dependency_inputs(self._project, parent),
+                transform_id,
+                transform_version,
+                params,
+            )
+            track = add_generated_track(
+                self._project,
+                parent_track_id=parent.id,
+                name="Vocals Stem",
+                transform_id=transform_id,
+                transform_params=params,
+                transform_version=transform_version,
+                output_schema="artifact.stem.v1",
+                dependency_hash=dependency_hash,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            self._set_dirty(True)
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
+    @Slot(str, result=str)
     def create_editable_track_from_track(self, source_track_id: str) -> str:
         try:
             if find_track(self._project, source_track_id) is None:

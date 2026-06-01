@@ -38,6 +38,24 @@ class StemArtifactWorkflowTest(unittest.TestCase):
         self.assertEqual(model.data(index, model.role_for_name("cacheRefCount")), 1)
         self.assertEqual(model.data(index, model.role_for_name("artifactKinds")), "stem")
 
+    def test_controller_adds_vocals_stem_track(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+
+        stem_id = controller.add_vocals_stem_track(source_id)
+
+        self.assertNotEqual(stem_id, "")
+        stem = next(track for track in controller._project.tracks if track.id == stem_id)
+        self.assertEqual(stem.transform_id, "stems.vocals_stand_in")
+        self.assertEqual(stem.output_schema, "artifact.stem.v1")
+
 
 if __name__ == "__main__":
     unittest.main()
