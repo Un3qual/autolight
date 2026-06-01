@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 
-from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
+from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import add_generated_track, import_audio_asset, new_project
 from autolight.timeline.model import TimelineTrackModel
 from tests.helpers import write_wav
@@ -39,6 +39,9 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("activeJobId"): b"activeJobId",
                     model.role_for_name("jobState"): b"jobState",
                     model.role_for_name("jobProgress"): b"jobProgress",
+                    model.role_for_name("waveformSamples"): b"waveformSamples",
+                    model.role_for_name("cacheRefCount"): b"cacheRefCount",
+                    model.role_for_name("artifactKinds"): b"artifactKinds",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -60,6 +63,9 @@ class TimelineTrackModelTest(unittest.TestCase):
             )
             self.assertEqual(model.data(index, model.role_for_name("resultState")), "complete")
             self.assertEqual(model.data(index, model.role_for_name("error")), "analysis failed")
+            self.assertEqual(model.data(index, model.role_for_name("waveformSamples")), [])
+            self.assertEqual(model.data(index, model.role_for_name("cacheRefCount")), 0)
+            self.assertEqual(model.data(index, model.role_for_name("artifactKinds")), "")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
 
     def test_model_exposes_latest_job_state_progress_and_id(self):
@@ -84,6 +90,37 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(model.data(index, model.role_for_name("activeJobId")), "job_1")
         self.assertEqual(model.data(index, model.role_for_name("jobState")), "running")
         self.assertEqual(model.data(index, model.role_for_name("jobProgress")), 0.25)
+
+    def test_waveform_samples_are_hidden_when_cache_is_invalid(self):
+        project = ProjectDocument(id="project_1", name="Demo")
+        project.tracks.append(
+            Track(
+                id="track_waveform",
+                type=TrackType.GENERATED,
+                name="Waveform",
+                transform_id="waveform.summary",
+                result_state=ResultState.COMPLETE,
+                cache_refs=["cache_waveform"],
+                provenance={"waveform_samples": [{"peak": 1.0, "rms": 1.0}]},
+            )
+        )
+        project.cache_entries.append(
+            CacheEntry(
+                id="cache_waveform",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform/cache_waveform.bin",
+                created_at="",
+                transform_version="1",
+                validation_status="invalid",
+            )
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        samples = model.data(model.index(0, 0), model.role_for_name("waveformSamples"))
+
+        self.assertEqual(samples, [])
 
     def test_marker_spans_are_sorted_by_timestamp_for_timeline_projection(self):
         with tempfile.TemporaryDirectory() as tmp:

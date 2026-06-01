@@ -25,7 +25,7 @@
 - Create: `autolight/analysis/waveform.py`
 - Create: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Write failing waveform generator tests**
+- [x] **Step 1: Write failing waveform generator tests**
 
 Create `tests/test_waveform_summary.py`:
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run waveform generator tests and verify failure**
+- [x] **Step 2: Run waveform generator tests and verify failure**
 
 Run:
 
@@ -79,7 +79,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.analysis.waveform'`.
 
-- [ ] **Step 3: Implement waveform generator**
+- [x] **Step 3: Implement waveform generator**
 
 Create `autolight/analysis/waveform.py`:
 
@@ -120,7 +120,7 @@ def build_waveform_summary(audio_path: str | Path, output_path: str | Path, buck
     Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 ```
 
-- [ ] **Step 4: Run waveform generator tests**
+- [x] **Step 4: Run waveform generator tests**
 
 Run:
 
@@ -130,7 +130,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: PASS with 1 test.
 
-- [ ] **Step 5: Commit waveform generator**
+- [x] **Step 5: Commit waveform generator**
 
 Run:
 
@@ -147,7 +147,7 @@ Expected: commit succeeds.
 - Modify: `autolight/analysis/builtin.py`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing transform registration test**
+- [x] **Step 1: Add failing transform registration test**
 
 Add these imports to `tests/test_waveform_summary.py`:
 
@@ -183,7 +183,7 @@ Add this test:
         self.assertEqual(result.metadata["bucket_count"], 4)
 ```
 
-- [ ] **Step 2: Run transform test and verify failure**
+- [x] **Step 2: Run transform test and verify failure**
 
 Run:
 
@@ -193,7 +193,7 @@ uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_w
 
 Expected: FAIL because `waveform.summary` is not registered.
 
-- [ ] **Step 3: Register `waveform.summary` transform**
+- [x] **Step 3: Register `waveform.summary` transform**
 
 Add this import to `autolight/analysis/builtin.py`:
 
@@ -236,7 +236,7 @@ def _waveform_summary(context: TransformContext, params: dict) -> TransformResul
     )
 ```
 
-- [ ] **Step 4: Run waveform tests**
+- [x] **Step 4: Run waveform tests**
 
 Run:
 
@@ -246,7 +246,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit waveform transform**
+- [x] **Step 5: Commit waveform transform**
 
 Run:
 
@@ -265,7 +265,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing model and QML tests**
+- [x] **Step 1: Add failing model and QML tests**
 
 Add this test to `WaveformSummaryTest`:
 
@@ -310,7 +310,7 @@ Add this test to `WaveformSummaryTest`:
         self.assertIn("modelData.peak", qml)
 ```
 
-- [ ] **Step 2: Run QML test and verify failure**
+- [x] **Step 2: Run QML test and verify failure**
 
 Run:
 
@@ -320,7 +320,7 @@ uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_c
 
 Expected: FAIL because waveform jobs do not yet load cached JSON samples into the track model and QML does not yet reference `waveformSamples`.
 
-- [ ] **Step 3: Load waveform artifacts, add waveform role, and add QML repeater**
+- [x] **Step 3: Load waveform artifacts, add waveform role, and add QML repeater**
 
 Add imports to `autolight/app_controller.py`:
 
@@ -391,7 +391,7 @@ Add this `Repeater` before marker rendering in the timeline lane `Rectangle`:
                     }
 ```
 
-- [ ] **Step 4: Run waveform tests and smoke**
+- [x] **Step 4: Run waveform tests and smoke**
 
 Run:
 
@@ -402,7 +402,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit waveform timeline display**
+- [x] **Step 5: Commit waveform timeline display**
 
 Run:
 
@@ -415,7 +415,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run full tests**
+- [x] **Step 1: Run full tests**
 
 Run:
 
@@ -425,7 +425,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run smoke and diff checks**
+- [x] **Step 2: Run smoke and diff checks**
 
 Run:
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
@@ -25,6 +26,7 @@ from autolight.project.store import (
     track_dependency_inputs,
 )
 from autolight.timeline.model import TimelineTrackModel
+from autolight.timeline.transform_model import TransformSpecModel
 
 
 class AppController(QObject):
@@ -36,6 +38,7 @@ class AppController(QObject):
     selectedTrackHasRunningJobChanged = Signal()
     selectedTrackCanRerunChanged = Signal()
     isDirtyChanged = Signal()
+    _track_changed_on_main_thread = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -50,15 +53,24 @@ class AppController(QObject):
         self._track_model.set_project(self._project)
         self._registry = TransformRegistry()
         register_builtin_transforms(self._registry)
+        self._transform_model = TransformSpecModel(self._registry, parent=self)
         self._job_queue = LocalJobQueue(
             self._registry,
             artifact_root=Path(self._runtime_temp_dir.name) / "artifacts",
-            on_track_changed=self._handle_track_changed,
+            on_track_changed=self._queue_track_changed,
+        )
+        self._track_changed_on_main_thread.connect(
+            self._handle_track_changed,
+            Qt.ConnectionType.QueuedConnection,
         )
 
     @Property(QObject, constant=True)
     def trackModel(self):
         return self._track_model
+
+    @Property(QObject, constant=True)
+    def transformModel(self):
+        return self._transform_model
 
     @Property(str, notify=projectNameChanged)
     def projectName(self) -> str:
@@ -252,6 +264,77 @@ class AppController(QObject):
             return ""
 
     @Slot(str, result=str)
+    def add_vocals_stem_track(self, parent_track_id: str) -> str:
+        try:
+            parent = find_track(self._project, parent_track_id)
+            if parent is None:
+                raise ValueError(f"parent track not found: {parent_track_id}")
+            transform_id = "stems.vocals_stand_in"
+            transform_version = "1"
+            params = {"label": "vocals"}
+            self._require_source_audio_path_for_track(parent)
+            dependency_hash = track_dependency_hash(
+                track_dependency_inputs(self._project, parent),
+                transform_id,
+                transform_version,
+                params,
+            )
+            track = add_generated_track(
+                self._project,
+                parent_track_id=parent.id,
+                name="Vocals Stem",
+                transform_id=transform_id,
+                transform_params=params,
+                transform_version=transform_version,
+                output_schema="artifact.stem.v1",
+                dependency_hash=dependency_hash,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            self._set_dirty(True)
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
+    @Slot(str, str, str, str, result=str)
+    def add_transform_track(self, parent_track_id: str, transform_id: str, version: str, params_json: str) -> str:
+        try:
+            params = json.loads(params_json or "{}")
+            if not isinstance(params, dict):
+                raise ValueError("transform params must be a JSON object")
+            parent = find_track(self._project, parent_track_id)
+            if parent is None:
+                raise ValueError(f"parent track not found: {parent_track_id}")
+            spec = self._registry.get(transform_id, version=version)
+            params = self._params_with_parent_defaults(parent, spec, params)
+            dependency_hash = track_dependency_hash(
+                track_dependency_inputs(self._project, parent),
+                spec.id,
+                spec.version,
+                params,
+            )
+            track = add_generated_track(
+                self._project,
+                parent_track_id=parent.id,
+                name=spec.name,
+                transform_id=spec.id,
+                transform_params=params,
+                transform_version=spec.version,
+                output_schema=spec.output_schema,
+                dependency_hash=dependency_hash,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            self._set_dirty(True)
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
+    @Slot(str, result=str)
     def create_editable_track_from_track(self, source_track_id: str) -> str:
         try:
             if find_track(self._project, source_track_id) is None:
@@ -336,6 +419,7 @@ class AppController(QObject):
     def refresh_cache_status(self) -> list[str]:
         try:
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
+            self._load_all_waveform_samples()
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
@@ -358,6 +442,7 @@ class AppController(QObject):
 
     def _set_project(self, project) -> None:
         self._project = project
+        self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
@@ -389,12 +474,83 @@ class AppController(QObject):
         self._is_dirty = dirty
         self.isDirtyChanged.emit()
 
+    def _queue_track_changed(self, track_id: str) -> None:
+        self._track_changed_on_main_thread.emit(track_id)
+
+    @Slot(str)
     def _handle_track_changed(self, track_id: str) -> None:
+        self._load_waveform_samples(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
+
+    def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
+        enriched = dict(params)
+        if spec.input_schema == "audio.v1":
+            self._require_source_audio_path_for_track(parent)
+            enriched.pop("audio_path", None)
+        return enriched
+
+    def _require_source_audio_path_for_track(self, track) -> str:
+        audio_path = self._source_audio_path_for_track(track)
+        if not audio_path:
+            raise ValueError("audio transform requires a source audio track")
+        return audio_path
+
+    def _source_audio_path_for_track(self, track) -> str:
+        seen_track_ids = set()
+        pending = [track]
+        while pending:
+            current = pending.pop(0)
+            if current is None or current.id in seen_track_ids:
+                continue
+            seen_track_ids.add(current.id)
+            asset_id = current.provenance.get("asset_id")
+            asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
+            if asset is not None:
+                return asset.path
+            next_track_ids = list(current.input_track_ids)
+            source_track_id = current.provenance.get("source_track_id", "")
+            if source_track_id:
+                next_track_ids.append(source_track_id)
+            for next_track_id in next_track_ids:
+                candidate = find_track(self._project, next_track_id)
+                if candidate is not None:
+                    pending.append(candidate)
+        return ""
+
+    def _load_waveform_samples(self, track_id: str) -> None:
+        track = find_track(self._project, track_id)
+        if track is None or track.transform_id != "waveform.summary":
+            return
+        if track.result_state != ResultState.COMPLETE:
+            track.provenance.pop("waveform_samples", None)
+            return
+        entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
+        for cache_ref in track.cache_refs:
+            entry = entries_by_id.get(cache_ref)
+            if entry is None or entry.artifact_kind != "waveform" or entry.validation_status != "valid":
+                continue
+            artifact_path = self._job_queue.cache_store.artifact_path(entry)
+            try:
+                payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                track.provenance.pop("waveform_samples", None)
+                return
+            samples = payload.get("samples", [])
+            if isinstance(samples, list):
+                track.provenance["waveform_samples"] = samples
+            else:
+                track.provenance.pop("waveform_samples", None)
+            return
+        track.provenance.pop("waveform_samples", None)
+
+    def _load_all_waveform_samples(self) -> None:
+        for track in list(self._project.tracks):
+            if track.transform_id == "waveform.summary":
+                self._load_waveform_samples(track.id)
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         return [
@@ -416,11 +572,12 @@ class AppController(QObject):
         parent = find_track(self._project, track.input_track_ids[0])
         if parent is None:
             raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+        params = self._dependency_transform_params_for_track(track)
         track.dependency_hash = track_dependency_hash(
             track_dependency_inputs(self._project, parent),
             track.transform_id,
             track.transform_version,
-            track.transform_params,
+            params,
         )
 
     def _submit_track(self, track_id: str) -> str:
@@ -436,10 +593,29 @@ class AppController(QObject):
             names = ", ".join(input_track.name for input_track in incomplete_inputs)
             raise ValueError(f"input track is not complete: {names}")
         self._refresh_dependency_hash(track)
-        job_id = self._job_queue.submit(self._project, track_id)
+        job_id = self._job_queue.submit(
+            self._project,
+            track_id,
+            transform_params=self._runtime_transform_params_for_track(track),
+        )
         self._set_last_error("")
         self._set_dirty(True)
         return job_id
+
+    def _runtime_transform_params_for_track(self, track) -> dict:
+        params = dict(track.transform_params)
+        spec = self._registry.get(track.transform_id, version=track.transform_version)
+        if spec.input_schema == "audio.v1":
+            params.pop("audio_path", None)
+            params["audio_path"] = self._require_source_audio_path_for_track(track)
+        return params
+
+    def _dependency_transform_params_for_track(self, track) -> dict:
+        params = dict(track.transform_params)
+        spec = self._registry.get(track.transform_id, version=track.transform_version)
+        if spec.input_schema == "audio.v1":
+            params.pop("audio_path", None)
+        return params
 
     def _can_replace_project(self) -> bool:
         try:

@@ -84,6 +84,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pyside6" },
     { name = "scikit-learn" },
+    { name = "soundfile" },
 ]
 
 [package.dev-dependencies]
@@ -99,6 +100,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pyside6", specifier = ">=6.11.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
+    { name = "soundfile", specifier = ">=0.13.1" },
 ]
 
 [package.metadata.requires-dev]

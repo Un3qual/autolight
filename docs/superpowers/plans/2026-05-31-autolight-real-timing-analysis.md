@@ -23,7 +23,7 @@
 - Create: `autolight/analysis/timing.py`
 - Create: `tests/test_timing_analysis.py`
 
-- [ ] **Step 1: Write failing timing helper tests**
+- [x] **Step 1: Write failing timing helper tests**
 
 Create `tests/test_timing_analysis.py`:
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run timing tests and verify failure**
+- [x] **Step 2: Run timing tests and verify failure**
 
 Run:
 
@@ -84,7 +84,7 @@ uv run python -m unittest tests.test_timing_analysis -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.analysis.timing'`.
 
-- [ ] **Step 3: Implement timing helpers**
+- [x] **Step 3: Implement timing helpers**
 
 Create `autolight/analysis/timing.py`:
 
@@ -129,7 +129,7 @@ def detect_beat_markers(audio_path: str | Path) -> list[dict]:
     ]
 ```
 
-- [ ] **Step 4: Run timing helper tests**
+- [x] **Step 4: Run timing helper tests**
 
 Run:
 
@@ -139,7 +139,7 @@ uv run python -m unittest tests.test_timing_analysis -v
 
 Expected: PASS for the helper tests.
 
-- [ ] **Step 5: Commit timing helpers**
+- [x] **Step 5: Commit timing helpers**
 
 Run:
 
@@ -156,7 +156,7 @@ Expected: commit succeeds.
 - Modify: `autolight/analysis/builtin.py`
 - Modify: `tests/test_timing_analysis.py`
 
-- [ ] **Step 1: Add failing transform tests**
+- [x] **Step 1: Add failing transform tests**
 
 Add these imports:
 
@@ -188,7 +188,7 @@ Add this test:
         self.assertGreaterEqual(len(beat_result.markers), 1)
 ```
 
-- [ ] **Step 2: Run transform test and verify failure**
+- [x] **Step 2: Run transform test and verify failure**
 
 Run:
 
@@ -198,7 +198,7 @@ uv run python -m unittest tests.test_timing_analysis.TimingAnalysisTest.test_tim
 
 Expected: FAIL because timing transforms are not registered.
 
-- [ ] **Step 3: Register timing transforms**
+- [x] **Step 3: Register timing transforms**
 
 Add imports:
 
@@ -254,7 +254,7 @@ def _timing_beats(context: TransformContext, params: dict) -> TransformResult:
     return TransformResult(markers=markers)
 ```
 
-- [ ] **Step 4: Run timing analysis tests**
+- [x] **Step 4: Run timing analysis tests**
 
 Run:
 
@@ -264,7 +264,7 @@ uv run python -m unittest tests.test_timing_analysis tests.test_analysis -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit timing transforms**
+- [x] **Step 5: Commit timing transforms**
 
 Run:
 
@@ -277,7 +277,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run full tests**
+- [x] **Step 1: Run full tests**
 
 Run:
 
@@ -287,7 +287,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run smoke and diff check**
+- [x] **Step 2: Run smoke and diff check**
 
 Run:
 

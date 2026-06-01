@@ -69,3 +69,10 @@ class TransformRegistry:
 
     def ids(self) -> list[str]:
         return sorted(self._transforms)
+
+    def specs(self) -> list[TransformSpec]:
+        return [
+            self._transforms[transform_id][version]
+            for transform_id in sorted(self._transforms)
+            for version in sorted(self._transforms[transform_id])
+        ]

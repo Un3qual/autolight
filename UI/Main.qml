@@ -168,6 +168,38 @@ Window {
                     onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
                 }
 
+                ComboBox {
+                    id: transformPicker
+                    model: appController.transformModel
+                    textRole: "name"
+                    valueRole: "transformId"
+                    Layout.preferredWidth: 190
+                }
+
+                TextField {
+                    id: transformParamsField
+                    text: "{\"duration\": 8.0, \"interval\": 0.5}"
+                    placeholderText: "JSON params"
+                    Layout.preferredWidth: 210
+                }
+
+                Button {
+                    text: "Add Transform"
+                    enabled: appController.selectedTrackId.length > 0 && transformPicker.currentIndex >= 0
+                    onClicked: appController.add_transform_track(
+                        appController.selectedTrackId,
+                        transformPicker.currentValue,
+                        appController.transformModel.version_at(transformPicker.currentIndex),
+                        transformParamsField.text
+                    )
+                }
+
+                Button {
+                    text: "Add Vocals Stem"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.add_vocals_stem_track(appController.selectedTrackId)
+                }
+
                 Button {
                     text: "Run"
                     enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
@@ -287,6 +319,15 @@ Window {
                             }
 
                             Text {
+                                text: cacheRefCount > 0 ? artifactKinds + " artifact" : ""
+                                color: "#93c5fd"
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                                width: parent.width
+                                visible: cacheRefCount > 0
+                            }
+
+                            Text {
                                 text: error
                                 visible: error.length > 0
                                 color: "#fca5a5"
@@ -316,6 +357,18 @@ Window {
                         height: parent.height
                         color: index % 2 === 0 ? "#171a20" : "#14171d"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
+                        clip: true
+
+                        Repeater {
+                            model: waveformSamples
+                            Rectangle {
+                                width: 2
+                                height: Math.max(2, modelData.peak * (parent.height - 18))
+                                x: root.timelineLeftPadding + (waveformSamples.length > 1 ? index * Math.max(0, parent.width - root.timelineLeftPadding - width) / (waveformSamples.length - 1) : 0)
+                                y: (parent.height - height) / 2
+                                color: "#60a5fa"
+                            }
+                        }
 
                         Repeater {
                             model: markerSpans

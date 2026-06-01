@@ -181,6 +181,26 @@ class LocalJobQueueTest(unittest.TestCase):
         self.assertEqual([marker for marker in project.markers if marker.track_id == track_id], [])
         self.assertEqual(track.cache_refs, [])
 
+    def test_submit_rejects_runtime_params_that_change_cached_identity(self):
+        def marker_transform(context, params):
+            return TransformResult(markers=[{"timestamp": params["timestamp"], "label": "runtime"}])
+
+        registry = TransformRegistry()
+        registry.register(test_transform("test.runtime_identity", marker_transform))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project, track_id = project_with_generated_track(
+                Path(tmp),
+                "test.runtime_identity",
+                {"timestamp": 1.0},
+            )
+            queue = LocalJobQueue(registry, artifact_root=Path(tmp) / "artifacts")
+
+            with self.assertRaisesRegex(ValueError, "runtime transform params"):
+                queue.submit(project, track_id, transform_params={"timestamp": 2.0})
+
+        self.assertEqual(project.job_runs, [])
+
     def test_failed_stale_job_does_not_mark_changed_track_failed(self):
         started = Event()
         release = Event()

@@ -27,7 +27,7 @@
 - Create: `autolight/timeline/transform_model.py`
 - Create: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Write failing transform model tests**
+- [x] **Step 1: Write failing transform model tests**
 
 Create `tests/test_transform_picker.py`:
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run transform picker tests and verify failure**
+- [x] **Step 2: Run transform picker tests and verify failure**
 
 Run:
 
@@ -111,7 +111,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.timeline.transform_model'`.
 
-- [ ] **Step 3: Implement registry spec listing and `TransformSpecModel`**
+- [x] **Step 3: Implement registry spec listing and `TransformSpecModel`**
 
 Add this method to `TransformRegistry` in `autolight/analysis/registry.py`:
 
@@ -182,7 +182,7 @@ class TransformSpecModel(QAbstractListModel):
         return self._specs[row].version
 ```
 
-- [ ] **Step 4: Run transform picker tests**
+- [x] **Step 4: Run transform picker tests**
 
 Run:
 
@@ -192,7 +192,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit transform spec model**
+- [x] **Step 5: Commit transform spec model**
 
 Run:
 
@@ -209,7 +209,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Add failing controller generic-transform test**
+- [x] **Step 1: Add failing controller generic-transform test**
 
 Append this test to `TransformPickerTest`:
 
@@ -374,7 +374,7 @@ Append this test to `TransformPickerTest`:
         self.assertIn("source audio track", controller.lastError)
 ```
 
-- [ ] **Step 2: Run generic-transform test and verify failure**
+- [x] **Step 2: Run generic-transform test and verify failure**
 
 Run:
 
@@ -384,7 +384,7 @@ uv run python -m unittest tests.test_transform_picker.TransformPickerTest.test_c
 
 Expected: FAIL because `add_transform_track` is missing.
 
-- [ ] **Step 3: Implement controller generic transform support**
+- [x] **Step 3: Implement controller generic transform support**
 
 Add imports to `autolight/app_controller.py`:
 
@@ -481,7 +481,7 @@ Add this helper near the other private controller helpers:
         return ""
 ```
 
-- [ ] **Step 4: Run transform picker tests**
+- [x] **Step 4: Run transform picker tests**
 
 Run:
 
@@ -491,7 +491,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit generic transform controller**
+- [x] **Step 5: Commit generic transform controller**
 
 Run:
 
@@ -508,7 +508,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Add failing QML picker test**
+- [x] **Step 1: Add failing QML picker test**
 
 Add this test:
 
@@ -524,7 +524,7 @@ Add this test:
         self.assertIn("transformParamsField.text", qml)
 ```
 
-- [ ] **Step 2: Run QML picker test and verify failure**
+- [x] **Step 2: Run QML picker test and verify failure**
 
 Run:
 
@@ -534,7 +534,7 @@ uv run python -m unittest tests.test_transform_picker.TransformPickerTest.test_q
 
 Expected: FAIL because QML still uses hard-coded transform actions.
 
-- [ ] **Step 3: Add QML transform picker controls**
+- [x] **Step 3: Add QML transform picker controls**
 
 Add these controls to the toolbar near `Add Markers`:
 
@@ -566,7 +566,7 @@ Add these controls to the toolbar near `Add Markers`:
                 }
 ```
 
-- [ ] **Step 4: Run picker tests and smoke**
+- [x] **Step 4: Run picker tests and smoke**
 
 Run:
 
@@ -577,7 +577,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit transform picker UI**
+- [x] **Step 5: Commit transform picker UI**
 
 Run:
 
@@ -590,7 +590,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests and smoke**
+- [x] **Step 1: Run all tests and smoke**
 
 Run:
 
@@ -601,7 +601,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 

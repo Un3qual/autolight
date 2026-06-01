@@ -25,7 +25,7 @@
 - Modify: `autolight/timeline/model.py`
 - Create: `tests/test_stem_artifact_workflow.py`
 
-- [ ] **Step 1: Add failing artifact role tests**
+- [x] **Step 1: Add failing artifact role tests**
 
 Create `tests/test_stem_artifact_workflow.py`:
 
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run artifact role tests and verify failure**
+- [x] **Step 2: Run artifact role tests and verify failure**
 
 Run:
 
@@ -85,7 +85,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow -v
 
 Expected: FAIL with `KeyError: 'cacheRefCount'`.
 
-- [ ] **Step 3: Add artifact summary roles**
+- [x] **Step 3: Add artifact summary roles**
 
 Extend `ROLE_NAMES` in `autolight/timeline/model.py`:
 
@@ -117,7 +117,7 @@ Add helper:
         ]
 ```
 
-- [ ] **Step 4: Run stem artifact tests**
+- [x] **Step 4: Run stem artifact tests**
 
 Run:
 
@@ -127,7 +127,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow tests.test_timeline_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit artifact roles**
+- [x] **Step 5: Commit artifact roles**
 
 Run:
 
@@ -144,7 +144,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_stem_artifact_workflow.py`
 
-- [ ] **Step 1: Add failing controller stem test**
+- [x] **Step 1: Add failing controller stem test**
 
 Add this test:
 
@@ -168,7 +168,7 @@ Add this test:
         self.assertEqual(stem.output_schema, "artifact.stem.v1")
 ```
 
-- [ ] **Step 2: Run controller stem test and verify failure**
+- [x] **Step 2: Run controller stem test and verify failure**
 
 Run:
 
@@ -178,7 +178,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow.StemArtifactWorkflow
 
 Expected: FAIL because `add_vocals_stem_track` is missing.
 
-- [ ] **Step 3: Implement stem track action**
+- [x] **Step 3: Implement stem track action**
 
 Add imports to `autolight/app_controller.py`:
 
@@ -219,7 +219,7 @@ Add slot to `autolight/app_controller.py`:
             return ""
 ```
 
-- [ ] **Step 4: Run stem workflow tests**
+- [x] **Step 4: Run stem workflow tests**
 
 Run:
 
@@ -229,7 +229,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit stem controller action**
+- [x] **Step 5: Commit stem controller action**
 
 Run:
 
@@ -246,7 +246,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_stem_artifact_workflow.py`
 
-- [ ] **Step 1: Add failing QML stem workflow test**
+- [x] **Step 1: Add failing QML stem workflow test**
 
 Add this test:
 
@@ -260,7 +260,7 @@ Add this test:
         self.assertIn("cacheRefCount", qml)
 ```
 
-- [ ] **Step 2: Run QML stem test and verify failure**
+- [x] **Step 2: Run QML stem test and verify failure**
 
 Run:
 
@@ -270,7 +270,7 @@ uv run python -m unittest tests.test_stem_artifact_workflow.StemArtifactWorkflow
 
 Expected: FAIL because the QML does not expose stem actions or artifact roles.
 
-- [ ] **Step 3: Add stem UI action and artifact status**
+- [x] **Step 3: Add stem UI action and artifact status**
 
 Add toolbar button:
 
@@ -295,7 +295,7 @@ Add artifact status text below the existing track status text:
                         }
 ```
 
-- [ ] **Step 4: Run stem tests and smoke**
+- [x] **Step 4: Run stem tests and smoke**
 
 Run:
 
@@ -306,7 +306,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit stem UI workflow**
+- [x] **Step 5: Commit stem UI workflow**
 
 Run:
 
@@ -319,7 +319,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests and smoke**
+- [x] **Step 1: Run all tests and smoke**
 
 Run:
 
@@ -330,7 +330,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 
