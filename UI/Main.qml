@@ -460,8 +460,9 @@ Window {
                             Rectangle {
                                 width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * appController.timelinePixelsPerSecond)
                                 height: parent.height - 18
-                                x: Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))
+                                x: root.timelineX(modelData.timestamp)
                                 y: 9
+                                visible: x + width >= root.timelineLeftPadding && x <= parent.width
                                 radius: 2
                                 color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
                             }

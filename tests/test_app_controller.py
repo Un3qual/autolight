@@ -1023,6 +1023,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("root.timelineX(modelData.timestamp)", qml)
         self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("modelData.duration : 0.08) * appController.timelinePixelsPerSecond", qml)
+        self.assertNotIn("Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))", qml)
         self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)
         self.assertNotIn("pixelsPerSecond: 96", qml)
