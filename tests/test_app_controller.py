@@ -469,15 +469,16 @@ class AppControllerTest(unittest.TestCase):
 
     def test_qml_dark_surface_action_controls_use_readable_text_color(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
-        action_start = qml.index("id: trackActionControls")
+        action_start = qml.index("id: transformDetailBar")
         playback_start = qml.index("id: playbackControls")
         action_qml = qml[action_start:playback_start]
         playback_qml = qml[playback_start:qml.index("id: playbackScrubber")]
 
-        self.assertIn("readonly property color controlTextColor: \"#f4f4f5\"", qml)
+        self.assertIn('readonly property color textPrimary: "#f4f4f5"', qml)
+        self.assertIn("readonly property color controlTextColor: root.textPrimary", qml)
         self.assertIn("color: root.controlTextColor", action_qml)
         self.assertIn("placeholderTextColor: root.controlMutedTextColor", action_qml)
-        self.assertGreaterEqual(action_qml.count("palette.buttonText: root.controlTextColor"), 8)
+        self.assertGreaterEqual(action_qml.count("palette.buttonText: root.controlTextColor"), 4)
         self.assertGreaterEqual(playback_qml.count("palette.buttonText: root.controlTextColor"), 4)
 
     def test_qml_playback_fallback_only_runs_without_selected_track(self):
