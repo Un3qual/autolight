@@ -15,6 +15,8 @@ Window {
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
+    readonly property color controlTextColor: "#f4f4f5"
+    readonly property color controlMutedTextColor: "#a1a1aa"
     readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
     readonly property var markerColorOptions: [
         { key: "cyan", label: "Cyan", color: "#67e8f9" },
@@ -27,6 +29,12 @@ Window {
 
     function timelineX(seconds) {
         return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
+    }
+
+    function seekTimelineAtX(xValue) {
+        var laneSeconds = appController.timelineScrollSeconds
+            + Math.max(0, xValue - root.timelineLeftPadding) / appController.timelinePixelsPerSecond
+        appController.seek_playback(Math.min(appController.timelineDurationSeconds, laneSeconds))
     }
 
     function markerColorIndex(colorKey) {
@@ -219,25 +227,6 @@ Window {
                 Item { Layout.fillWidth: true }
 
                 Button {
-                    text: appController.playback.isPlaying ? "Pause" : "Play"
-                    enabled: appController.selectedTrackCanPlay || (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) || appController.playback.isPlaying
-                    onClicked: root.togglePlayback()
-                }
-
-                Button {
-                    text: "Stop"
-                    enabled: appController.playback.sourcePath.length > 0
-                    onClicked: appController.stop_playback()
-                }
-
-                Label {
-                    id: playheadTimeLabel
-                    text: root.formatSeconds(appController.playback.positionSeconds) + " / " + root.formatSeconds(appController.playback.durationSeconds)
-                    color: "#d4d4d8"
-                    font.pixelSize: 12
-                }
-
-                Button {
                     text: "New"
                     onClicked: root.newProjectWithConfirmation()
                 }
@@ -268,71 +257,6 @@ Window {
                     onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
                 }
 
-                ComboBox {
-                    id: transformPicker
-                    model: appController.transformModel
-                    textRole: "name"
-                    valueRole: "transformId"
-                    Layout.preferredWidth: 190
-                }
-
-                TextField {
-                    id: transformParamsField
-                    text: "{\"duration\": 8.0, \"interval\": 0.5}"
-                    placeholderText: "JSON params"
-                    Layout.preferredWidth: 210
-                }
-
-                Button {
-                    text: "Add Transform"
-                    enabled: appController.selectedTrackId.length > 0 && transformPicker.currentIndex >= 0
-                    onClicked: appController.add_transform_track(
-                        appController.selectedTrackId,
-                        transformPicker.currentValue,
-                        appController.transformModel.version_at(transformPicker.currentIndex),
-                        transformParamsField.text
-                    )
-                }
-
-                Button {
-                    text: "Add Vocals Stem"
-                    enabled: appController.selectedTrackId.length > 0
-                    onClicked: appController.add_vocals_stem_track(appController.selectedTrackId)
-                }
-
-                Button {
-                    text: "Run"
-                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
-                    onClicked: appController.run_track(appController.selectedTrackId)
-                }
-
-                Button {
-                    text: "Cancel"
-                    enabled: appController.selectedTrackHasRunningJob
-                    onClicked: appController.cancel_selected_job()
-                }
-
-                Button {
-                    text: "Rerun"
-                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
-                    onClicked: appController.rerun_track(appController.selectedTrackId)
-                }
-
-                Button {
-                    text: "Check Cache"
-                    onClicked: appController.refresh_cache_status()
-                }
-
-                Button {
-                    text: "Derive Editable"
-                    enabled: appController.selectedTrackId.length > 0
-                    onClicked: appController.create_editable_track_from_track(appController.selectedTrackId)
-                }
-
-                Button {
-                    text: "Load Demo"
-                    onClicked: root.demoProjectWithConfirmation()
-                }
             }
         }
 
@@ -370,15 +294,159 @@ Window {
             }
         }
 
-        Slider {
-            id: playbackScrubber
+        RowLayout {
+            id: trackActionControls
             Layout.fillWidth: true
-            from: 0
-            to: Math.max(0.01, appController.playback.durationSeconds)
-            value: appController.playback.positionSeconds
-            enabled: appController.playback.sourcePath.length > 0
-            live: true
-            onMoved: appController.seek_playback(value)
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            spacing: 6
+
+            ComboBox {
+                id: transformPicker
+                model: appController.transformModel
+                textRole: "name"
+                valueRole: "transformId"
+                Layout.preferredWidth: 150
+                palette.text: root.controlTextColor
+                palette.buttonText: root.controlTextColor
+            }
+
+            TextField {
+                id: transformParamsField
+                text: "{\"duration\": 8.0, \"interval\": 0.5}"
+                placeholderText: "JSON params"
+                Layout.preferredWidth: 150
+                color: root.controlTextColor
+                placeholderTextColor: root.controlMutedTextColor
+                selectedTextColor: root.controlTextColor
+                selectionColor: "#2563eb"
+            }
+
+            Button {
+                text: "Transform"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackId.length > 0 && transformPicker.currentIndex >= 0
+                onClicked: appController.add_transform_track(
+                    appController.selectedTrackId,
+                    transformPicker.currentValue,
+                    appController.transformModel.version_at(transformPicker.currentIndex),
+                    transformParamsField.text
+                )
+            }
+
+            Button {
+                text: "Vocals"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackId.length > 0
+                onClicked: appController.add_vocals_stem_track(appController.selectedTrackId)
+            }
+
+            Button {
+                text: "Run"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
+                onClicked: appController.run_track(appController.selectedTrackId)
+            }
+
+            Button {
+                text: "Cancel"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackHasRunningJob
+                onClicked: appController.cancel_selected_job()
+            }
+
+            Button {
+                text: "Rerun"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
+                onClicked: appController.rerun_track(appController.selectedTrackId)
+            }
+
+            Button {
+                text: "Cache"
+                palette.buttonText: root.controlTextColor
+                onClicked: appController.refresh_cache_status()
+            }
+
+            Button {
+                text: "Editable"
+                palette.buttonText: root.controlTextColor
+                enabled: appController.selectedTrackId.length > 0
+                onClicked: appController.create_editable_track_from_track(appController.selectedTrackId)
+            }
+
+            Button {
+                text: "Demo"
+                palette.buttonText: root.controlTextColor
+                onClicked: root.demoProjectWithConfirmation()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            spacing: 8
+
+            RowLayout {
+                id: playbackControls
+                spacing: 6
+
+                Button {
+                    text: "-1s"
+                    palette.buttonText: root.controlTextColor
+                    enabled: appController.playback.sourcePath.length > 0
+                    onClicked: appController.nudge_playback(-1.0)
+                }
+
+                Button {
+                    text: appController.playback.isPlaying ? "Pause" : "Play"
+                    palette.buttonText: root.controlTextColor
+                    enabled: appController.selectedTrackCanPlay || (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) || appController.playback.isPlaying
+                    onClicked: root.togglePlayback()
+                }
+
+                Button {
+                    text: "Stop"
+                    palette.buttonText: root.controlTextColor
+                    enabled: appController.playback.sourcePath.length > 0
+                    onClicked: appController.stop_playback()
+                }
+
+                Button {
+                    text: "+1s"
+                    palette.buttonText: root.controlTextColor
+                    enabled: appController.playback.sourcePath.length > 0
+                    onClicked: appController.nudge_playback(1.0)
+                }
+
+                Slider {
+                    id: playbackVolumeSlider
+                    from: 0
+                    to: 1
+                    value: appController.playback.volume
+                    Layout.preferredWidth: 88
+                    onMoved: appController.playback.set_volume(value)
+                }
+
+                Label {
+                    id: playheadTimeLabel
+                    text: root.formatSeconds(appController.playback.positionSeconds) + " / " + root.formatSeconds(appController.playback.durationSeconds)
+                    color: "#d4d4d8"
+                    font.pixelSize: 12
+                }
+            }
+
+            Slider {
+                id: playbackScrubber
+                Layout.fillWidth: true
+                from: 0
+                to: Math.max(0.01, appController.playback.durationSeconds)
+                value: appController.playback.positionSeconds
+                enabled: appController.playback.sourcePath.length > 0
+                live: true
+                onMoved: appController.seek_playback(value)
+            }
         }
 
         RowLayout {
@@ -505,15 +573,39 @@ Window {
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
                         clip: true
 
+                        Rectangle {
+                            id: waveformCenterLine
+                            x: root.timelineLeftPadding
+                            y: Math.round(parent.height / 2)
+                            width: Math.max(0, parent.width - root.timelineLeftPadding)
+                            height: 1
+                            color: "#2f333d"
+                            visible: waveformSamples.length > 0
+                        }
+
                         Repeater {
                             model: waveformSamples
-                            Rectangle {
-                                width: 2
-                                height: Math.max(2, modelData.peak * (parent.height - 18))
+                            Item {
+                                width: 3
+                                height: parent.height
                                 x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)
-                                y: (parent.height - height) / 2
                                 visible: x >= root.timelineLeftPadding - width && x <= parent.width
-                                color: "#60a5fa"
+
+                                Rectangle {
+                                    width: 2
+                                    height: Math.max(2, modelData.peak * (parent.height - 18))
+                                    y: (parent.height - height) / 2
+                                    color: "#60a5fa"
+                                    opacity: 0.75
+                                }
+
+                                Rectangle {
+                                    width: 2
+                                    height: Math.max(2, modelData.rms * (parent.height - 18))
+                                    y: (parent.height - height) / 2
+                                    color: "#bfdbfe"
+                                    opacity: 0.95
+                                }
                             }
                         }
 
@@ -557,7 +649,10 @@ Window {
                         MouseArea {
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton
-                            onClicked: appController.select_track(trackId)
+                            onClicked: function(mouse) {
+                                appController.select_track(trackId)
+                                root.seekTimelineAtX(mouse.x)
+                            }
                         }
                     }
                 }

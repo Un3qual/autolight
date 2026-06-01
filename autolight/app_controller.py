@@ -267,6 +267,18 @@ class AppController(QObject):
             ]
         )
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
+        waveform = add_generated_track(
+            self._project,
+            parent_track_id=source.id,
+            name="Waveform Summary",
+            transform_id="waveform.summary",
+            transform_params={"buckets": 80},
+            transform_version="1",
+            output_schema="artifact.waveform.v1",
+            dependency_hash="demo-waveform",
+        )
+        waveform.result_state = ResultState.COMPLETE
+        self._attach_demo_waveform(waveform)
         self._track_model.set_project(self._project)
         self._set_selected_track_id(source.id)
         self._notify_timeline_duration_changed()
@@ -617,8 +629,13 @@ class AppController(QObject):
 
     @Slot(float)
     def seek_playback(self, seconds: float) -> None:
+        self._ensure_playback_seek_duration()
         self._playback.seek_seconds(seconds)
         self.set_timeline_scroll_seconds(self._scroll_for_visible_time(seconds))
+
+    @Slot(float)
+    def nudge_playback(self, delta_seconds: float) -> None:
+        self.seek_playback(self._playback.positionSeconds + float(delta_seconds))
 
     @Slot(float)
     def set_timeline_zoom(self, pixels_per_second: float) -> None:
@@ -842,6 +859,35 @@ class AppController(QObject):
         for track in list(self._project.tracks):
             if track.transform_id == "waveform.summary":
                 self._load_waveform_samples(track.id)
+
+    def _ensure_playback_seek_duration(self) -> None:
+        duration = self._timeline_duration_seconds()
+        if duration > self._playback.durationSeconds:
+            self._playback._set_duration_seconds(duration)
+
+    def _attach_demo_waveform(self, waveform_track) -> None:
+        samples = self._demo_waveform_samples()
+        payload = json.dumps({"version": 1, "duration": 1.0, "samples": samples}).encode("utf-8")
+        entry = self._job_queue.cache_store.write_bytes(
+            "waveform",
+            "demo-waveform",
+            payload,
+            "1",
+        )
+        waveform_track.cache_refs = [entry.id]
+        waveform_track.provenance["waveform_samples"] = samples
+        waveform_track.provenance["waveform_duration_seconds"] = 1.0
+        self._project.cache_entries.append(entry)
+
+    @staticmethod
+    def _demo_waveform_samples() -> list[dict[str, float]]:
+        return [
+            {
+                "peak": 0.32 + 0.58 * abs(math.sin(index * 0.31)),
+                "rms": 0.14 + 0.34 * abs(math.sin(index * 0.31)),
+            }
+            for index in range(80)
+        ]
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
         selected_ids = set(self._selected_marker_ids)

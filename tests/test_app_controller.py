@@ -6,11 +6,13 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QColor, QImage
 
 import main as app_entry
 from autolight.app_controller import AppController
 from autolight.cache.keys import track_dependency_hash
-from autolight.project.models import CacheEntry, JobRun, ResultState
+from autolight.project.models import CacheEntry, JobRun, ResultState, TrackType
+from autolight.project.store import track_dependency_inputs
 from tests.helpers import write_wav
 
 
@@ -65,7 +67,7 @@ class AppControllerTest(unittest.TestCase):
 
         controller.load_demo_project()
 
-        self.assertEqual(controller.trackModel.rowCount(), 3)
+        self.assertEqual(controller.trackModel.rowCount(), 4)
         self.assertEqual(controller.projectName, "Autolight Demo")
 
     def test_controller_emits_project_name_changed_when_demo_loads(self):
@@ -113,8 +115,27 @@ class AppControllerTest(unittest.TestCase):
                     "resultState": "complete",
                     "markerCount": 2,
                 },
+                {
+                    "name": "Waveform Summary",
+                    "trackType": "generated",
+                    "resultState": "complete",
+                    "markerCount": 0,
+                },
             ],
         )
+
+    def test_demo_source_track_keeps_waveform_out_of_source_cache_refs(self):
+        controller = self._controller()
+
+        controller.load_demo_project()
+
+        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        dependency_inputs = track_dependency_inputs(controller._project, source)
+
+        self.assertEqual(source.cache_refs, [])
+        self.assertEqual(len(dependency_inputs), 1)
+        self.assertTrue(dependency_inputs[0].startswith(f"track:{source.id}:"))
+        self.assertNotIn("cache_", dependency_inputs[0])
 
     def test_controller_uses_unique_demo_audio_paths(self):
         controller = self._controller()
@@ -269,6 +290,22 @@ class AppControllerTest(unittest.TestCase):
         controller.playback.load_source.assert_not_called()
         controller.playback.play.assert_called_once()
 
+    def test_nudge_playback_seeks_relative_to_current_position(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=80000)
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.play_selected_track())
+
+        controller.seek_playback(2.0)
+        controller.nudge_playback(1.5)
+
+        self.assertEqual(controller.playback.positionSeconds, 3.5)
+
     def test_play_selected_generated_track_loads_resolved_source_audio(self):
         controller = self._controller()
         controller.playback.load_source = Mock(return_value=True)
@@ -407,6 +444,40 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
+
+    def test_qml_exposes_polished_playback_and_waveform_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("id: playbackControls", qml)
+        self.assertIn("id: playbackVolumeSlider", qml)
+        self.assertIn("appController.nudge_playback", qml)
+        self.assertIn("appController.playback.set_volume", qml)
+        self.assertIn("root.seekTimelineAtX", qml)
+        self.assertIn("modelData.rms", qml)
+        self.assertIn("id: waveformCenterLine", qml)
+
+    def test_qml_keeps_playback_controls_out_of_top_toolbar(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        toolbar_start = qml.index("ToolBar {")
+        toolbar_end = qml.index("RowLayout {\n            id: timelineRuler")
+        toolbar_qml = qml[toolbar_start:toolbar_end]
+
+        self.assertNotIn("id: playbackControls", toolbar_qml)
+        self.assertNotIn("appController.nudge_playback", toolbar_qml)
+        self.assertGreater(qml.index("id: playbackControls"), toolbar_end)
+
+    def test_qml_dark_surface_action_controls_use_readable_text_color(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        action_start = qml.index("id: trackActionControls")
+        playback_start = qml.index("id: playbackControls")
+        action_qml = qml[action_start:playback_start]
+        playback_qml = qml[playback_start:qml.index("id: playbackScrubber")]
+
+        self.assertIn("readonly property color controlTextColor: \"#f4f4f5\"", qml)
+        self.assertIn("color: root.controlTextColor", action_qml)
+        self.assertIn("placeholderTextColor: root.controlMutedTextColor", action_qml)
+        self.assertGreaterEqual(action_qml.count("palette.buttonText: root.controlTextColor"), 8)
+        self.assertGreaterEqual(playback_qml.count("palette.buttonText: root.controlTextColor"), 4)
 
     def test_qml_playback_fallback_only_runs_without_selected_track(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
@@ -1135,7 +1206,7 @@ class AppControllerTest(unittest.TestCase):
         editable_id = controller.create_editable_track_from_track(generated_id)
 
         self.assertNotEqual(editable_id, "")
-        self.assertEqual(controller.trackModel.rowCount(), 4)
+        self.assertEqual(controller.trackModel.rowCount(), 5)
         self.assertEqual(controller.selectedTrackId, editable_id)
         editable = self._track_by_id(controller, editable_id)
         self.assertEqual(editable.input_track_ids, [generated_id])
@@ -1169,6 +1240,23 @@ class AppControllerTest(unittest.TestCase):
             exit_code = app_entry.main(["main.py", "--smoke"])
 
         self.assertEqual(exit_code, -1)
+
+    def test_screenshot_checker_distinguishes_blank_dark_from_toolbar_clip(self):
+        from scripts import check_qml_screenshot
+
+        blank = QImage(1120, 720, QImage.Format.Format_RGB32)
+        blank.fill(QColor("#181a1f"))
+
+        clipped = QImage(1120, 720, QImage.Format.Format_RGB32)
+        clipped.fill(QColor("#181a1f"))
+        for y in range(0, 40):
+            for x in range(0, 1120):
+                clipped.setPixelColor(x, y, QColor("#f4f4f5"))
+        for y in range(0, 40, 2):
+            clipped.setPixelColor(1118, y, QColor("#111318"))
+
+        self.assertTrue(check_qml_screenshot.toolbar_right_edge_is_clear(blank))
+        self.assertFalse(check_qml_screenshot.toolbar_right_edge_is_clear(clipped))
 
     def test_qml_timeline_shell_uses_one_row_oriented_list(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

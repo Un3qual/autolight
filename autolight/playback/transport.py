@@ -13,6 +13,7 @@ class PlaybackTransport(QObject):
     durationSecondsChanged = Signal()
     isPlayingChanged = Signal()
     lastErrorChanged = Signal()
+    volumeChanged = Signal()
 
     def __init__(self, *, player=None, audio_output=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -24,6 +25,7 @@ class PlaybackTransport(QObject):
         self._duration_seconds = 0.0
         self._is_playing = False
         self._last_error = ""
+        self._volume = 1.0
         self._player.positionChanged.connect(self._handle_position_changed)
         self._player.durationChanged.connect(self._handle_duration_changed)
         self._player.playbackStateChanged.connect(self._handle_playback_state_changed)
@@ -48,6 +50,10 @@ class PlaybackTransport(QObject):
     @Property(str, notify=lastErrorChanged)
     def lastError(self) -> str:
         return self._last_error
+
+    @Property(float, notify=volumeChanged)
+    def volume(self) -> float:
+        return self._volume
 
     @Slot(str, float, result=bool)
     def load_source(self, path: str, duration_seconds: float = 0.0) -> bool:
@@ -103,6 +109,10 @@ class PlaybackTransport(QObject):
     def set_volume(self, value: float) -> None:
         volume = min(max(self._finite_non_negative(value), 0.0), 1.0)
         self._audio_output.setVolume(volume)
+        if self._volume == volume:
+            return
+        self._volume = volume
+        self.volumeChanged.emit()
 
     def _handle_position_changed(self, milliseconds: int) -> None:
         self._set_position_seconds(self._finite_non_negative(milliseconds / 1000.0))
