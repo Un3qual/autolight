@@ -1,3 +1,4 @@
+import copy
 import json
 import math
 import tempfile
@@ -329,6 +330,88 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(marker.label, "Hit")
         self.assertEqual(marker.metadata["color"], "amber")
 
+    def test_marker_snapshot_command_restores_dependent_track_state(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 1.0, "Cue", color="cyan")
+        downstream = add_generated_track(
+            project,
+            editable.id,
+            "Generated From Editable",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "complete-hash",
+        )
+        downstream.result_state = ResultState.COMPLETE
+        downstream_marker = Marker(id="downstream_marker", track_id=downstream.id, timestamp=3.0)
+        downstream_job = JobRun(
+            id="downstream_job",
+            track_id=downstream.id,
+            transform_id=downstream.transform_id,
+            parameters_hash=downstream.dependency_hash,
+            state=ResultState.COMPLETE,
+        )
+        project.markers.append(downstream_marker)
+        project.job_runs.append(downstream_job)
+        before = [marker_snapshot(marker)]
+        before_dependents = [
+            {
+                "index": project.tracks.index(downstream),
+                "track": copy.deepcopy(downstream),
+                "markers": [copy.deepcopy(downstream_marker)],
+                "job_runs": [copy.deepcopy(downstream_job)],
+            }
+        ]
+        update_editable_marker(
+            project,
+            editable.id,
+            marker.id,
+            timestamp=2.0,
+            label="Hit",
+            category="accent",
+            color="amber",
+        )
+        after = [marker_snapshot(marker)]
+        after_dependents = [
+            {
+                "index": project.tracks.index(downstream),
+                "track": copy.deepcopy(downstream),
+                "markers": [
+                    copy.deepcopy(item)
+                    for item in project.markers
+                    if item.track_id == downstream.id
+                ],
+                "job_runs": [
+                    copy.deepcopy(item)
+                    for item in project.job_runs
+                    if item.track_id == downstream.id
+                ],
+            }
+        ]
+        history = EditHistory()
+        history.push(
+            MarkerSnapshotCommand(
+                track_id=editable.id,
+                before=before,
+                after=after,
+                before_dependents=before_dependents,
+                after_dependents=after_dependents,
+            )
+        )
+
+        history.undo(project)
+        restored_downstream = self._project_track_by_id(project, downstream.id)
+        self.assertEqual(restored_downstream.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_downstream.dependency_hash, "complete-hash")
+        self.assertIn(downstream_marker.id, [item.id for item in project.markers])
+        self.assertIn(downstream_job.id, [item.id for item in project.job_runs])
+
+        history.redo(project)
+        restored_downstream = self._project_track_by_id(project, downstream.id)
+        self.assertEqual(restored_downstream.result_state, ResultState.STALE)
+
     def test_edit_history_keeps_command_on_failed_undo(self):
         class FailingCommand:
             @staticmethod
@@ -346,6 +429,36 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             history.undo(new_project("Demo"))
 
         self.assertTrue(history.can_undo)
+        self.assertFalse(history.can_redo)
+
+    def test_edit_history_discards_track_creation_undo_when_dependents_exist(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        manual = create_manual_editable_track(project, source.id, "Manual Cues")
+        command = TrackSnapshotCommand(
+            track_id=manual.id,
+            before=None,
+            after=manual,
+            index=project.tracks.index(manual),
+        )
+        history = EditHistory()
+        history.push(command)
+        dependent = add_generated_track(
+            project,
+            manual.id,
+            "Generated From Manual",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+
+        self.assertTrue(history.undo(project))
+
+        self.assertIn(manual.id, [track.id for track in project.tracks])
+        self.assertIn(dependent.id, [track.id for track in project.tracks])
+        self.assertFalse(history.can_undo)
         self.assertFalse(history.can_redo)
 
     def test_project_snapshot_command_restores_ui_state_in_place(self):
@@ -787,12 +900,32 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         second_marker = self._selected_track_markers(controller)[1]
         self.assertEqual(
             set(first_marker),
-            {"id", "timestamp", "label", "category", "color", "colorKey", "selected"},
+            {"id", "timestamp", "duration", "label", "category", "color", "colorKey", "selected"},
         )
         self.assertEqual(first_marker["color"], MARKER_COLOR_PALETTE["cyan"])
         self.assertEqual(first_marker["colorKey"], "cyan")
         self.assertTrue(first_marker["selected"])
         self.assertTrue(second_marker["selected"])
+
+    def test_controller_selected_track_marker_summary_includes_duration(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+
+        marker_id = controller.add_marker_to_selected_track_with_duration(
+            1.5,
+            1.25,
+            "Blackout",
+            "cue",
+            "cyan",
+        )
+
+        summary = next(item for item in self._selected_track_markers(controller) if item["id"] == marker_id)
+        self.assertEqual(summary["duration"], 1.25)
 
     def test_controller_clears_marker_selection_when_selected_track_changes(self):
         from autolight.app_controller import AppController
@@ -1200,11 +1333,11 @@ class EditableMarkerInspectorTest(unittest.TestCase):
                 return marker
         self.fail(f"marker not found: {marker_id}")
 
-    def _project_marker_by_id(self, project, marker_id: str) -> Marker:
-        for marker in project.markers:
-            if marker.id == marker_id:
-                return marker
-        self.fail(f"marker not found: {marker_id}")
+    def _project_track_by_id(self, project, track_id: str):
+        for track in project.tracks:
+            if track.id == track_id:
+                return track
+        self.fail(f"track not found: {track_id}")
 
     def _project_marker_by_id(self, project, marker_id: str) -> Marker:
         for marker in project.markers:

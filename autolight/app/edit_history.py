@@ -14,23 +14,36 @@ class EditCommand(Protocol):
     def redo(self, project: ProjectDocument) -> None: ...
 
 
+class ObsoleteEditCommand(RuntimeError):
+    """Raised when a history command can no longer apply to the current graph."""
+
+
 @dataclass(slots=True)
 class MarkerSnapshotCommand:
     track_id: str
     before: list[dict[str, Any]]
     after: list[dict[str, Any]]
+    before_dependents: list[dict[str, Any]] = field(default_factory=list)
+    after_dependents: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.before = copy.deepcopy(self.before)
         self.after = copy.deepcopy(self.after)
+        self.before_dependents = copy.deepcopy(self.before_dependents)
+        self.after_dependents = copy.deepcopy(self.after_dependents)
 
     def undo(self, project: ProjectDocument) -> None:
-        self._restore(project, self.before)
+        self._restore(project, self.before, self.before_dependents)
 
     def redo(self, project: ProjectDocument) -> None:
-        self._restore(project, self.after)
+        self._restore(project, self.after, self.after_dependents)
 
-    def _restore(self, project: ProjectDocument, snapshots: list[dict[str, Any]]) -> None:
+    def _restore(
+        self,
+        project: ProjectDocument,
+        snapshots: list[dict[str, Any]],
+        dependent_snapshots: list[dict[str, Any]],
+    ) -> None:
         from autolight.project.models import Marker
         from autolight.project.store import find_track, mark_dependents_stale
 
@@ -56,8 +69,32 @@ class MarkerSnapshotCommand:
                     metadata=copy.deepcopy(item["metadata"]),
                 )
             )
-        if find_track(project, self.track_id) is not None:
+        if dependent_snapshots:
+            if find_track(project, self.track_id) is not None:
+                mark_dependents_stale(project, self.track_id)
+            self._restore_dependent_states(project, dependent_snapshots)
+        elif find_track(project, self.track_id) is not None:
             mark_dependents_stale(project, self.track_id)
+
+    @staticmethod
+    def _restore_dependent_states(
+        project: ProjectDocument,
+        snapshots: list[dict[str, Any]],
+    ) -> None:
+        track_ids = {item["track"].id for item in snapshots}
+        project.markers[:] = [marker for marker in project.markers if marker.track_id not in track_ids]
+        project.job_runs[:] = [job for job in project.job_runs if job.track_id not in track_ids]
+        for item in snapshots:
+            track = copy.deepcopy(item["track"])
+            insert_at = min(max(0, int(item.get("index", len(project.tracks)))), len(project.tracks))
+            for index, current in enumerate(project.tracks):
+                if current.id == track.id:
+                    project.tracks[index] = track
+                    break
+            else:
+                project.tracks.insert(insert_at, track)
+            project.markers.extend(copy.deepcopy(item.get("markers", [])))
+            project.job_runs.extend(copy.deepcopy(item.get("job_runs", [])))
 
 
 @dataclass(slots=True)
@@ -101,7 +138,7 @@ class TrackSnapshotCommand:
     def _remove_track(self, project: ProjectDocument) -> None:
         dependent = self._dependent_track(project)
         if dependent is not None:
-            raise ValueError(f"cannot remove track with dependent track: {dependent.id}")
+            raise ObsoleteEditCommand(f"cannot remove track with dependent track: {dependent.id}")
         self._discard_track_state(project)
 
     def _replace_track(
@@ -187,16 +224,21 @@ class EditHistory:
         self._redo_stack.clear()
 
     def undo(self, project: ProjectDocument) -> bool:
-        if not self._undo_stack:
-            return False
-        command = self._undo_stack.pop()
-        try:
-            command.undo(project)
-        except Exception:
-            self._undo_stack.append(command)
-            raise
-        self._redo_stack.append(command)
-        return True
+        skipped_obsolete = False
+        while self._undo_stack:
+            command = self._undo_stack.pop()
+            try:
+                command.undo(project)
+            except ObsoleteEditCommand:
+                self._clean_undo_depth = None
+                skipped_obsolete = True
+                continue
+            except Exception:
+                self._undo_stack.append(command)
+                raise
+            self._redo_stack.append(command)
+            return True
+        return skipped_obsolete
 
     def redo(self, project: ProjectDocument) -> bool:
         if not self._redo_stack:
