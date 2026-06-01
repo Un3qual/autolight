@@ -84,7 +84,8 @@ class ProjectSnapshotCommand:
         project.markers[:] = copy.deepcopy(snapshot.markers)
         project.job_runs[:] = copy.deepcopy(snapshot.job_runs)
         project.cache_entries[:] = copy.deepcopy(snapshot.cache_entries)
-        project.ui_state = copy.deepcopy(snapshot.ui_state)
+        project.ui_state.clear()
+        project.ui_state.update(copy.deepcopy(snapshot.ui_state))
 
 
 class EditHistory:
@@ -108,7 +109,11 @@ class EditHistory:
         if not self._undo_stack:
             return False
         command = self._undo_stack.pop()
-        command.undo(project)
+        try:
+            command.undo(project)
+        except Exception:
+            self._undo_stack.append(command)
+            raise
         self._redo_stack.append(command)
         return True
 
@@ -116,7 +121,11 @@ class EditHistory:
         if not self._redo_stack:
             return False
         command = self._redo_stack.pop()
-        command.redo(project)
+        try:
+            command.redo(project)
+        except Exception:
+            self._redo_stack.append(command)
+            raise
         self._undo_stack.append(command)
         return True
 

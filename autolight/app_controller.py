@@ -486,13 +486,10 @@ class AppController(QObject):
                 color=normalize_marker_color(color),
             )
             after = [marker_snapshot(marker)]
-            self._edit_history.push(
-                MarkerSnapshotCommand(track_id=self._selected_track_id, before=[], after=after)
-            )
+            self._push_marker_snapshot_command(self._selected_track_id, before=[], after=after)
             self._track_model.set_project(self._project)
             self._set_selected_marker_ids([marker.id], emit_marker_summary=False)
             self.selectedTrackMarkersChanged.emit()
-            self._notify_history_changed()
             self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
@@ -504,7 +501,14 @@ class AppController(QObject):
     @Slot(str, result=bool)
     def delete_marker_from_selected_track(self, marker_id: str) -> bool:
         try:
+            before = [
+                marker_snapshot(marker)
+                for marker in self._project.markers
+                if marker.track_id == self._selected_track_id and marker.id == marker_id
+            ]
             deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
+            if deleted:
+                self._push_marker_snapshot_command(self._selected_track_id, before=before, after=[])
             self._track_model.set_project(self._project)
             if marker_id in self._selected_marker_ids:
                 self._set_selected_marker_ids(
@@ -548,7 +552,7 @@ class AppController(QObject):
             if len(self._selected_marker_ids) != 1:
                 raise ValueError("select one marker to update")
             marker = self._editable_marker_for_selected_marker_id(self._selected_marker_ids[0])
-            before = self._marker_update_snapshot(marker)
+            before = [marker_snapshot(marker)]
             update_editable_marker(
                 self._project,
                 self._selected_track_id,
@@ -558,8 +562,10 @@ class AppController(QObject):
                 category=category,
                 color=color,
             )
-            changed = before != self._marker_update_snapshot(marker)
+            after = [marker_snapshot(marker)]
+            changed = before != after
             if changed:
+                self._push_marker_snapshot_command(self._selected_track_id, before=before, after=after)
                 self._track_model.set_project(self._project)
                 self.selectedTrackMarkersChanged.emit()
                 self._notify_timeline_duration_changed()
@@ -574,6 +580,7 @@ class AppController(QObject):
     @Slot(str, str, str, result=int)
     def bulk_update_selected_markers(self, label: str, category: str, color: str) -> int:
         try:
+            before = self._marker_snapshots_for_track(self._selected_track_id, self._selected_marker_ids)
             updated = bulk_update_editable_markers(
                 self._project,
                 self._selected_track_id,
@@ -585,6 +592,16 @@ class AppController(QObject):
             if not updated:
                 self._set_last_error("")
                 return 0
+            after = self._marker_snapshots_for_track(
+                self._selected_track_id,
+                [item["id"] for item in before],
+            )
+            before_changed, after_changed = self._changed_marker_snapshots(before, after)
+            self._push_marker_snapshot_command(
+                self._selected_track_id,
+                before=before_changed,
+                after=after_changed,
+            )
             self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
@@ -645,6 +662,7 @@ class AppController(QObject):
         try:
             if not self._edit_history.undo(self._project):
                 return False
+            self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
@@ -660,6 +678,7 @@ class AppController(QObject):
         try:
             if not self._edit_history.redo(self._project):
                 return False
+            self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
@@ -967,6 +986,12 @@ class AppController(QObject):
         self.canUndoChanged.emit()
         self.canRedoChanged.emit()
 
+    def _push_marker_snapshot_command(self, track_id: str, before: list[dict], after: list[dict]) -> None:
+        if before == after:
+            return
+        self._edit_history.push(MarkerSnapshotCommand(track_id=track_id, before=before, after=after))
+        self._notify_history_changed()
+
     def _push_project_snapshot_command(self, before_project) -> None:
         self._edit_history.push(
             ProjectSnapshotCommand(
@@ -975,6 +1000,45 @@ class AppController(QObject):
             )
         )
         self._notify_history_changed()
+
+    def _marker_snapshots_for_track(self, track_id: str, marker_ids: list[str]) -> list[dict]:
+        selected_ids = set(marker_ids)
+        return [
+            marker_snapshot(marker)
+            for marker in self._project.markers
+            if marker.track_id == track_id and (not selected_ids or marker.id in selected_ids)
+        ]
+
+    @staticmethod
+    def _changed_marker_snapshots(before: list[dict], after: list[dict]) -> tuple[list[dict], list[dict]]:
+        before_by_id = {item["id"]: item for item in before}
+        after_by_id = {item["id"]: item for item in after}
+        changed_ids = [
+            item["id"]
+            for item in before
+            if before_by_id[item["id"]] != after_by_id.get(item["id"])
+        ]
+        changed_ids.extend(item["id"] for item in after if item["id"] not in before_by_id)
+        return (
+            [before_by_id[item_id] for item_id in changed_ids if item_id in before_by_id],
+            [after_by_id[item_id] for item_id in changed_ids if item_id in after_by_id],
+        )
+
+    def _reconcile_selection_with_project(self) -> None:
+        if self._selected_track_id and find_track(self._project, self._selected_track_id) is None:
+            self._set_selected_track_id("")
+            return
+        if not self._selected_track_id:
+            self._set_selected_marker_ids([])
+            return
+        marker_ids = {
+            marker.id
+            for marker in self._project.markers
+            if marker.track_id == self._selected_track_id
+        }
+        self._set_selected_marker_ids(
+            [marker_id for marker_id in self._selected_marker_ids if marker_id in marker_ids]
+        )
 
     def _keep_playback_position_visible(self) -> None:
         if not self._playback.isPlaying:
@@ -1084,11 +1148,6 @@ class AppController(QObject):
             if marker.track_id == self._selected_track_id and marker.id == marker_id:
                 return marker
         raise ValueError(f"marker not found on track {self._selected_track_id}: {marker_id}")
-
-    @staticmethod
-    def _marker_update_snapshot(marker: Marker) -> tuple[float, str, str, object]:
-        metadata = marker.metadata if isinstance(marker.metadata, dict) else {}
-        return (marker.timestamp, marker.label, marker.category, metadata.get("color"))
 
     def _refresh_dependency_hash(self, track) -> None:
         if not track.transform_id or not track.input_track_ids:

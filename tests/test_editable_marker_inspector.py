@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autolight.app.edit_history import EditHistory, MarkerSnapshotCommand
+from autolight.app.edit_history import EditHistory, MarkerSnapshotCommand, ProjectSnapshotCommand
 from autolight.app.marker_editing import MarkerEditingService
 from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
@@ -274,6 +274,36 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(marker.timestamp, 2.0)
         self.assertEqual(marker.label, "Hit")
         self.assertEqual(marker.metadata["color"], "amber")
+
+    def test_edit_history_keeps_command_on_failed_undo(self):
+        class FailingCommand:
+            def undo(self, project):
+                raise RuntimeError("restore failed")
+
+            def redo(self, project):
+                raise AssertionError("redo should not be called")
+
+        history = EditHistory()
+        history.push(FailingCommand())
+
+        with self.assertRaisesRegex(RuntimeError, "restore failed"):
+            history.undo(new_project("Demo"))
+
+        self.assertTrue(history.can_undo)
+        self.assertFalse(history.can_redo)
+
+    def test_project_snapshot_command_restores_ui_state_in_place(self):
+        project = new_project("Demo")
+        project.ui_state["timeline"] = {"scroll_seconds": 4.0}
+        before = new_project("Before")
+        before.ui_state["timeline"] = {"scroll_seconds": 1.0}
+        command = ProjectSnapshotCommand(before=before, after=project)
+        ui_state = project.ui_state
+
+        command.undo(project)
+
+        self.assertIs(project.ui_state, ui_state)
+        self.assertEqual(project.ui_state, {"timeline": {"scroll_seconds": 1.0}})
 
     def test_add_editable_marker_rejects_generated_track(self):
         project = new_project("Demo")
@@ -622,6 +652,27 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
         self.assertEqual(controller.lastError, "")
 
+    def test_controller_undo_redo_deletes_marker_history(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = self._selected_track_markers(controller)[0]["id"]
+
+        self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
+        self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertTrue(controller.canUndo)
+
+        self.assertTrue(controller.undo())
+        self.assertTrue(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertTrue(controller.canRedo)
+
+        self.assertTrue(controller.redo())
+        self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
+
     def test_controller_tracks_selected_marker_ids(self):
         from autolight.app_controller import AppController
 
@@ -708,6 +759,34 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(controller.lastError, "")
         self.assertTrue(controller.isDirty)
 
+    def test_controller_undo_redo_updates_selected_marker_history(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = self._selected_track_markers(controller)[0]["id"]
+        marker = self._marker_by_id(controller, marker_id)
+        before = (marker.timestamp, marker.label, marker.category, marker_color_key(marker))
+        controller.toggle_marker_selection(marker_id, False)
+
+        self.assertTrue(controller.update_selected_marker(1.75, "Blackout", "lighting", "amber"))
+        self.assertTrue(controller.canUndo)
+
+        self.assertTrue(controller.undo())
+        marker = self._marker_by_id(controller, marker_id)
+        self.assertEqual((marker.timestamp, marker.label, marker.category, marker_color_key(marker)), before)
+        self.assertTrue(controller.canRedo)
+
+        self.assertTrue(controller.redo())
+        marker = self._marker_by_id(controller, marker_id)
+        self.assertEqual(marker.timestamp, 1.75)
+        self.assertEqual(marker.label, "Blackout")
+        self.assertEqual(marker.category, "lighting")
+        self.assertEqual(marker.metadata["color"], "amber")
+
     def test_controller_noop_update_selected_marker_does_not_dirty_or_refresh(self):
         from autolight.app_controller import AppController
 
@@ -762,6 +841,41 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(summaries[1]["label"], "All")
         self.assertEqual(summaries[0]["colorKey"], "blue")
         self.assertEqual(summaries[1]["colorKey"], "blue")
+
+    def test_controller_undo_redo_bulk_updates_selected_markers_history(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_ids = [marker["id"] for marker in self._selected_track_markers(controller)]
+        before = {
+            marker_id: (
+                self._marker_by_id(controller, marker_id).label,
+                self._marker_by_id(controller, marker_id).category,
+                marker_color_key(self._marker_by_id(controller, marker_id)),
+            )
+            for marker_id in marker_ids
+        }
+        controller.clear_marker_selection()
+
+        self.assertEqual(controller.bulk_update_selected_markers("All", "scene", "blue"), 2)
+        self.assertTrue(controller.canUndo)
+
+        self.assertTrue(controller.undo())
+        for marker_id, expected in before.items():
+            marker = self._marker_by_id(controller, marker_id)
+            self.assertEqual((marker.label, marker.category, marker_color_key(marker)), expected)
+        self.assertTrue(controller.canRedo)
+
+        self.assertTrue(controller.redo())
+        for marker_id in marker_ids:
+            marker = self._marker_by_id(controller, marker_id)
+            self.assertEqual(marker.label, "All")
+            self.assertEqual(marker.category, "scene")
+            self.assertEqual(marker.metadata["color"], "blue")
 
     def test_controller_noop_bulk_update_selected_markers_does_not_dirty_or_refresh(self):
         from autolight.app_controller import AppController

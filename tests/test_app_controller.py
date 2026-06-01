@@ -130,8 +130,10 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertTrue(controller.canUndo)
         self.assertFalse(controller.canRedo)
+        self.assertEqual(controller.selectedMarkerIds, [marker_id])
         self.assertTrue(controller.undo())
         self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertEqual(controller.selectedMarkerIds, [])
         self.assertTrue(controller.canRedo)
 
         controller.new_project()
