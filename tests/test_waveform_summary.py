@@ -619,7 +619,13 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertNotIn("visible_waveform", track.provenance)
 
     def test_qml_mentions_waveform_samples_role(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        ui_root = Path(__file__).resolve().parents[1] / "UI"
+        qml = "\n".join(
+            [
+                (ui_root / "components" / "TimelineLane.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "WaveformStrip.qml").read_text(encoding="utf-8"),
+            ]
+        )
         self.assertIn("waveformSamples", qml)
         self.assertIn("waveformDurationSeconds", qml)
         self.assertIn("modelData.peak", qml)
@@ -636,7 +642,9 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertIn("visible: x >= root.timelineLeftPadding - width && x <= parent.width", qml)
 
     def test_qml_waveform_uses_peak_and_rms_layers(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = (
+            Path(__file__).resolve().parents[1] / "UI" / "components" / "WaveformStrip.qml"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("modelData.peak", qml)
         self.assertIn("modelData.rms", qml)

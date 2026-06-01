@@ -74,6 +74,11 @@ class AppControllerTest(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
+    @staticmethod
+    def _qml_text(*relative_paths: str) -> str:
+        root = Path(__file__).resolve().parents[1]
+        return "\n".join((root / relative_path).read_text(encoding="utf-8") for relative_path in relative_paths)
+
     def test_app_layer_modules_exist_for_milestone_2_boundaries(self):
         module_names = [
             "autolight.app.session",
@@ -681,7 +686,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.timelineVisibleSeconds, 0.01)
 
     def test_qml_exposes_transport_controls_and_playhead(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/PlaybackBar.qml",
+            "UI/components/TimelineLane.qml",
+        )
 
         self.assertIn("appController.play_selected_track()", qml)
         self.assertIn("appController.pause_playback()", qml)
@@ -695,8 +704,37 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
 
+    def test_qml_main_composes_milestone_2_components(self):
+        qml = Path("UI/Main.qml").read_text(encoding="utf-8")
+
+        for component_name in [
+            "ProjectToolbar",
+            "TransformBar",
+            "PlaybackBar",
+            "TimelineRuler",
+            "TimelineView",
+            "MarkerInspector",
+            "StatusFooter",
+        ]:
+            with self.subTest(component_name=component_name):
+                self.assertIn(component_name, qml)
+
+    def test_qml_large_components_are_split_out_of_main(self):
+        self.assertLessEqual(len(Path("UI/Main.qml").read_text(encoding="utf-8").splitlines()), 360)
+        for path in [
+            Path("UI/components/TimelineLane.qml"),
+            Path("UI/components/MarkerBlock.qml"),
+            Path("UI/components/WaveformStrip.qml"),
+        ]:
+            with self.subTest(path=str(path)):
+                self.assertTrue(path.exists())
+
     def test_qml_exposes_polished_playback_and_waveform_controls(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/PlaybackBar.qml",
+            "UI/components/WaveformStrip.qml",
+        )
 
         self.assertIn("id: playbackControls", qml)
         self.assertIn("id: playbackVolumeSlider", qml)
@@ -707,21 +745,17 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: waveformCenterLine", qml)
 
     def test_qml_keeps_playback_controls_out_of_top_toolbar(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
-        toolbar_start = qml.index("ToolBar {")
-        toolbar_end = qml.index("RowLayout {\n            id: timelineRuler")
-        toolbar_qml = qml[toolbar_start:toolbar_end]
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
+        playback_qml = self._qml_text("UI/components/PlaybackBar.qml")
 
         self.assertNotIn("id: playbackControls", toolbar_qml)
         self.assertNotIn("appController.nudge_playback", toolbar_qml)
-        self.assertGreater(qml.index("id: playbackControls"), toolbar_end)
+        self.assertIn("id: playbackControls", playback_qml)
 
     def test_qml_dark_surface_action_controls_use_readable_text_color(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
-        action_start = qml.index("id: transformDetailBar")
-        playback_start = qml.index("id: playbackControls")
-        action_qml = qml[action_start:playback_start]
-        playback_qml = qml[playback_start:qml.index("id: playbackScrubber")]
+        qml = self._qml_text("UI/Main.qml")
+        action_qml = self._qml_text("UI/components/TransformBar.qml")
+        playback_qml = self._qml_text("UI/components/PlaybackBar.qml")
 
         self.assertIn('readonly property color textPrimary: "#f4f4f5"', qml)
         self.assertIn("readonly property color controlTextColor: root.textPrimary", qml)
@@ -731,14 +765,17 @@ class AppControllerTest(unittest.TestCase):
         self.assertGreaterEqual(playback_qml.count("palette.buttonText: root.controlTextColor"), 4)
 
     def test_qml_playback_fallback_only_runs_without_selected_track(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text("UI/Main.qml", "UI/components/PlaybackBar.qml")
 
         no_selected_track_guard = (
             "appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0"
         )
+        root_no_selected_track_guard = (
+            "root.appController.selectedTrackId.length === 0 && root.appController.playback.sourcePath.length > 0"
+        )
         self.assertIn(no_selected_track_guard, qml)
         self.assertIn(
-            "appController.selectedTrackCanPlay || (" + no_selected_track_guard + ") || appController.playback.isPlaying",
+            "root.appController.selectedTrackCanPlay || (" + root_no_selected_track_guard + ") || root.appController.playback.isPlaying",
             qml,
         )
         self.assertIn("} else if (" + no_selected_track_guard + ") {", qml)
@@ -765,10 +802,10 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("root.timelineVisibleSeconds", qml)
 
     def test_qml_ruler_ticks_use_whole_second_boundaries_after_fractional_pan(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text("UI/components/TimelineRuler.qml")
 
-        self.assertIn("property real tickSecond: Math.ceil(appController.timelineScrollSeconds) + index", qml)
-        self.assertIn("x: root.timelineX(tickSecond)", qml)
+        self.assertIn("property real tickSecond: Math.ceil(timelineRuler.appController.timelineScrollSeconds) + index", qml)
+        self.assertIn("x: timelineRuler.timelineX(tickSecond)", qml)
         self.assertIn("text: tickSecond + \"s\"", qml)
         self.assertNotIn("Math.floor(appController.timelineScrollSeconds + index)", qml)
 
@@ -1849,15 +1886,20 @@ class AppControllerTest(unittest.TestCase):
         self.assertFalse(check_qml_screenshot.toolbar_right_edge_is_clear(clipped))
 
     def test_qml_timeline_shell_uses_one_row_oriented_list(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/components/TimelineView.qml",
+            "UI/components/TimelineLane.qml",
+            "UI/components/MarkerBlock.qml",
+        )
 
         self.assertIn("id: timelineRows", qml)
         self.assertIn("model: markerSpans", qml)
-        self.assertIn("modelData.timestamp", qml)
-        self.assertIn("root.timelineX(modelData.timestamp)", qml)
+        self.assertIn("marker: modelData", qml)
+        self.assertIn("root.marker.timestamp", qml)
+        self.assertIn("root.timelineX(root.marker.timestamp)", qml)
         self.assertIn("appController.timelinePixelsPerSecond", qml)
-        self.assertIn("modelData.duration : 0.08) * appController.timelinePixelsPerSecond", qml)
-        self.assertNotIn("Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))", qml)
+        self.assertIn("root.marker.duration : 0.08) * root.appController.timelinePixelsPerSecond", qml)
+        self.assertNotIn("Math.max(0, Math.min(parent.width - width, root.timelineX(root.marker.timestamp)))", qml)
         self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)
         self.assertNotIn("pixelsPerSecond: 96", qml)
@@ -1884,11 +1926,15 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn('{ key: "cyan", label: "Cyan", color: "#67e8f9" }', qml)
 
     def test_qml_uses_named_timeline_label_width(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/TimelineRuler.qml",
+            "UI/components/TrackRow.qml",
+        )
 
         self.assertIn("readonly property real timelineLabelWidth: 280", qml)
-        self.assertIn("timelineRows.width - root.timelineLabelWidth - root.timelineLeftPadding", qml)
-        self.assertIn("Layout.preferredWidth: root.timelineLabelWidth", qml)
+        self.assertIn("timelineView.rowsWidth - root.timelineLabelWidth - root.timelineLeftPadding", qml)
+        self.assertIn("Layout.preferredWidth: timelineRuler.timelineLabelWidth", qml)
         self.assertIn("width: root.timelineLabelWidth", qml)
         self.assertIn("parent.width - root.timelineLabelWidth", qml)
         self.assertNotIn("timelineRows.width - 280 - root.timelineLeftPadding", qml)
@@ -1896,18 +1942,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("width: 280", qml)
 
     def test_qml_timeline_ruler_has_fixed_height(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text("UI/Main.qml", "UI/components/TimelineRuler.qml")
 
         self.assertIn("readonly property real timelineRulerHeight: 32", qml)
         self.assertIn("id: timelineRuler", qml)
-        self.assertIn("Layout.minimumHeight: root.timelineRulerHeight", qml)
-        self.assertIn("Layout.preferredHeight: root.timelineRulerHeight", qml)
-        self.assertIn("Layout.maximumHeight: root.timelineRulerHeight", qml)
+        self.assertIn("Layout.minimumHeight: timelineRuler.timelineRulerHeight", qml)
+        self.assertIn("Layout.preferredHeight: timelineRuler.timelineRulerHeight", qml)
+        self.assertIn("Layout.maximumHeight: timelineRuler.timelineRulerHeight", qml)
 
     def test_qml_uses_grouped_toolbar_and_stable_lane_dimensions(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
-        toolbar_start = qml.index("ToolBar {")
-        toolbar_shell = qml[toolbar_start : qml.index("RowLayout {", toolbar_start)]
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/ProjectToolbar.qml",
+            "UI/components/TransformBar.qml",
+            "UI/components/TimelineView.qml",
+            "UI/components/TrackRow.qml",
+            "UI/components/TimelineLane.qml",
+        )
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
+        toolbar_start = toolbar_qml.index("ToolBar {")
+        toolbar_shell = toolbar_qml[toolbar_start : toolbar_qml.index("RowLayout {", toolbar_start)]
 
         self.assertIn("id: fileActions", qml)
         self.assertIn("id: transformActions", qml)
@@ -1919,7 +1973,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("background:", toolbar_shell)
 
     def test_qml_exposes_project_workflow_actions(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/ProjectToolbar.qml",
+            "UI/components/TransformBar.qml",
+        )
 
         self.assertIn("import QtQuick.Dialogs", qml)
         self.assertIn("id: openProjectDialog", qml)
@@ -1950,28 +2008,36 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("statusError", qml)
 
     def test_qml_exposes_job_progress_controls(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/TransformBar.qml",
+            "UI/components/TrackRow.qml",
+        )
 
         self.assertIn("jobProgress", qml)
         self.assertIn("activeJobId", qml)
         self.assertIn("ProgressBar", qml)
         self.assertIn("appController.cancel_selected_job()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
-        self.assertIn("enabled: appController.selectedTrackHasRunningJob", qml)
+        self.assertIn("enabled: root.appController.selectedTrackHasRunningJob", qml)
         self.assertIn(
-            "enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob",
+            "enabled: root.appController.selectedTrackCanRerun && !root.appController.selectedTrackHasRunningJob",
             qml,
         )
 
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text(
+            "UI/Main.qml",
+            "UI/components/TransformBar.qml",
+            "UI/components/TrackRow.qml",
+        )
 
         self.assertIn("appController.refresh_cache_status()", qml)
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
         self.assertIn('resultState === "stale"', qml)
         self.assertIn('resultState === "failed"', qml)
-        self.assertIn("text: error", qml)
-        self.assertIn("visible: error.length > 0", qml)
+        self.assertIn("text: root.error", qml)
+        self.assertIn("visible: root.error.length > 0", qml)
 
     @staticmethod
     def _track_role_values(controller: AppController, row: int):

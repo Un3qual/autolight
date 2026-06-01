@@ -960,7 +960,13 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(summaries[1]["colorKey"], "cyan")
 
     def test_qml_exposes_editable_marker_inspector(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        ui_root = Path(__file__).resolve().parents[1] / "UI"
+        qml = "\n".join(
+            [
+                (ui_root / "Main.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "MarkerInspector.qml").read_text(encoding="utf-8"),
+            ]
+        )
 
         self.assertIn("id: inspectorPanel", qml)
         self.assertIn("markerTimestampField", qml)
@@ -968,19 +974,25 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("appController.selectedTrackMarkers", qml)
         self.assertIn("inspectorPanel.selectedMarkerId", qml)
         self.assertIn("appController.add_marker_to_selected_track", qml)
-        self.assertIn("appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)", qml)
+        self.assertIn("appController.delete_marker_from_selected_track(markerId)", qml)
         self.assertIn("appController.selectedTrackIsEditable", qml)
         self.assertIn(
-            "enabled: appController.selectedTrackId.length > 0 && appController.selectedTrackIsEditable",
+            "enabled: inspectorPanel.appController.selectedTrackId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable",
             qml,
         )
         self.assertIn(
-            "enabled: inspectorPanel.selectedMarkerId.length > 0 && appController.selectedTrackIsEditable",
+            "enabled: inspectorPanel.selectedMarkerId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable",
             qml,
         )
 
     def test_qml_exposes_marker_label_color_and_bulk_edit_controls(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        ui_root = Path(__file__).resolve().parents[1] / "UI"
+        qml = "\n".join(
+            [
+                (ui_root / "Main.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "MarkerInspector.qml").read_text(encoding="utf-8"),
+            ]
+        )
 
         self.assertIn("id: markerColorPicker", qml)
         self.assertIn("id: markerCategoryField", qml)
@@ -991,7 +1003,7 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("modelData.selected", qml)
         self.assertIn("selectedMarkerIds.length", qml)
         self.assertIn("function syncMarkerEditorFromSelection()", qml)
-        self.assertIn("root.syncMarkerEditorFromSelection()", qml)
+        self.assertIn("markerInspector.syncMarkerEditorFromSelection()", qml)
         self.assertIn("No track selected", qml)
         self.assertNotIn("root.syncMarkerEditor(modelData)", qml)
 

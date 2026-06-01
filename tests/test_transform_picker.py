@@ -357,11 +357,17 @@ class TransformPickerTest(unittest.TestCase):
         self.assertIn("source audio track", controller.lastError)
 
     def test_qml_uses_transform_model_and_generic_add_action(self):
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
-        self.assertIn("model: appController.transformModel", qml)
+        ui_root = Path(__file__).resolve().parents[1] / "UI"
+        qml = "\n".join(
+            [
+                (ui_root / "Main.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "TransformBar.qml").read_text(encoding="utf-8"),
+            ]
+        )
+        self.assertIn("model: root.appController.transformModel", qml)
         self.assertIn("textRole: \"name\"", qml)
         self.assertIn("appController.add_transform_track(", qml)
-        self.assertIn("appController.transformModel.version_at(transformPicker.currentIndex)", qml)
+        self.assertIn("root.appController.transformModel.version_at(transformPicker.currentIndex)", qml)
         self.assertIn("transformParamsField.text", qml)
 
     def _track_by_id(self, controller, track_id: str):
