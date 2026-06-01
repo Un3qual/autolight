@@ -698,6 +698,7 @@ class AppController(QObject):
             return
         if track.result_state != ResultState.COMPLETE:
             track.provenance.pop("waveform_samples", None)
+            track.provenance.pop("waveform_duration_seconds", None)
             return
         entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
         for cache_ref in track.cache_refs:
@@ -709,14 +710,18 @@ class AppController(QObject):
                 payload = json.loads(artifact_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, TypeError):
                 track.provenance.pop("waveform_samples", None)
+                track.provenance.pop("waveform_duration_seconds", None)
                 return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
                 track.provenance["waveform_samples"] = samples
+                track.provenance["waveform_duration_seconds"] = payload.get("duration", 0.0)
             else:
                 track.provenance.pop("waveform_samples", None)
+                track.provenance.pop("waveform_duration_seconds", None)
             return
         track.provenance.pop("waveform_samples", None)
+        track.provenance.pop("waveform_duration_seconds", None)
 
     def _load_all_waveform_samples(self) -> None:
         for track in list(self._project.tracks):

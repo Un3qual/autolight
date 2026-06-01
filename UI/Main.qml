@@ -14,6 +14,7 @@ Window {
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
+    readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
 
     function timelineX(seconds) {
         return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
@@ -312,9 +313,10 @@ Window {
                 Repeater {
                     model: Math.ceil(appController.timelineVisibleSeconds) + 1
                     Text {
-                        x: root.timelineX(appController.timelineScrollSeconds + index)
+                        property real tickSecond: Math.ceil(appController.timelineScrollSeconds) + index
+                        x: root.timelineX(tickSecond)
                         y: 9
-                        text: Math.floor(appController.timelineScrollSeconds + index) + "s"
+                        text: tickSecond + "s"
                         color: "#a1a1aa"
                         font.pixelSize: 12
                     }
@@ -462,7 +464,7 @@ Window {
                             Rectangle {
                                 width: 2
                                 height: Math.max(2, modelData.peak * (parent.height - 18))
-                                x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)
+                                x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)
                                 y: (parent.height - height) / 2
                                 visible: x >= root.timelineLeftPadding - width && x <= parent.width
                                 color: "#60a5fa"
@@ -610,10 +612,10 @@ Window {
                 anchors.left: parent.left
                 anchors.leftMargin: 12
                 width: parent.width - 24
-                text: appController.lastError.length > 0
-                    ? appController.lastError
+                text: root.statusError.length > 0
+                    ? root.statusError
                     : (appController.projectPath.length > 0 ? appController.projectPath : "Unsaved project")
-                color: appController.lastError.length > 0 ? "#f87171" : "#a1a1aa"
+                color: root.statusError.length > 0 ? "#f87171" : "#a1a1aa"
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }

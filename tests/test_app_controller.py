@@ -334,6 +334,14 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("property real timelineVisibleSeconds: 8.0", qml)
         self.assertNotIn("root.timelineVisibleSeconds", qml)
 
+    def test_qml_ruler_ticks_use_whole_second_boundaries_after_fractional_pan(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property real tickSecond: Math.ceil(appController.timelineScrollSeconds) + index", qml)
+        self.assertIn("x: root.timelineX(tickSecond)", qml)
+        self.assertIn("text: tickSecond + \"s\"", qml)
+        self.assertNotIn("Math.floor(appController.timelineScrollSeconds + index)", qml)
+
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
 
@@ -1108,6 +1116,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.create_editable_track_from_track(appController.selectedTrackId)", qml)
         self.assertIn("appController.select_track(trackId)", qml)
         self.assertIn("appController.lastError", qml)
+        self.assertIn("appController.playback.lastError", qml)
+        self.assertIn("statusError", qml)
 
     def test_qml_exposes_job_progress_controls(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")

@@ -184,11 +184,14 @@ class WaveformSummaryTest(unittest.TestCase):
 
         model = controller.trackModel
         waveform_role = model.role_for_name("waveformSamples")
+        waveform_duration_role = model.role_for_name("waveformDurationSeconds")
         row = self._track_row(controller, track.id)
         samples = model.data(model.index(row, 0), waveform_role)
+        duration = model.data(model.index(row, 0), waveform_duration_role)
 
         self.assertEqual(len(samples), 4)
         self.assertIn("peak", samples[0])
+        self.assertAlmostEqual(duration, 1.0)
 
     def test_controller_restores_waveform_samples_after_open_project(self):
         from autolight.app_controller import AppController
@@ -218,6 +221,7 @@ class WaveformSummaryTest(unittest.TestCase):
             controller._job_queue.wait(job_id, timeout=5)
             QCoreApplication.processEvents()
             track.provenance.pop("waveform_samples", None)
+            track.provenance.pop("waveform_duration_seconds", None)
             self.assertTrue(controller.save_project(str(project_path)))
 
             self.assertTrue(controller.open_project(str(project_path)))
@@ -225,7 +229,12 @@ class WaveformSummaryTest(unittest.TestCase):
 
         model = controller.trackModel
         samples = model.data(model.index(self._track_row(controller, track.id), 0), model.role_for_name("waveformSamples"))
+        duration = model.data(
+            model.index(self._track_row(controller, track.id), 0),
+            model.role_for_name("waveformDurationSeconds"),
+        )
         self.assertEqual(len(samples), 4)
+        self.assertAlmostEqual(duration, 1.0)
 
     def test_controller_clears_waveform_samples_when_artifact_cannot_be_loaded(self):
         from autolight.app_controller import AppController
@@ -267,14 +276,20 @@ class WaveformSummaryTest(unittest.TestCase):
         controller._load_waveform_samples(track.id)
 
         self.assertNotIn("waveform_samples", track.provenance)
+        self.assertNotIn("waveform_duration_seconds", track.provenance)
 
     def test_qml_mentions_waveform_samples_role(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
         self.assertIn("waveformSamples", qml)
+        self.assertIn("waveformDurationSeconds", qml)
         self.assertIn("modelData.peak", qml)
         self.assertIn("clip: true", qml)
         self.assertIn("root.timelineLeftPadding", qml)
         self.assertIn(
+            "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)",
+            qml,
+        )
+        self.assertNotIn(
             "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)",
             qml,
         )
