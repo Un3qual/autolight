@@ -133,6 +133,102 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(visible[0]["time"], 0.0)
         self.assertEqual(model.data(index, model.role_for_name("waveformLevelBucketCount")), 8)
 
+    def test_visible_waveform_roles_hide_incomplete_or_invalid_cache_results(self):
+        cases = [
+            (ResultState.STALE, "valid", ["cache_1"]),
+            (ResultState.PENDING, "valid", ["cache_1"]),
+            (ResultState.COMPLETE, "invalid", ["cache_1"]),
+            (ResultState.COMPLETE, "valid", []),
+        ]
+
+        for result_state, validation_status, cache_refs in cases:
+            with self.subTest(
+                result_state=result_state,
+                validation_status=validation_status,
+                cache_refs=cache_refs,
+            ):
+                project = new_project("Demo")
+                waveform = Track(
+                    id="track_wave",
+                    type=TrackType.GENERATED,
+                    name="Waveform",
+                    transform_id="waveform.summary",
+                    result_state=result_state,
+                    cache_refs=list(cache_refs),
+                    provenance={
+                        "visible_waveform": {
+                            "duration": 2.0,
+                            "level_bucket_count": 8,
+                            "samples": [{"time": 0.0, "peak": 0.2, "rms": 0.1}],
+                        }
+                    },
+                )
+                project.tracks.append(waveform)
+                project.cache_entries.append(
+                    CacheEntry(
+                        id="cache_1",
+                        dependency_hash="dep",
+                        artifact_kind="waveform",
+                        path="waveform.json",
+                        created_at="",
+                        transform_version="1",
+                        validation_status=validation_status,
+                    )
+                )
+                model = TimelineTrackModel()
+                model.set_project(project)
+
+                index = model.index(0, 0)
+                self.assertEqual(
+                    model.data(index, model.role_for_name("visibleWaveformSamples")),
+                    [],
+                )
+                self.assertEqual(
+                    model.data(index, model.role_for_name("waveformLevelBucketCount")),
+                    0,
+                )
+
+    def test_visible_waveform_samples_returns_copies(self):
+        project = new_project("Demo")
+        waveform = Track(
+            id="track_wave",
+            type=TrackType.GENERATED,
+            name="Waveform",
+            transform_id="waveform.summary",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_1"],
+            provenance={
+                "visible_waveform": {
+                    "duration": 2.0,
+                    "level_bucket_count": 8,
+                    "samples": [{"time": 0.0, "peak": 0.2, "rms": 0.1}],
+                }
+            },
+        )
+        project.tracks.append(waveform)
+        project.cache_entries.append(
+            CacheEntry(
+                id="cache_1",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform.json",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        visible = model.data(model.index(0, 0), model.role_for_name("visibleWaveformSamples"))
+        visible[0]["peak"] = 0.99
+        visible.append({"time": 1.0, "peak": 1.0, "rms": 1.0})
+
+        provenance_samples = waveform.provenance["visible_waveform"]["samples"]
+        self.assertEqual(
+            provenance_samples,
+            [{"time": 0.0, "peak": 0.2, "rms": 0.1}],
+        )
+
     def test_waveform_level_bucket_count_returns_zero_for_malformed_values(self):
         malformed_values = [float("inf"), math.nan, {"bad": "type"}]
         malformed_visibles = [{"level_bucket_count": value} for value in malformed_values]
@@ -148,7 +244,18 @@ class TimelineTrackModelTest(unittest.TestCase):
                         name="Waveform",
                         transform_id="waveform.summary",
                         result_state=ResultState.COMPLETE,
+                        cache_refs=["cache_1"],
                         provenance={"visible_waveform": visible},
+                    )
+                )
+                project.cache_entries.append(
+                    CacheEntry(
+                        id="cache_1",
+                        dependency_hash="dep",
+                        artifact_kind="waveform",
+                        path="waveform.json",
+                        created_at="",
+                        transform_version="1",
                     )
                 )
                 model = TimelineTrackModel()

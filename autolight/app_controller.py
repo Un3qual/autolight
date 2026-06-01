@@ -860,11 +860,19 @@ class AppController(QObject):
         if self._timeline_visible_seconds != next_visible_seconds:
             self._timeline_visible_seconds = next_visible_seconds
             self.timelineVisibleSecondsChanged.emit()
-        self.set_timeline_scroll_seconds(next_scroll)
+        self._set_timeline_scroll_seconds(next_scroll, refresh_visible_waveforms=False)
         self._refresh_visible_waveforms()
 
     @Slot(float)
     def set_timeline_scroll_seconds(self, seconds: float) -> None:
+        self._set_timeline_scroll_seconds(seconds)
+
+    def _set_timeline_scroll_seconds(
+        self,
+        seconds: float,
+        *,
+        refresh_visible_waveforms: bool = True,
+    ) -> None:
         value = float(seconds)
         if not math.isfinite(value):
             return
@@ -877,7 +885,8 @@ class AppController(QObject):
             return
         self._timeline_scroll_seconds = clamped
         self.timelineScrollSecondsChanged.emit()
-        self._refresh_visible_waveforms()
+        if refresh_visible_waveforms:
+            self._refresh_visible_waveforms()
 
     @Slot(float)
     def set_timeline_visible_seconds(self, seconds: float) -> None:
@@ -889,7 +898,10 @@ class AppController(QObject):
             return
         self._timeline_visible_seconds = clamped
         self.timelineVisibleSecondsChanged.emit()
-        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+        self._set_timeline_scroll_seconds(
+            self._timeline_scroll_seconds,
+            refresh_visible_waveforms=False,
+        )
         self._refresh_visible_waveforms()
 
     @Slot()
@@ -1173,6 +1185,13 @@ class AppController(QObject):
         for track in self._project.tracks:
             if track.transform_id != "waveform.summary":
                 continue
+            if (
+                track.result_state != ResultState.COMPLETE
+                or not self._has_valid_waveform_cache(track)
+            ):
+                if track.provenance.pop("visible_waveform", None) is not None:
+                    self.trackModel.refresh_track(track.id)
+                continue
             payload = track.provenance.get("waveform_payload")
             if not isinstance(payload, dict):
                 if track.provenance.pop("visible_waveform", None) is not None:
@@ -1185,6 +1204,15 @@ class AppController(QObject):
                 pixels_per_second=self._timeline_pixels_per_second,
             )
             self.trackModel.refresh_track(track.id)
+
+    def _has_valid_waveform_cache(self, track) -> bool:
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        return any(
+            (entry := entries.get(cache_ref)) is not None
+            and entry.artifact_kind == "waveform"
+            and entry.validation_status == "valid"
+            for cache_ref in track.cache_refs
+        )
 
     def _load_waveform_samples(self, track_id: str) -> None:
         track = find_track(self._project, track_id)

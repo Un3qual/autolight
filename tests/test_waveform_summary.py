@@ -375,6 +375,154 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertEqual(detail["level_bucket_count"], 256)
         self.assertGreater(scrolled["samples"][0]["time"], detail["samples"][0]["time"])
 
+    def test_controller_refresh_clears_visible_waveform_for_incomplete_or_invalid_cache(self):
+        from autolight.app_controller import AppController
+        from autolight.project.models import CacheEntry, ResultState
+        from autolight.project.store import add_generated_track, import_audio_asset
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source = import_audio_asset(controller._project, audio_path)
+            stale_track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Stale Waveform",
+                transform_id="waveform.summary",
+                transform_params={"buckets": 8},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-stale",
+            )
+            invalid_cache_track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Invalid Cache Waveform",
+                transform_id="waveform.summary",
+                transform_params={"buckets": 8},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-invalid",
+            )
+
+        stale_track.result_state = ResultState.STALE
+        stale_track.cache_refs = ["cache_stale"]
+        invalid_cache_track.result_state = ResultState.COMPLETE
+        invalid_cache_track.cache_refs = ["cache_invalid"]
+        payload = {
+            "version": 2,
+            "duration": 8.0,
+            "levels": [
+                {"bucket_count": 8, "samples": [{"peak": 0.1, "rms": 0.05}] * 8}
+            ],
+        }
+        for track in (stale_track, invalid_cache_track):
+            track.provenance["waveform_payload"] = payload
+            track.provenance["visible_waveform"] = {
+                "duration": 8.0,
+                "level_bucket_count": 8,
+                "samples": [{"time": 0.0, "peak": 0.1, "rms": 0.05}],
+            }
+        controller._project.cache_entries.extend(
+            [
+                CacheEntry(
+                    id="cache_stale",
+                    dependency_hash="dep",
+                    artifact_kind="waveform",
+                    path="waveform/cache_stale.bin",
+                    created_at="",
+                    transform_version="1",
+                ),
+                CacheEntry(
+                    id="cache_invalid",
+                    dependency_hash="dep",
+                    artifact_kind="waveform",
+                    path="waveform/cache_invalid.bin",
+                    created_at="",
+                    transform_version="1",
+                    validation_status="invalid",
+                ),
+            ]
+        )
+        controller.trackModel.set_project(controller._project)
+        emissions = []
+        controller.trackModel.dataChanged.connect(
+            lambda top_left, _bottom_right, _roles: emissions.append(top_left.row())
+        )
+
+        controller._refresh_visible_waveforms()
+
+        self.assertNotIn("visible_waveform", stale_track.provenance)
+        self.assertNotIn("visible_waveform", invalid_cache_track.provenance)
+        self.assertEqual(
+            sorted(emissions),
+            sorted(
+                [
+                    self._track_row(controller, stale_track.id),
+                    self._track_row(controller, invalid_cache_track.id),
+                ]
+            ),
+        )
+
+    def test_controller_zoom_refreshes_visible_waveform_once_when_scroll_changes(self):
+        from autolight.app_controller import AppController
+        from autolight.project.models import CacheEntry, ResultState
+        from autolight.project.store import add_generated_track, import_audio_asset
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source = import_audio_asset(controller._project, audio_path)
+            controller._project.audio_assets[0].duration = 100.0
+            track = add_generated_track(
+                controller._project,
+                parent_track_id=source.id,
+                name="Waveform",
+                transform_id="waveform.summary",
+                transform_params={"buckets": 8},
+                transform_version="1",
+                output_schema="artifact.waveform.v1",
+                dependency_hash="waveform-test",
+            )
+
+        track.result_state = ResultState.COMPLETE
+        track.cache_refs = ["cache_waveform"]
+        track.provenance["waveform_payload"] = {
+            "version": 2,
+            "duration": 100.0,
+            "levels": [
+                {"bucket_count": 100, "samples": [{"peak": 0.2, "rms": 0.10}] * 100}
+            ],
+        }
+        controller._project.cache_entries.append(
+            CacheEntry(
+                id="cache_waveform",
+                dependency_hash="dep",
+                artifact_kind="waveform",
+                path="waveform/cache_waveform.bin",
+                created_at="",
+                transform_version="1",
+            )
+        )
+        controller.trackModel.set_project(controller._project)
+        controller.set_timeline_visible_seconds(10.0)
+        controller.set_timeline_scroll_seconds(60.0)
+        row = self._track_row(controller, track.id)
+        emissions = []
+        controller.trackModel.dataChanged.connect(
+            lambda top_left, _bottom_right, _roles: emissions.append(top_left.row())
+        )
+
+        controller.set_timeline_zoom(200.0)
+
+        self.assertEqual([item for item in emissions if item == row], [row])
+
     def test_controller_restores_waveform_samples_after_open_project(self):
         from autolight.app_controller import AppController
         from autolight.project.store import add_generated_track, import_audio_asset

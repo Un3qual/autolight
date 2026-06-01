@@ -159,17 +159,13 @@ class TimelineTrackModel(QAbstractListModel):
         ]
 
     def _waveform_samples_for_track(self, track: Track) -> list:
-        if self._project is None or track.result_state != ResultState.COMPLETE:
-            return []
-        if not self._has_valid_waveform_cache(track.cache_refs):
+        if not self._has_complete_valid_waveform(track):
             return []
         samples = track.provenance.get("waveform_samples", [])
         return samples if isinstance(samples, list) else []
 
     def _waveform_duration_seconds_for_track(self, track: Track) -> float:
-        if self._project is None or track.result_state != ResultState.COMPLETE:
-            return 0.0
-        if not self._has_valid_waveform_cache(track.cache_refs):
+        if not self._has_complete_valid_waveform(track):
             return 0.0
         try:
             duration = float(track.provenance.get("waveform_duration_seconds", 0.0))
@@ -178,15 +174,17 @@ class TimelineTrackModel(QAbstractListModel):
         return duration if math.isfinite(duration) and duration >= 0.0 else 0.0
 
     def _visible_waveform_samples_for_track(self, track: Track) -> list:
-        visible = track.provenance.get("visible_waveform", {})
-        if not isinstance(visible, dict):
+        visible = self._visible_waveform_for_track(track)
+        if visible is None:
             return []
         samples = visible.get("samples", [])
-        return samples if isinstance(samples, list) else []
+        if not isinstance(samples, list):
+            return []
+        return [dict(sample) for sample in samples if isinstance(sample, dict)]
 
     def _waveform_level_bucket_count_for_track(self, track: Track) -> int:
-        visible = track.provenance.get("visible_waveform", {})
-        if not isinstance(visible, dict):
+        visible = self._visible_waveform_for_track(track)
+        if visible is None:
             return 0
         try:
             bucket_count = float(visible.get("level_bucket_count", 0))
@@ -195,6 +193,19 @@ class TimelineTrackModel(QAbstractListModel):
         if not math.isfinite(bucket_count) or bucket_count < 0:
             return 0
         return int(bucket_count)
+
+    def _visible_waveform_for_track(self, track: Track) -> dict | None:
+        if not self._has_complete_valid_waveform(track):
+            return None
+        visible = track.provenance.get("visible_waveform", {})
+        return visible if isinstance(visible, dict) else None
+
+    def _has_complete_valid_waveform(self, track: Track) -> bool:
+        return (
+            self._project is not None
+            and track.result_state == ResultState.COMPLETE
+            and self._has_valid_waveform_cache(track.cache_refs)
+        )
 
     def _has_valid_waveform_cache(self, cache_refs: list[str]) -> bool:
         if self._project is None:
