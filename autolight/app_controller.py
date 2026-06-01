@@ -15,17 +15,22 @@ from autolight.jobs.queue import LocalJobQueue
 from autolight.playback import PlaybackTransport
 from autolight.project.models import AudioAsset, Marker, ResultState, TrackType
 from autolight.project.store import (
+    DEFAULT_MARKER_COLOR,
+    MARKER_COLOR_PALETTE,
     ProjectStore,
     add_editable_marker,
     add_generated_track,
+    bulk_update_editable_markers,
     create_editable_track_from_markers,
     delete_editable_marker,
     find_track,
     import_audio_asset,
+    marker_display_color,
     new_project,
     refresh_audio_asset_status,
     refresh_audio_track_status,
     track_dependency_inputs,
+    update_editable_marker,
 )
 from autolight.timeline.model import TimelineTrackModel
 from autolight.timeline.transform_model import TransformSpecModel
@@ -37,6 +42,7 @@ class AppController(QObject):
     lastErrorChanged = Signal()
     selectedTrackIdChanged = Signal()
     selectedTrackMarkersChanged = Signal()
+    selectedMarkerIdsChanged = Signal()
     selectedTrackHasRunningJobChanged = Signal()
     selectedTrackCanRerunChanged = Signal()
     selectedTrackCanPlayChanged = Signal()
@@ -53,6 +59,7 @@ class AppController(QObject):
         self._project_path = ""
         self._last_error = ""
         self._selected_track_id = ""
+        self._selected_marker_ids: list[str] = []
         self._is_dirty = False
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
@@ -129,6 +136,10 @@ class AppController(QObject):
     @Property(list, notify=selectedTrackMarkersChanged)
     def selectedTrackMarkers(self) -> list[dict]:
         return self._marker_summary_for_track(self._selected_track_id)
+
+    @Property(list, notify=selectedMarkerIdsChanged)
+    def selectedMarkerIds(self) -> list[str]:
+        return list(self._selected_marker_ids)
 
     @Property(bool, notify=selectedTrackCanRerunChanged)
     def selectedTrackCanRerun(self) -> bool:
@@ -423,6 +434,11 @@ class AppController(QObject):
         try:
             deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
             self._track_model.set_project(self._project)
+            if deleted and marker_id in self._selected_marker_ids:
+                self._set_selected_marker_ids(
+                    [selected_id for selected_id in self._selected_marker_ids if selected_id != marker_id],
+                    emit_marker_summary=False,
+                )
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             if deleted:
@@ -432,6 +448,79 @@ class AppController(QObject):
         except Exception as exc:
             self._set_last_error(str(exc))
             return False
+
+    @Slot(str, bool)
+    def toggle_marker_selection(self, marker_id: str, additive: bool) -> None:
+        marker_ids = {marker["id"] for marker in self._marker_summary_for_track(self._selected_track_id)}
+        if marker_id not in marker_ids:
+            self._set_last_error(f"marker not found: {marker_id}")
+            return
+        if additive:
+            selected = list(self._selected_marker_ids)
+            if marker_id in selected:
+                selected.remove(marker_id)
+            else:
+                selected.append(marker_id)
+            self._set_selected_marker_ids(selected)
+        else:
+            self._set_selected_marker_ids([marker_id])
+        self._set_last_error("")
+
+    @Slot()
+    def clear_marker_selection(self) -> None:
+        self._set_selected_marker_ids([])
+
+    @Slot(float, str, str, str, result=bool)
+    def update_selected_marker(self, timestamp: float, label: str, category: str, color: str) -> bool:
+        try:
+            if len(self._selected_marker_ids) != 1:
+                raise ValueError("select one marker to update")
+            marker = self._editable_marker_for_selected_marker_id(self._selected_marker_ids[0])
+            before = self._marker_update_snapshot(marker)
+            update_editable_marker(
+                self._project,
+                self._selected_track_id,
+                self._selected_marker_ids[0],
+                timestamp=timestamp,
+                label=label,
+                category=category,
+                color=color,
+            )
+            changed = before != self._marker_update_snapshot(marker)
+            if changed:
+                self._track_model.set_project(self._project)
+                self.selectedTrackMarkersChanged.emit()
+                self._notify_timeline_duration_changed()
+            self._set_last_error("")
+            if changed:
+                self._set_dirty(True)
+            return True
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return False
+
+    @Slot(str, str, str, result=int)
+    def bulk_update_selected_markers(self, label: str, category: str, color: str) -> int:
+        try:
+            updated = bulk_update_editable_markers(
+                self._project,
+                self._selected_track_id,
+                self._selected_marker_ids,
+                label=label,
+                category=category,
+                color=color,
+            )
+            if not updated:
+                self._set_last_error("")
+                return 0
+            self._track_model.set_project(self._project)
+            self.selectedTrackMarkersChanged.emit()
+            self._set_last_error("")
+            self._set_dirty(True)
+            return updated
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return 0
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
@@ -587,11 +676,20 @@ class AppController(QObject):
         if self._selected_track_id == track_id:
             return
         self._selected_track_id = track_id
+        self._set_selected_marker_ids([], emit_marker_summary=False)
         self.selectedTrackIdChanged.emit()
         self.selectedTrackMarkersChanged.emit()
         self.selectedTrackHasRunningJobChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
         self.selectedTrackCanPlayChanged.emit()
+
+    def _set_selected_marker_ids(self, marker_ids: list[str], *, emit_marker_summary: bool = True) -> None:
+        if self._selected_marker_ids == marker_ids:
+            return
+        self._selected_marker_ids = list(marker_ids)
+        self.selectedMarkerIdsChanged.emit()
+        if emit_marker_summary:
+            self.selectedTrackMarkersChanged.emit()
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -727,18 +825,39 @@ class AppController(QObject):
                 self._load_waveform_samples(track.id)
 
     def _marker_summary_for_track(self, track_id: str) -> list[dict]:
+        selected_ids = set(self._selected_marker_ids)
         return [
             {
                 "id": marker.id,
                 "timestamp": marker.timestamp,
                 "label": marker.label,
                 "category": marker.category,
+                "color": marker_display_color(marker),
+                "colorKey": self._marker_color_key(marker),
+                "selected": marker.id in selected_ids,
             }
             for marker in sorted(
                 (marker for marker in self._project.markers if marker.track_id == track_id),
                 key=lambda marker: (marker.timestamp, marker.id),
             )
         ]
+
+    def _editable_marker_for_selected_marker_id(self, marker_id: str) -> Marker:
+        for marker in self._project.markers:
+            if marker.track_id == self._selected_track_id and marker.id == marker_id:
+                return marker
+        raise ValueError(f"marker not found on track {self._selected_track_id}: {marker_id}")
+
+    @staticmethod
+    def _marker_update_snapshot(marker: Marker) -> tuple[float, str, str, object]:
+        return (marker.timestamp, marker.label, marker.category, marker.metadata.get("color"))
+
+    @staticmethod
+    def _marker_color_key(marker: Marker) -> str:
+        color = marker.metadata.get("color", "")
+        if isinstance(color, str) and color in MARKER_COLOR_PALETTE:
+            return color
+        return DEFAULT_MARKER_COLOR
 
     def _refresh_dependency_hash(self, track) -> None:
         if not track.transform_id or not track.input_track_ids:

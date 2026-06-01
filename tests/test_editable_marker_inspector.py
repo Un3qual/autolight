@@ -296,6 +296,205 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
         self.assertEqual(controller.lastError, "")
 
+    def test_controller_tracks_selected_marker_ids(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        first_marker_id = controller.selectedTrackMarkers[0]["id"]
+        second_marker_id = controller.selectedTrackMarkers[1]["id"]
+
+        controller.toggle_marker_selection(first_marker_id, False)
+        controller.toggle_marker_selection(second_marker_id, True)
+
+        self.assertEqual(controller.selectedMarkerIds, [first_marker_id, second_marker_id])
+        first_marker = controller.selectedTrackMarkers[0]
+        second_marker = controller.selectedTrackMarkers[1]
+        self.assertEqual(
+            set(first_marker),
+            {"id", "timestamp", "label", "category", "color", "colorKey", "selected"},
+        )
+        self.assertEqual(first_marker["color"], MARKER_COLOR_PALETTE["cyan"])
+        self.assertEqual(first_marker["colorKey"], "cyan")
+        self.assertTrue(first_marker["selected"])
+        self.assertTrue(second_marker["selected"])
+
+    def test_controller_clears_marker_selection_when_selected_track_changes(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        generated_id = self._track_id_for_type(controller, "generated")
+        controller.select_track(editable_id)
+        marker_id = controller.selectedTrackMarkers[0]["id"]
+        controller.toggle_marker_selection(marker_id, False)
+
+        controller.select_track(generated_id)
+
+        self.assertEqual(controller.selectedMarkerIds, [])
+        self.assertFalse(any(marker["selected"] for marker in controller.selectedTrackMarkers))
+
+    def test_controller_track_change_with_selected_marker_emits_marker_summary_once(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        generated_id = self._track_id_for_type(controller, "generated")
+        controller.select_track(editable_id)
+        marker_id = controller.selectedTrackMarkers[0]["id"]
+        controller.toggle_marker_selection(marker_id, False)
+        marker_changes = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+
+        controller.select_track(generated_id)
+
+        self.assertEqual(len(marker_changes), 1)
+        self.assertEqual(controller.selectedMarkerIds, [])
+        self.assertFalse(any(marker["selected"] for marker in controller.selectedTrackMarkers))
+
+    def test_controller_update_selected_marker_changes_marker_fields(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = controller.selectedTrackMarkers[0]["id"]
+        controller.toggle_marker_selection(marker_id, False)
+
+        self.assertTrue(controller.update_selected_marker(1.75, "Blackout", "lighting", "amber"))
+
+        marker = next(item for item in controller._project.markers if item.id == marker_id)
+        self.assertEqual(marker.timestamp, 1.75)
+        self.assertEqual(marker.label, "Blackout")
+        self.assertEqual(marker.category, "lighting")
+        self.assertEqual(marker.metadata["color"], "amber")
+        self.assertEqual(controller.selectedMarkerIds, [marker_id])
+        self.assertEqual(controller.timelineDurationSeconds, 1.75)
+        self.assertEqual(controller.lastError, "")
+        self.assertTrue(controller.isDirty)
+
+    def test_controller_noop_update_selected_marker_does_not_dirty_or_refresh(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(1.5, "Blackout")
+        controller.toggle_marker_selection(marker_id, False)
+        controller._set_dirty(False)
+        marker_changes = []
+        duration_changes = []
+        model_resets = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+        controller.timelineDurationSecondsChanged.connect(lambda: duration_changes.append(controller.timelineDurationSeconds))
+        controller.trackModel.modelReset.connect(lambda: model_resets.append(True))
+
+        self.assertTrue(controller.update_selected_marker(1.5, "Blackout", "cue", "cyan"))
+
+        self.assertFalse(controller.isDirty)
+        self.assertEqual(controller.lastError, "")
+        self.assertEqual(marker_changes, [])
+        self.assertEqual(duration_changes, [])
+        self.assertEqual(model_resets, [])
+
+    def test_controller_bulk_update_selected_markers_updates_selected_or_all(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        first_marker_id = controller.selectedTrackMarkers[0]["id"]
+        second_marker_id = controller.selectedTrackMarkers[1]["id"]
+        controller.toggle_marker_selection(first_marker_id, False)
+
+        self.assertEqual(controller.bulk_update_selected_markers("Scene", "scene", "violet"), 1)
+        first = next(item for item in controller._project.markers if item.id == first_marker_id)
+        second = next(item for item in controller._project.markers if item.id == second_marker_id)
+        self.assertEqual(first.label, "Scene")
+        self.assertNotEqual(second.label, "Scene")
+        self.assertEqual(controller.lastError, "")
+        self.assertTrue(controller.isDirty)
+
+        controller.clear_marker_selection()
+        self.assertEqual(controller.bulk_update_selected_markers("All", "scene", "blue"), 2)
+        self.assertEqual([item["label"] for item in controller.selectedTrackMarkers], ["All", "All"])
+        self.assertEqual([item["colorKey"] for item in controller.selectedTrackMarkers], ["blue", "blue"])
+
+    def test_controller_noop_bulk_update_selected_markers_does_not_dirty_or_refresh(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        first_marker_id = controller.selectedTrackMarkers[0]["id"]
+        controller.toggle_marker_selection(first_marker_id, False)
+        self.assertEqual(controller.bulk_update_selected_markers("Scene", "scene", "violet"), 1)
+        controller._set_dirty(False)
+        marker_changes = []
+        model_resets = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+        controller.trackModel.modelReset.connect(lambda: model_resets.append(True))
+
+        self.assertEqual(controller.bulk_update_selected_markers("Scene", "scene", "violet"), 0)
+
+        self.assertFalse(controller.isDirty)
+        self.assertEqual(controller.lastError, "")
+        self.assertEqual(marker_changes, [])
+        self.assertEqual(model_resets, [])
+
+    def test_controller_delete_selected_marker_emits_marker_summary_once(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(1.5, "Blackout")
+        controller.toggle_marker_selection(marker_id, False)
+        marker_changes = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+
+        self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
+
+        self.assertEqual(len(marker_changes), 1)
+        self.assertEqual(controller.selectedMarkerIds, [])
+
+    def test_marker_summary_normalizes_invalid_color_key_to_default(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        first_marker_id = controller.selectedTrackMarkers[0]["id"]
+        second_marker_id = controller.selectedTrackMarkers[1]["id"]
+        first = next(item for item in controller._project.markers if item.id == first_marker_id)
+        second = next(item for item in controller._project.markers if item.id == second_marker_id)
+        first.metadata["color"] = "not-a-color"
+        second.metadata["color"] = 42
+
+        summaries = controller.selectedTrackMarkers
+
+        self.assertEqual([item["color"] for item in summaries], [MARKER_COLOR_PALETTE["cyan"]] * 2)
+        self.assertEqual([item["colorKey"] for item in summaries], ["cyan", "cyan"])
+
     def test_qml_exposes_editable_marker_inspector(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
 
