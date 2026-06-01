@@ -12,6 +12,7 @@ from autolight.analysis.registry import (
     TransformResult,
     TransformSpec,
 )
+from autolight.analysis.timing import detect_beat_markers, detect_onset_markers
 
 MAX_FIXED_INTERVAL_MARKERS = 100_000
 
@@ -37,6 +38,28 @@ def register_builtin_transforms(registry: TransformRegistry) -> None:
             output_schema="artifact.stem.v1",
             estimated_cost="heavy",
             run=_vocals_stand_in,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="timing.onsets",
+            version="1",
+            name="Onsets",
+            input_schema="audio.v1",
+            output_schema="markers.v1",
+            estimated_cost="medium",
+            run=_timing_onsets,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="timing.beats",
+            version="1",
+            name="Beats",
+            input_schema="audio.v1",
+            output_schema="markers.v1",
+            estimated_cost="medium",
+            run=_timing_beats,
         )
     )
 
@@ -94,3 +117,21 @@ def _vocals_stand_in(context: TransformContext, params: dict) -> TransformResult
     artifact.write_text(json.dumps({"stem": label, "samples": []}, sort_keys=True), encoding="utf-8")
     context.progress(1.0)
     return TransformResult(artifacts={"stem": str(artifact)}, metadata={"stem": label})
+
+
+def _timing_onsets(context: TransformContext, params: dict) -> TransformResult:
+    context.progress(0.1)
+    markers = detect_onset_markers(Path(str(params["audio_path"])))
+    if context.cancel_requested():
+        raise TransformCancelled("cancelled")
+    context.progress(1.0)
+    return TransformResult(markers=markers)
+
+
+def _timing_beats(context: TransformContext, params: dict) -> TransformResult:
+    context.progress(0.1)
+    markers = detect_beat_markers(Path(str(params["audio_path"])))
+    if context.cancel_requested():
+        raise TransformCancelled("cancelled")
+    context.progress(1.0)
+    return TransformResult(markers=markers)
