@@ -10,7 +10,6 @@ Window {
     visible: true
     title: appController.projectName
     color: "#181a1f"
-    readonly property real timelinePixelsPerSecond: 96
     readonly property real timelineLeftPadding: 24
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
@@ -301,7 +300,7 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: root.timelineLeftPadding
-                    spacing: root.timelinePixelsPerSecond
+                    spacing: appController.timelinePixelsPerSecond
 
                     Repeater {
                         model: 9
@@ -425,7 +424,7 @@ Window {
                         Repeater {
                             model: markerSpans
                             Rectangle {
-                                width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
+                                width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * appController.timelinePixelsPerSecond)
                                 height: parent.height - 18
                                 x: Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))
                                 y: 9
