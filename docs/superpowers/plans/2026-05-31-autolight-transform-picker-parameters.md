@@ -209,7 +209,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Add failing controller generic-transform test**
+- [x] **Step 1: Add failing controller generic-transform test**
 
 Append this test to `TransformPickerTest`:
 
@@ -374,7 +374,7 @@ Append this test to `TransformPickerTest`:
         self.assertIn("source audio track", controller.lastError)
 ```
 
-- [ ] **Step 2: Run generic-transform test and verify failure**
+- [x] **Step 2: Run generic-transform test and verify failure**
 
 Run:
 
@@ -384,7 +384,7 @@ uv run python -m unittest tests.test_transform_picker.TransformPickerTest.test_c
 
 Expected: FAIL because `add_transform_track` is missing.
 
-- [ ] **Step 3: Implement controller generic transform support**
+- [x] **Step 3: Implement controller generic transform support**
 
 Add imports to `autolight/app_controller.py`:
 
@@ -481,7 +481,7 @@ Add this helper near the other private controller helpers:
         return ""
 ```
 
-- [ ] **Step 4: Run transform picker tests**
+- [x] **Step 4: Run transform picker tests**
 
 Run:
 
@@ -491,7 +491,7 @@ uv run python -m unittest tests.test_transform_picker -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit generic transform controller**
+- [x] **Step 5: Commit generic transform controller**
 
 Run:
 

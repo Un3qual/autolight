@@ -62,6 +62,165 @@ class TransformPickerTest(unittest.TestCase):
 
         self.assertEqual(versions, ["1", "2"])
 
+    def test_controller_add_transform_track_accepts_json_params(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+
+        track_id = controller.add_transform_track(
+            source_id,
+            "markers.fixed_interval",
+            "1",
+            '{"duration": 3.0, "interval": 1.0}',
+        )
+
+        self.assertNotEqual(track_id, "")
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertEqual(track.transform_id, "markers.fixed_interval")
+        self.assertEqual(track.transform_version, "1")
+        self.assertEqual(track.transform_params, {"duration": 3.0, "interval": 1.0})
+
+    def test_controller_add_transform_track_defaults_audio_path_for_audio_transform(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+
+        track_id = controller.add_transform_track(source_id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_resolves_audio_path_from_parent_chain(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+        generated_id = controller.add_transform_track(
+            source_id,
+            "markers.fixed_interval",
+            "1",
+            '{"duration": 3.0, "interval": 1.0}',
+        )
+
+        track_id = controller.add_transform_track(generated_id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_searches_all_parent_branches_for_audio(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        source_id = controller.trackModel.data(
+            controller.trackModel.index(0, 0),
+            controller.trackModel.role_for_name("trackId"),
+        )
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        multi_parent = Track(
+            id="track_multi_parent",
+            type=TrackType.EDITABLE,
+            name="Editable Multi Parent",
+            input_track_ids=[no_audio.id, source_id],
+        )
+        controller._project.tracks.extend([no_audio, multi_parent])
+
+        track_id = controller.add_transform_track(multi_parent.id, "test.audio_path", "1", "{}")
+
+        track = next(track for track in controller._project.tracks if track.id == track_id)
+        self.assertIn("audio_path", track.transform_params)
+        self.assertTrue(track.transform_params["audio_path"].endswith(".wav"))
+
+    def test_controller_add_transform_track_rejects_audio_transform_without_source_audio(self):
+        from autolight.app_controller import AppController
+
+        def noop(context, params):
+            return TransformResult()
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller._registry.register(
+            TransformSpec(
+                id="test.audio_path",
+                version="1",
+                name="Audio Path Transform",
+                input_schema="audio.v1",
+                output_schema="markers.v1",
+                estimated_cost="light",
+                run=noop,
+            )
+        )
+        controller.load_demo_project()
+        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        controller._project.tracks.append(no_audio)
+
+        track_id = controller.add_transform_track(no_audio.id, "test.audio_path", "1", "{}")
+
+        self.assertEqual(track_id, "")
+        self.assertIn("source audio track", controller.lastError)
+
 
 if __name__ == "__main__":
     unittest.main()

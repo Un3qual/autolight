@@ -26,6 +26,7 @@ from autolight.project.store import (
     track_dependency_inputs,
 )
 from autolight.timeline.model import TimelineTrackModel
+from autolight.timeline.transform_model import TransformSpecModel
 
 
 class AppController(QObject):
@@ -51,6 +52,7 @@ class AppController(QObject):
         self._track_model.set_project(self._project)
         self._registry = TransformRegistry()
         register_builtin_transforms(self._registry)
+        self._transform_model = TransformSpecModel(self._registry, parent=self)
         self._job_queue = LocalJobQueue(
             self._registry,
             artifact_root=Path(self._runtime_temp_dir.name) / "artifacts",
@@ -60,6 +62,10 @@ class AppController(QObject):
     @Property(QObject, constant=True)
     def trackModel(self):
         return self._track_model
+
+    @Property(QObject, constant=True)
+    def transformModel(self):
+        return self._transform_model
 
     @Property(str, notify=projectNameChanged)
     def projectName(self) -> str:
@@ -286,6 +292,42 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return ""
 
+    @Slot(str, str, str, str, result=str)
+    def add_transform_track(self, parent_track_id: str, transform_id: str, version: str, params_json: str) -> str:
+        try:
+            params = json.loads(params_json or "{}")
+            if not isinstance(params, dict):
+                raise ValueError("transform params must be a JSON object")
+            parent = find_track(self._project, parent_track_id)
+            if parent is None:
+                raise ValueError(f"parent track not found: {parent_track_id}")
+            spec = self._registry.get(transform_id, version=version)
+            params = self._params_with_parent_defaults(parent, spec, params)
+            dependency_hash = track_dependency_hash(
+                track_dependency_inputs(self._project, parent),
+                spec.id,
+                spec.version,
+                params,
+            )
+            track = add_generated_track(
+                self._project,
+                parent_track_id=parent.id,
+                name=spec.name,
+                transform_id=spec.id,
+                transform_params=params,
+                transform_version=spec.version,
+                output_schema=spec.output_schema,
+                dependency_hash=dependency_hash,
+            )
+            self._track_model.set_project(self._project)
+            self._set_selected_track_id(track.id)
+            self._set_last_error("")
+            self._set_dirty(True)
+            return track.id
+        except Exception as exc:
+            self._set_last_error(str(exc))
+            return ""
+
     @Slot(str, result=str)
     def create_editable_track_from_track(self, source_track_id: str) -> str:
         try:
@@ -431,6 +473,37 @@ class AppController(QObject):
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
+
+    def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
+        enriched = dict(params)
+        if spec.input_schema == "audio.v1" and "audio_path" not in enriched:
+            audio_path = self._source_audio_path_for_track(parent)
+            if not audio_path:
+                raise ValueError("audio transform requires a source audio track")
+            enriched["audio_path"] = audio_path
+        return enriched
+
+    def _source_audio_path_for_track(self, track) -> str:
+        seen_track_ids = set()
+        pending = [track]
+        while pending:
+            current = pending.pop(0)
+            if current is None or current.id in seen_track_ids:
+                continue
+            seen_track_ids.add(current.id)
+            asset_id = current.provenance.get("asset_id")
+            asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
+            if asset is not None:
+                return asset.path
+            next_track_ids = list(current.input_track_ids)
+            source_track_id = current.provenance.get("source_track_id", "")
+            if source_track_id:
+                next_track_ids.append(source_track_id)
+            for next_track_id in next_track_ids:
+                candidate = find_track(self._project, next_track_id)
+                if candidate is not None:
+                    pending.append(candidate)
+        return ""
 
     def _load_waveform_samples(self, track_id: str) -> None:
         track = find_track(self._project, track_id)
