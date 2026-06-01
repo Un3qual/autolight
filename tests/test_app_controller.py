@@ -1,6 +1,8 @@
 import importlib
 import json
 import math
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,13 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor, QImage
 
 import main as app_entry
+from autolight.app import (
+    EditHistory,
+    MarkerEditingService,
+    ProjectSession,
+    TimelineViewport,
+    WaveformLodStore,
+)
 from autolight.app_controller import AppController
 from autolight.cache.keys import track_dependency_hash
 from autolight.project.models import CacheEntry, JobRun, ResultState, TrackType
@@ -77,13 +86,37 @@ class AppControllerTest(unittest.TestCase):
             with self.subTest(module_name=module_name):
                 self.assertIsNotNone(importlib.import_module(module_name))
 
+    def test_plain_app_import_defers_project_store_dependencies(self):
+        script = "\n".join(
+            [
+                "import sys",
+                "import autolight.app",
+                "project_modules = sorted(",
+                "    name for name in sys.modules if name.startswith('autolight.project')",
+                ")",
+                "if project_modules:",
+                "    raise SystemExit(','.join(project_modules))",
+            ]
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
     def test_app_controller_constructs_app_layer_collaborators(self):
         controller = self._controller()
 
-        self.assertEqual(type(controller._session).__name__, "ProjectSession")
-        self.assertEqual(type(controller._edit_history).__name__, "EditHistory")
-        self.assertEqual(type(controller._viewport).__name__, "TimelineViewport")
-        self.assertEqual(type(controller._waveform_lod).__name__, "WaveformLodStore")
+        self.assertIsInstance(controller._session, ProjectSession)
+        self.assertIsInstance(controller._marker_editing, MarkerEditingService)
+        self.assertIsInstance(controller._edit_history, EditHistory)
+        self.assertIsInstance(controller._viewport, TimelineViewport)
+        self.assertIsInstance(controller._waveform_lod, WaveformLodStore)
 
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()

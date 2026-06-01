@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from autolight.project.models import ProjectDocument
-from autolight.project.store import new_project
+if TYPE_CHECKING:
+    from autolight.project.models import ProjectDocument
 
 
 @dataclass(slots=True)
@@ -16,6 +17,8 @@ class ProjectSession:
 
     @classmethod
     def empty(cls) -> "ProjectSession":
+        from autolight.project.store import new_project
+
         return cls(project=new_project("Untitled"))
 
     def replace_project(
