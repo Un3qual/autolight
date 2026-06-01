@@ -169,6 +169,12 @@ Window {
                 }
 
                 Button {
+                    text: "Add Vocals Stem"
+                    enabled: appController.selectedTrackId.length > 0
+                    onClicked: appController.add_vocals_stem_track(appController.selectedTrackId)
+                }
+
+                Button {
                     text: "Run"
                     enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
                     onClicked: appController.run_track(appController.selectedTrackId)
@@ -284,6 +290,15 @@ Window {
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                                 width: parent.width
+                            }
+
+                            Text {
+                                text: cacheRefCount > 0 ? artifactKinds + " artifact" : ""
+                                color: "#93c5fd"
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                                width: parent.width
+                                visible: cacheRefCount > 0
                             }
 
                             Text {
