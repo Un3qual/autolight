@@ -147,7 +147,7 @@ Expected: commit succeeds.
 - Modify: `autolight/analysis/builtin.py`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing transform registration test**
+- [x] **Step 1: Add failing transform registration test**
 
 Add these imports to `tests/test_waveform_summary.py`:
 
@@ -183,7 +183,7 @@ Add this test:
         self.assertEqual(result.metadata["bucket_count"], 4)
 ```
 
-- [ ] **Step 2: Run transform test and verify failure**
+- [x] **Step 2: Run transform test and verify failure**
 
 Run:
 
@@ -193,7 +193,7 @@ uv run python -m unittest tests.test_waveform_summary.WaveformSummaryTest.test_w
 
 Expected: FAIL because `waveform.summary` is not registered.
 
-- [ ] **Step 3: Register `waveform.summary` transform**
+- [x] **Step 3: Register `waveform.summary` transform**
 
 Add this import to `autolight/analysis/builtin.py`:
 
@@ -236,7 +236,7 @@ def _waveform_summary(context: TransformContext, params: dict) -> TransformResul
     )
 ```
 
-- [ ] **Step 4: Run waveform tests**
+- [x] **Step 4: Run waveform tests**
 
 Run:
 
@@ -246,7 +246,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit waveform transform**
+- [x] **Step 5: Commit waveform transform**
 
 Run:
 

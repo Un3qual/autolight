@@ -13,6 +13,7 @@ from autolight.analysis.registry import (
     TransformSpec,
 )
 from autolight.analysis.timing import detect_beat_markers, detect_onset_markers
+from autolight.analysis.waveform import build_waveform_summary
 
 MAX_FIXED_INTERVAL_MARKERS = 100_000
 
@@ -60,6 +61,17 @@ def register_builtin_transforms(registry: TransformRegistry) -> None:
             output_schema="markers.v1",
             estimated_cost="medium",
             run=_timing_beats,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="waveform.summary",
+            version="1",
+            name="Waveform Summary",
+            input_schema="audio.v1",
+            output_schema="artifact.waveform.v1",
+            estimated_cost="medium",
+            run=_waveform_summary,
         )
     )
 
@@ -135,3 +147,19 @@ def _timing_beats(context: TransformContext, params: dict) -> TransformResult:
         raise TransformCancelled("cancelled")
     context.progress(1.0)
     return TransformResult(markers=markers)
+
+
+def _waveform_summary(context: TransformContext, params: dict) -> TransformResult:
+    audio_path = Path(str(params["audio_path"]))
+    buckets = int(params.get("buckets", 512))
+    context.artifact_dir.mkdir(parents=True, exist_ok=True)
+    context.progress(0.1)
+    output_path = Path(context.artifact_dir) / "waveform.json"
+    build_waveform_summary(audio_path, output_path, buckets=buckets)
+    if context.cancel_requested():
+        raise TransformCancelled("cancelled")
+    context.progress(1.0)
+    return TransformResult(
+        artifacts={"waveform": str(output_path)},
+        metadata={"bucket_count": buckets},
+    )
