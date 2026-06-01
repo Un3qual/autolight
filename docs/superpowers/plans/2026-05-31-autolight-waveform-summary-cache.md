@@ -25,7 +25,7 @@
 - Create: `autolight/analysis/waveform.py`
 - Create: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Write failing waveform generator tests**
+- [x] **Step 1: Write failing waveform generator tests**
 
 Create `tests/test_waveform_summary.py`:
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run waveform generator tests and verify failure**
+- [x] **Step 2: Run waveform generator tests and verify failure**
 
 Run:
 
@@ -79,7 +79,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.analysis.waveform'`.
 
-- [ ] **Step 3: Implement waveform generator**
+- [x] **Step 3: Implement waveform generator**
 
 Create `autolight/analysis/waveform.py`:
 
@@ -120,7 +120,7 @@ def build_waveform_summary(audio_path: str | Path, output_path: str | Path, buck
     Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 ```
 
-- [ ] **Step 4: Run waveform generator tests**
+- [x] **Step 4: Run waveform generator tests**
 
 Run:
 
@@ -130,7 +130,7 @@ uv run python -m unittest tests.test_waveform_summary -v
 
 Expected: PASS with 1 test.
 
-- [ ] **Step 5: Commit waveform generator**
+- [x] **Step 5: Commit waveform generator**
 
 Run:
 
