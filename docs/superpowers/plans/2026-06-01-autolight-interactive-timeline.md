@@ -1666,7 +1666,7 @@ Add waveform helpers:
         try:
             return int(visible.get("level_bucket_count", 0))
         except (TypeError, ValueError):
-        return 0
+            return 0
 ```
 
 Update existing `tests/test_timeline_model.py` role-name expectations to include:
@@ -1873,9 +1873,9 @@ Add:
 
 ```python
     def test_qml_exposes_direct_marker_drag_resize_and_manual_tracks(self):
-        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
-        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+        lane_qml = self._qml_text("UI/components/TimelineLane.qml")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
 
         self.assertIn("add_manual_cue_track", toolbar_qml)
         self.assertIn("snap_timeline_time", lane_qml)

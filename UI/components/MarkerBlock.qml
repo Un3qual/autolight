@@ -35,7 +35,7 @@ Rectangle {
     MouseArea {
         id: bodyDrag
         anchors.fill: parent
-        enabled: root.editable
+        enabled: true
         drag.target: null
         property real pressParentX: 0
 
@@ -46,27 +46,36 @@ Rectangle {
         onPressed: function(mouse) {
             pressParentX = parentX(mouse)
             root.lastPreviewDelta = 0
-            var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
             root.appController.select_track(root.trackId)
-            if (!root.markerSelected) {
-                root.selected(root.markerId, additive)
-            }
         }
 
         onPositionChanged: function(mouse) {
+            if (!root.editable) {
+                return
+            }
             var pixelDelta = parentX(mouse) - pressParentX
             root.lastPreviewDelta = pixelDelta / Math.max(1, root.pixelsPerSecond)
         }
 
         onReleased: function(mouse) {
             var pixelDelta = parentX(mouse) - pressParentX
+            var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
             if (Math.abs(pixelDelta) < root.dragThresholdPixels) {
                 root.lastPreviewDelta = 0
+                root.selected(root.markerId, additive)
+                return
+            }
+            if (!root.editable) {
+                root.lastPreviewDelta = 0
+                root.selected(root.markerId, additive)
                 return
             }
             var bypass = (mouse.modifiers & Qt.AltModifier) !== 0
             var delta = pixelDelta / Math.max(1, root.pixelsPerSecond)
             root.appController.select_track(root.trackId)
+            if (!root.markerSelected) {
+                root.selected(root.markerId, false)
+            }
             root.appController.move_selected_markers(delta, bypass)
             root.lastPreviewDelta = 0
         }

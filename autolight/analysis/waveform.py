@@ -29,11 +29,13 @@ def build_waveform_summary(
     if frame_count > 0:
         base_bucket_count = min(buckets, frame_count)
         level_bucket_counts = _waveform_level_bucket_counts(base_bucket_count, frame_count)
+        finest_bucket_count = level_bucket_counts[-1]
+        finest_samples = _summarize_samples(audio_path, finest_bucket_count, cancel_requested)
         for bucket_count in level_bucket_counts:
             levels.append(
                 {
                     "bucket_count": bucket_count,
-                    "samples": _summarize_samples(audio_path, bucket_count, cancel_requested),
+                    "samples": _derive_waveform_level(finest_samples, bucket_count),
                 }
             )
 
@@ -76,6 +78,30 @@ def _waveform_level_bucket_counts(base_bucket_count: int, frame_count: int) -> l
             break
         counts.append(next_count)
     return counts
+
+
+def _derive_waveform_level(
+    source_samples: list[dict[str, float]],
+    bucket_count: int,
+) -> list[dict[str, float]]:
+    source_count = len(source_samples)
+    if bucket_count >= source_count:
+        return [dict(sample) for sample in source_samples]
+
+    samples = []
+    for bucket_index in range(bucket_count):
+        start = math.floor(bucket_index * source_count / bucket_count)
+        stop = math.floor((bucket_index + 1) * source_count / bucket_count)
+        segment = source_samples[start:max(start + 1, stop)]
+        peak = max((abs(float(sample.get("peak", 0.0))) for sample in segment), default=0.0)
+        rms_square_total = sum(float(sample.get("rms", 0.0)) ** 2 for sample in segment)
+        samples.append(
+            {
+                "peak": peak,
+                "rms": float(math.sqrt(rms_square_total / max(1, len(segment)))),
+            }
+        )
+    return samples
 
 
 def _summarize_samples(

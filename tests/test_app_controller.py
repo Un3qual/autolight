@@ -130,21 +130,41 @@ class AppControllerTest(unittest.TestCase):
         self.assertFalse(controller.canUndo)
         self.assertFalse(controller.canRedo)
         controller.load_demo_project()
-        editable_id = next(track.id for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+        editable_id = self._track_by_type(controller, TrackType.EDITABLE).id
         controller.select_track(editable_id)
         marker_id = controller.add_marker_to_selected_track(0.75, "Cue", "cue", "cyan")
 
         self.assertTrue(controller.canUndo)
         self.assertFalse(controller.canRedo)
         self.assertEqual(controller.selectedMarkerIds, [marker_id])
+        self.assertTrue(controller.isDirty)
         self.assertTrue(controller.undo())
         self.assertFalse(any(marker.id == marker_id for marker in controller._project.markers))
         self.assertEqual(controller.selectedMarkerIds, [])
         self.assertTrue(controller.canRedo)
+        self.assertFalse(controller.isDirty)
+
+        self.assertTrue(controller.redo())
+        self.assertTrue(any(marker.id == marker_id for marker in controller._project.markers))
+        self.assertTrue(controller.isDirty)
 
         controller.new_project()
         self.assertFalse(controller.canUndo)
         self.assertFalse(controller.canRedo)
+
+    def test_undo_preserves_dirty_state_from_non_history_changes(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            controller.add_manual_cue_track("Manual Cues")
+
+        self.assertNotEqual(source_id, "")
+        self.assertTrue(controller.isDirty)
+        self.assertTrue(controller.undo())
+        self.assertTrue(controller.isDirty)
 
     def test_undo_redo_recomputes_visible_waveform_for_current_scroll(self):
         from autolight.project.store import add_generated_track
@@ -192,11 +212,7 @@ class AppControllerTest(unittest.TestCase):
 
         def first_visible_time() -> float:
             model = controller.trackModel
-            row = next(
-                index
-                for index, track in enumerate(controller._project.tracks)
-                if track.transform_id == "waveform.summary"
-            )
+            row = self._track_row_for_transform(controller, "waveform.summary")
             samples = model.data(
                 model.index(row, 0),
                 model.role_for_name("visibleWaveformSamples"),
@@ -705,9 +721,9 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("playheadTimeLabel", qml)
 
     def test_qml_exposes_direct_marker_drag_resize_and_manual_tracks(self):
-        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
-        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+        lane_qml = self._qml_text("UI/components/TimelineLane.qml")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
 
         self.assertIn("add_manual_cue_track", toolbar_qml)
         self.assertIn("snap_timeline_time", lane_qml)
@@ -716,7 +732,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("AltModifier", marker_qml)
 
     def test_qml_marker_resize_uses_drag_delta_from_press(self):
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
 
         self.assertIn("property real startParentX", marker_qml)
         self.assertIn("property real startDuration", marker_qml)
@@ -733,7 +749,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("startWidth + widthDelta", marker_qml)
 
     def test_qml_marker_move_skips_click_release_below_drag_threshold(self):
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
 
         self.assertIn("property real dragThresholdPixels", marker_qml)
         self.assertIn("property real pressParentX", marker_qml)
@@ -747,8 +763,8 @@ class AppControllerTest(unittest.TestCase):
         )
 
     def test_qml_marker_drag_preview_affects_rendered_position_without_live_move(self):
-        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+        lane_qml = self._qml_text("UI/components/TimelineLane.qml")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
 
         self.assertIn("property real baseX", marker_qml)
         self.assertIn("property real lastPreviewDelta", marker_qml)
@@ -768,8 +784,8 @@ class AppControllerTest(unittest.TestCase):
         )
 
     def test_qml_marker_operations_select_track_and_preserve_selected_drags(self):
-        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
-        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+        lane_qml = self._qml_text("UI/components/TimelineLane.qml")
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
 
         self.assertIn("property string trackId", marker_qml)
         self.assertIn("property bool markerSelected", marker_qml)
@@ -787,13 +803,13 @@ class AppControllerTest(unittest.TestCase):
         )
 
     def test_qml_project_toolbar_requires_app_controller(self):
-        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
 
         self.assertIn("required property var appController", toolbar_qml)
 
     def test_qml_exposes_undo_redo_actions(self):
-        qml = Path("UI/Main.qml").read_text(encoding="utf-8")
-        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+        qml = self._qml_text("UI/Main.qml")
+        toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
 
         self.assertIn("appController.undo()", toolbar_qml + qml)
         self.assertIn("appController.redo()", toolbar_qml + qml)
@@ -801,7 +817,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("canRedo", toolbar_qml + qml)
 
     def test_qml_main_composes_milestone_2_components(self):
-        qml = Path("UI/Main.qml").read_text(encoding="utf-8")
+        qml = self._qml_text("UI/Main.qml")
 
         for component_name in [
             "ProjectToolbar",
@@ -816,11 +832,12 @@ class AppControllerTest(unittest.TestCase):
                 self.assertIn(component_name, qml)
 
     def test_qml_large_components_are_split_out_of_main(self):
-        self.assertLessEqual(len(Path("UI/Main.qml").read_text(encoding="utf-8").splitlines()), 360)
+        root = Path(__file__).resolve().parents[1]
+        self.assertLessEqual(len((root / "UI/Main.qml").read_text(encoding="utf-8").splitlines()), 360)
         for path in [
-            Path("UI/components/TimelineLane.qml"),
-            Path("UI/components/MarkerBlock.qml"),
-            Path("UI/components/WaveformStrip.qml"),
+            root / "UI/components/TimelineLane.qml",
+            root / "UI/components/MarkerBlock.qml",
+            root / "UI/components/WaveformStrip.qml",
         ]:
             with self.subTest(path=str(path)):
                 self.assertTrue(path.exists())
@@ -842,9 +859,9 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("var centerY = height / 2", qml)
 
     def test_qml_waveform_uses_canvas_and_visible_samples(self):
-        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
-        track_row_qml = Path("UI/components/TrackRow.qml").read_text(encoding="utf-8")
-        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
+        waveform_qml = self._qml_text("UI/components/WaveformStrip.qml")
+        track_row_qml = self._qml_text("UI/components/TrackRow.qml")
+        lane_qml = self._qml_text("UI/components/TimelineLane.qml")
 
         self.assertIn("Canvas", waveform_qml)
         self.assertIn("visibleWaveformSamples", lane_qml)
@@ -854,11 +871,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("waveformSamples:", track_row_qml)
 
     def test_qml_scrubber_avoids_live_heavy_seek_binding(self):
-        playback_qml = Path("UI/components/PlaybackBar.qml").read_text(encoding="utf-8")
+        playback_qml = self._qml_text("UI/components/PlaybackBar.qml")
 
         self.assertIn("onMoved", playback_qml)
         self.assertIn("onPressedChanged", playback_qml)
-        self.assertIn("seek_playback", playback_qml)
+        self.assertIn("seekRequested", playback_qml)
         self.assertIn("pressedSourcePath", playback_qml)
         self.assertIn("pressedDurationSeconds", playback_qml)
         self.assertIn("onSourcePathChanged", playback_qml)
@@ -866,11 +883,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("root.appController.playback.sourcePath === pressedSourcePath", playback_qml)
         self.assertLess(
             playback_qml.index("root.appController.playback.sourcePath === pressedSourcePath"),
-            playback_qml.index("root.appController.seek_playback"),
+            playback_qml.index("root.seekRequested"),
         )
 
     def test_qml_waveform_strip_guards_invalid_samples(self):
-        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+        waveform_qml = self._qml_text("UI/components/WaveformStrip.qml")
 
         self.assertIn("function finiteNumber", waveform_qml)
         self.assertIn("if (!sample || typeof sample !== \"object\")", waveform_qml)
@@ -880,11 +897,19 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("root.clampedUnit(sample.rms)", waveform_qml)
 
     def test_qml_waveform_strip_repaints_render_affecting_inputs(self):
-        waveform_qml = Path("UI/components/WaveformStrip.qml").read_text(encoding="utf-8")
+        waveform_qml = self._qml_text("UI/components/WaveformStrip.qml")
 
         self.assertIn("onLeftPaddingChanged: requestPaint()", waveform_qml)
         self.assertIn("onPeakColorChanged: requestPaint()", waveform_qml)
         self.assertIn("onRmsColorChanged: requestPaint()", waveform_qml)
+
+    def test_qml_waveform_strip_batches_peak_and_rms_paths(self):
+        waveform_qml = self._qml_text("UI/components/WaveformStrip.qml")
+
+        self.assertIn("var drawableSamples = []", waveform_qml)
+        self.assertIn("for (var peakIndex = 0; peakIndex < drawableSamples.length; peakIndex++)", waveform_qml)
+        self.assertIn("for (var rmsIndex = 0; rmsIndex < drawableSamples.length; rmsIndex++)", waveform_qml)
+        self.assertEqual(waveform_qml.count("ctx.stroke()"), 2)
 
     def test_qml_keeps_playback_controls_out_of_top_toolbar(self):
         toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
@@ -943,13 +968,17 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("property real timelineVisibleSeconds: 8.0", qml)
         self.assertNotIn("root.timelineVisibleSeconds", qml)
 
-    def test_qml_ruler_ticks_use_whole_second_boundaries_after_fractional_pan(self):
+    def test_qml_ruler_ticks_depend_on_timeline_zoom(self):
         qml = self._qml_text("UI/components/TimelineRuler.qml")
 
-        self.assertIn("property real tickSecond: Math.ceil(timelineRuler.appController.timelineScrollSeconds) + index", qml)
+        self.assertIn("function tickStepSeconds()", qml)
+        self.assertIn("timelineRuler.appController.timelinePixelsPerSecond", qml)
+        self.assertIn("property real secondsPerTick: timelineRuler.tickStepSeconds()", qml)
+        self.assertIn("Math.ceil(timelineRuler.appController.timelineVisibleSeconds / timelineTickLane.secondsPerTick) + 2", qml)
+        self.assertIn("index * timelineTickLane.secondsPerTick", qml)
         self.assertIn("x: timelineRuler.timelineX(tickSecond)", qml)
-        self.assertIn("text: tickSecond + \"s\"", qml)
-        self.assertNotIn("Math.floor(appController.timelineScrollSeconds + index)", qml)
+        self.assertIn("text: timelineRuler.formatTick(tickSecond)", qml)
+        self.assertNotIn("model: Math.ceil(timelineRuler.appController.timelineVisibleSeconds) + 1", qml)
 
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
@@ -1070,7 +1099,8 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(reopened.selectedTrackId, source_id)
         self.assertEqual(reopened.timelinePixelsPerSecond, 240.0)
-        self.assertEqual(reopened.timelineScrollSeconds, 2.0)
+        self.assertAlmostEqual(reopened.timelineVisibleSeconds, 3.2)
+        self.assertAlmostEqual(reopened.timelineScrollSeconds, 6.8)
 
     def test_open_project_ignores_malformed_ui_state_containers(self):
         controller = self._controller()
@@ -1201,14 +1231,17 @@ class AppControllerTest(unittest.TestCase):
         def marker_span_selected() -> bool:
             model = controller.trackModel
             spans = model.data(model.index(2, 0), model.role_for_name("markerSpans"))
-            return next(span["selected"] for span in spans if span["id"] == marker_id)
+            for span in spans:
+                if span["id"] == marker_id:
+                    return span["selected"]
+            self.fail(f"marker span not found: {marker_id}")
 
         self.assertFalse(marker_span_selected())
 
         controller.toggle_marker_selection(marker_id, False)
 
         self.assertTrue(marker_span_selected())
-        marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+        marker = self._marker_by_id(controller, marker_id)
         self.assertNotIn("selected", marker.metadata)
 
         controller.toggle_marker_selection(marker_id, True)
@@ -1844,11 +1877,7 @@ class AppControllerTest(unittest.TestCase):
     def test_non_waveform_track_change_does_not_refresh_waveform_rows(self):
         controller = self._controller()
         controller.load_demo_project()
-        waveform_row = next(
-            index
-            for index, track in enumerate(controller._project.tracks)
-            if track.transform_id == "waveform.summary"
-        )
+        waveform_row = self._track_row_for_transform(controller, "waveform.summary")
         source_id = self._track_id(controller, 0)
         emissions = []
         controller.trackModel.dataChanged.connect(
@@ -1898,7 +1927,7 @@ class AppControllerTest(unittest.TestCase):
     def test_controller_adds_manual_cue_track_from_selected_source_context(self):
         controller = self._controller()
         controller.load_demo_project()
-        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        source = self._track_by_type(controller, TrackType.SOURCE)
         controller.select_track(source.id)
 
         manual_id = controller.add_manual_cue_track("Manual Cues")
@@ -1913,7 +1942,7 @@ class AppControllerTest(unittest.TestCase):
     def test_manual_track_undo_preserves_later_imported_audio_track(self):
         controller = self._controller()
         controller.load_demo_project()
-        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        source = self._track_by_type(controller, TrackType.SOURCE)
         controller.select_track(source.id)
         manual_id = controller.add_manual_cue_track("Manual Cues")
 
@@ -1941,17 +1970,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn(("double", "bool"), self._slot_parameter_types(controller, "move_selected_markers"))
         self.assertIn(("double",), self._slot_parameter_types(controller, "snap_timeline_time"))
         self.assertIn(("double", "bool"), self._slot_parameter_types(controller, "snap_timeline_time"))
+        self.assertIn(
+            ("double", "double", "QString", "QString", "QString"),
+            self._slot_parameter_types(controller, "add_marker_to_selected_track_with_duration"),
+        )
+        self.assertIn(
+            ("double", "double", "QString", "QString", "QString"),
+            self._slot_parameter_types(controller, "update_selected_marker_with_duration"),
+        )
+        self.assertIn((), self._slot_parameter_types(controller, "delete_selected_markers"))
 
     def test_controller_moves_and_resizes_selected_editable_markers(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable = next(track for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+        editable = self._track_by_type(controller, TrackType.EDITABLE)
         controller.select_track(editable.id)
         marker_id = controller.add_marker_to_selected_track(0.5, "Cue", "cue", "cyan")
         controller.toggle_marker_selection(marker_id, False)
 
         self.assertTrue(controller.move_selected_markers(0.25, False))
-        marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+        marker = self._marker_by_id(controller, marker_id)
         self.assertEqual(marker.timestamp, 0.75)
 
         self.assertTrue(controller.resize_marker(marker_id, 1.25))
@@ -1962,11 +2000,11 @@ class AppControllerTest(unittest.TestCase):
             with self.subTest(delta=delta):
                 controller = self._controller()
                 controller.load_demo_project()
-                editable = next(track for track in controller._project.tracks if track.type == TrackType.EDITABLE)
+                editable = self._track_by_type(controller, TrackType.EDITABLE)
                 controller.select_track(editable.id)
                 marker_id = controller.add_marker_to_selected_track(0.5, "Cue", "cue", "cyan")
                 controller.toggle_marker_selection(marker_id, False)
-                marker = next(marker for marker in controller._project.markers if marker.id == marker_id)
+                marker = self._marker_by_id(controller, marker_id)
                 before_dirty = controller.isDirty
                 before_can_undo = controller.canUndo
                 before_can_redo = controller.canRedo
@@ -1986,7 +2024,7 @@ class AppControllerTest(unittest.TestCase):
     def test_controller_snap_time_uses_generated_timing_markers_and_bypass(self):
         controller = self._controller()
         controller.load_demo_project()
-        timing = next(track for track in controller._project.tracks if track.name == "Beat Markers")
+        timing = self._track_by_name(controller, "Beat Markers")
 
         self.assertEqual(controller.snap_timeline_time(0.53, False), 0.5)
         self.assertEqual(controller.snap_timeline_time(0.53, True), 0.53)
@@ -2233,13 +2271,34 @@ class AppControllerTest(unittest.TestCase):
 
     @staticmethod
     def _optional_track_by_id(controller: AppController, track_id: str):
-        return next((track for track in controller._project.tracks if track.id == track_id), None)
+        for track in controller._project.tracks:
+            if track.id == track_id:
+                return track
+        return None
 
     def _track_by_type(self, controller: AppController, track_type: TrackType):
         for track in controller._project.tracks:
             if track.type == track_type:
                 return track
         self.fail(f"track type not found: {track_type}")
+
+    def _track_by_name(self, controller: AppController, name: str):
+        for track in controller._project.tracks:
+            if track.name == name:
+                return track
+        self.fail(f"track name not found: {name}")
+
+    def _track_row_for_transform(self, controller: AppController, transform_id: str) -> int:
+        for index, track in enumerate(controller._project.tracks):
+            if track.transform_id == transform_id:
+                return index
+        self.fail(f"track transform not found: {transform_id}")
+
+    def _marker_by_id(self, controller: AppController, marker_id: str):
+        for marker in controller._project.markers:
+            if marker.id == marker_id:
+                return marker
+        self.fail(f"marker not found: {marker_id}")
 
     @staticmethod
     def _slot_parameter_types(controller: AppController, slot_name: str) -> set[tuple[str, ...]]:

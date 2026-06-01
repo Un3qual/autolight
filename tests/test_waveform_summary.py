@@ -8,6 +8,7 @@ from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication
 
 import soundfile
+from autolight.analysis import waveform as waveform_module
 from autolight.analysis.builtin import MAX_WAVEFORM_BUCKETS, register_builtin_transforms
 from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
 from autolight.analysis.waveform import build_waveform_summary
@@ -64,6 +65,20 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertGreaterEqual(len(payload["levels"]), 2)
         self.assertEqual(payload["levels"][0]["bucket_count"], 2)
         self.assertGreater(payload["levels"][-1]["bucket_count"], payload["levels"][0]["bucket_count"])
+
+    def test_build_waveform_summary_streams_audio_once_for_lod_levels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            output_path = Path(tmp) / "waveform.json"
+            write_wav(audio_path)
+
+            with patch(
+                "autolight.analysis.waveform._summarize_samples",
+                wraps=waveform_module._summarize_samples,
+            ) as summarize_samples:
+                build_waveform_summary(audio_path, output_path, buckets=2)
+
+        self.assertEqual(summarize_samples.call_count, 1)
 
     def test_build_waveform_summary_zero_frame_audio_has_consistent_empty_levels(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,6 +158,7 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertEqual(visible["level_bucket_count"], 10)
         self.assertGreater(len(visible["samples"]), 0)
         self.assertEqual(visible["samples"][-1]["peak"], 0.9)
+        self.assertEqual(visible["samples"][-1]["time"], 9.0)
 
     def test_waveform_lod_reads_legacy_single_sample_payload(self):
         payload = {

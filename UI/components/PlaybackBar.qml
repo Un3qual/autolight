@@ -122,7 +122,7 @@ RowLayout {
                     pressedDurationSeconds,
                     root.validPlaybackDuration(root.appController.playback.durationSeconds)
                 )
-                root.appController.seek_playback(root.clampedPlaybackPosition(previewValue, releaseDurationSeconds))
+                root.seekRequested(root.clampedPlaybackPosition(previewValue, releaseDurationSeconds))
             }
             clearPressCapture()
         }

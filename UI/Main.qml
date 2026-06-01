@@ -300,16 +300,21 @@ Window {
                 selectedMarkerBackground: root.selectedMarkerBackground
                 Layout.preferredWidth: 260
                 Layout.fillHeight: true
-                onAddCueRequested: function(timestamp, label, category, colorKey) {
-                    appController.add_marker_to_selected_track(timestamp, label, category, colorKey)
+                onAddCueRequested: function(timestamp, duration, label, category, colorKey) {
+                    appController.add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey)
                 }
                 onDeleteCueRequested: function(markerId) {
                     if (appController.delete_marker_from_selected_track(markerId)) {
                         markerInspector.clearSelectionId()
                     }
                 }
-                onUpdateCueRequested: function(timestamp, label, category, colorKey) {
-                    appController.update_selected_marker(timestamp, label, category, colorKey)
+                onDeleteSelectedCuesRequested: {
+                    if (appController.delete_selected_markers() > 0) {
+                        markerInspector.clearSelectionId()
+                    }
+                }
+                onUpdateCueRequested: function(timestamp, duration, label, category, colorKey) {
+                    appController.update_selected_marker_with_duration(timestamp, duration, label, category, colorKey)
                 }
                 onBulkUpdateRequested: function(label, category, colorKey) {
                     appController.bulk_update_selected_markers(label, category, colorKey)

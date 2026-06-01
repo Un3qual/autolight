@@ -12,11 +12,21 @@ Rectangle {
     property color textMuted: "#a1a1aa"
     property color selectedMarkerBackground: "#2f4366"
     property string selectedMarkerId: ""
-    signal addCueRequested(real timestamp, string label, string category, string colorKey)
+    signal addCueRequested(real timestamp, real duration, string label, string category, string colorKey)
     signal deleteCueRequested(string markerId)
-    signal updateCueRequested(real timestamp, string label, string category, string colorKey)
+    signal deleteSelectedCuesRequested()
+    signal updateCueRequested(real timestamp, real duration, string label, string category, string colorKey)
     signal bulkUpdateRequested(string label, string category, string colorKey)
     signal toggleMarkerSelectionRequested(string markerId, bool extendSelection)
+
+    function validatedFieldNumber(text) {
+        var value = Number(text)
+        return isFinite(value) && value >= 0 ? value : NaN
+    }
+
+    function validNonNegativeField(text) {
+        return isFinite(inspectorPanel.validatedFieldNumber(text))
+    }
 
     function markerColorIndex(colorKey) {
         for (var i = 0; i < inspectorPanel.markerColorOptions.length; i++) {
@@ -31,12 +41,17 @@ Rectangle {
         return inspectorPanel.appController.selectedMarkerIds.length
     }
 
+    function firstSelectedMarkerId() {
+        return inspectorPanel.selectedMarkerCount() > 0 ? inspectorPanel.appController.selectedMarkerIds[0] : ""
+    }
+
     function clearSelectionId() {
         inspectorPanel.selectedMarkerId = ""
     }
 
     function syncMarkerEditor(marker) {
         markerTimestampField.text = Number(marker.timestamp).toFixed(2)
+        markerDurationField.text = Number(marker.duration || 0).toFixed(2)
         markerLabelField.text = marker.label.length > 0 ? marker.label : "Cue"
         markerCategoryField.text = marker.category.length > 0 ? marker.category : "cue"
         markerColorPicker.currentIndex = inspectorPanel.markerColorIndex(marker.colorKey)
@@ -70,6 +85,9 @@ Rectangle {
         function onSelectedMarkerIdsChanged() {
             inspectorPanel.syncMarkerEditorFromSelection()
         }
+        function onSelectedTrackMarkersChanged() {
+            inspectorPanel.syncMarkerEditorFromSelection()
+        }
     }
 
     Column {
@@ -96,6 +114,18 @@ Rectangle {
             id: markerTimestampField
             placeholderText: "Timestamp"
             text: "0.0"
+            validator: DoubleValidator { bottom: 0.0 }
+            color: acceptableInput ? inspectorPanel.textPrimary : "#f87171"
+            enabled: inspectorPanel.appController.selectedTrackIsEditable
+            width: parent.width
+        }
+
+        TextField {
+            id: markerDurationField
+            placeholderText: "Duration"
+            text: "0.0"
+            validator: DoubleValidator { bottom: 0.0 }
+            color: acceptableInput ? inspectorPanel.textPrimary : "#f87171"
             enabled: inspectorPanel.appController.selectedTrackIsEditable
             width: parent.width
         }
@@ -200,9 +230,13 @@ Rectangle {
 
         Button {
             text: "Add Cue"
-            enabled: inspectorPanel.appController.selectedTrackId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable
+            enabled: inspectorPanel.appController.selectedTrackId.length > 0
+                && inspectorPanel.appController.selectedTrackIsEditable
+                && inspectorPanel.validNonNegativeField(markerTimestampField.text)
+                && inspectorPanel.validNonNegativeField(markerDurationField.text)
             onClicked: inspectorPanel.addCueRequested(
-                Number(markerTimestampField.text),
+                inspectorPanel.validatedFieldNumber(markerTimestampField.text),
+                inspectorPanel.validatedFieldNumber(markerDurationField.text),
                 markerLabelField.text,
                 markerCategoryField.text,
                 markerColorPicker.currentValue
@@ -210,16 +244,26 @@ Rectangle {
         }
 
         Button {
-            text: "Delete Cue"
-            enabled: inspectorPanel.selectedMarkerId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable
-            onClicked: inspectorPanel.deleteCueRequested(inspectorPanel.selectedMarkerId)
+            text: inspectorPanel.selectedMarkerCount() > 1 ? "Delete Cues" : "Delete Cue"
+            enabled: inspectorPanel.selectedMarkerCount() > 0 && inspectorPanel.appController.selectedTrackIsEditable
+            onClicked: {
+                if (inspectorPanel.selectedMarkerCount() === 1) {
+                    inspectorPanel.deleteCueRequested(inspectorPanel.firstSelectedMarkerId())
+                } else {
+                    inspectorPanel.deleteSelectedCuesRequested()
+                }
+            }
         }
 
         Button {
             text: "Update Cue"
-            enabled: inspectorPanel.appController.selectedTrackIsEditable && inspectorPanel.selectedMarkerCount() === 1
+            enabled: inspectorPanel.appController.selectedTrackIsEditable
+                && inspectorPanel.selectedMarkerCount() === 1
+                && inspectorPanel.validNonNegativeField(markerTimestampField.text)
+                && inspectorPanel.validNonNegativeField(markerDurationField.text)
             onClicked: inspectorPanel.updateCueRequested(
-                Number(markerTimestampField.text),
+                inspectorPanel.validatedFieldNumber(markerTimestampField.text),
+                inspectorPanel.validatedFieldNumber(markerDurationField.text),
                 markerLabelField.text,
                 markerCategoryField.text,
                 markerColorPicker.currentValue

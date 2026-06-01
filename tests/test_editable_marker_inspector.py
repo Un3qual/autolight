@@ -11,7 +11,7 @@ from autolight.app.edit_history import (
     TrackSnapshotCommand,
 )
 from autolight.app.marker_editing import MarkerEditingService
-from autolight.project.models import Marker, ResultState, TrackType
+from autolight.project.models import JobRun, Marker, ResultState, TrackType
 from autolight.project.store import (
     MARKER_COLOR_PALETTE,
     ProjectStore,
@@ -317,24 +317,26 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         self.assertTrue(history.can_undo)
         history.undo(project)
-        marker = next(item for item in project.markers if item.id == marker.id)
+        marker = self._project_marker_by_id(project, marker.id)
         self.assertEqual(marker.timestamp, 1.0)
         self.assertEqual(marker.label, "Cue")
         self.assertEqual(marker.metadata["color"], "cyan")
 
         self.assertTrue(history.can_redo)
         history.redo(project)
-        marker = next(item for item in project.markers if item.id == marker.id)
+        marker = self._project_marker_by_id(project, marker.id)
         self.assertEqual(marker.timestamp, 2.0)
         self.assertEqual(marker.label, "Hit")
         self.assertEqual(marker.metadata["color"], "amber")
 
     def test_edit_history_keeps_command_on_failed_undo(self):
         class FailingCommand:
-            def undo(self, project):
+            @staticmethod
+            def undo(project):
                 raise RuntimeError("restore failed")
 
-            def redo(self, project):
+            @staticmethod
+            def redo(project):
                 raise AssertionError("redo should not be called")
 
         history = EditHistory()
@@ -363,11 +365,22 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         project = new_project("Demo")
         source = self._source_track(project)
         manual = create_manual_editable_track(project, source.id, "Manual Cues")
+        marker = add_editable_marker(project, manual.id, 1.25, "Cue", duration=0.5)
+        job_run = JobRun(
+            id="job_manual",
+            track_id=manual.id,
+            transform_id="manual",
+            parameters_hash="hash",
+            state=ResultState.COMPLETE,
+        )
+        project.job_runs.append(job_run)
         command = TrackSnapshotCommand(
             track_id=manual.id,
             before=None,
             after=manual,
             index=project.tracks.index(manual),
+            after_markers=[marker],
+            after_job_runs=[job_run],
         )
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "later.wav"
@@ -377,10 +390,14 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         command.undo(project)
 
         self.assertNotIn(manual.id, [track.id for track in project.tracks])
+        self.assertNotIn(marker.id, [item.id for item in project.markers])
+        self.assertNotIn(job_run.id, [item.id for item in project.job_runs])
         self.assertIn(imported.id, [track.id for track in project.tracks])
 
         command.redo(project)
         self.assertIn(manual.id, [track.id for track in project.tracks])
+        self.assertIn(marker.id, [item.id for item in project.markers])
+        self.assertIn(job_run.id, [item.id for item in project.job_runs])
         self.assertIn(imported.id, [track.id for track in project.tracks])
 
     def test_add_editable_marker_rejects_generated_track(self):
@@ -837,6 +854,34 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(controller.lastError, "")
         self.assertTrue(controller.isDirty)
 
+    def test_controller_update_selected_marker_with_duration_changes_duration(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_id = self._selected_track_markers(controller)[0]["id"]
+        controller.toggle_marker_selection(marker_id, False)
+
+        self.assertTrue(
+            controller.update_selected_marker_with_duration(
+                1.75,
+                0.5,
+                "Blackout",
+                "lighting",
+                "amber",
+            )
+        )
+
+        marker = self._marker_by_id(controller, marker_id)
+        self.assertEqual(marker.timestamp, 1.75)
+        self.assertEqual(marker.duration, 0.5)
+        self.assertEqual(marker.label, "Blackout")
+        self.assertEqual(marker.category, "lighting")
+        self.assertEqual(marker.metadata["color"], "amber")
+
     def test_controller_undo_redo_updates_selected_marker_history(self):
         from autolight.app_controller import AppController
 
@@ -997,6 +1042,27 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertEqual(len(marker_changes), 1)
         self.assertEqual(controller.selectedMarkerIds, [])
 
+    def test_controller_delete_selected_markers_removes_multi_selection_with_history(self):
+        from autolight.app_controller import AppController
+
+        controller = AppController()
+        self.addCleanup(controller.cleanup)
+        controller.load_demo_project()
+        editable_id = self._track_id_for_type(controller, "editable")
+        controller.select_track(editable_id)
+        marker_ids = [marker["id"] for marker in self._selected_track_markers(controller)]
+        controller.toggle_marker_selection(marker_ids[0], False)
+        controller.toggle_marker_selection(marker_ids[1], True)
+
+        self.assertEqual(controller.delete_selected_markers(), 2)
+
+        self.assertEqual(controller.selectedMarkerIds, [])
+        self.assertFalse(any(marker.id in marker_ids for marker in controller._project.markers))
+        self.assertTrue(controller.canUndo)
+
+        self.assertTrue(controller.undo())
+        self.assertTrue(all(self._marker_by_id(controller, marker_id) for marker_id in marker_ids))
+
     def test_controller_clears_stale_selected_marker_when_delete_returns_false(self):
         from autolight.app_controller import AppController
 
@@ -1048,18 +1114,23 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         self.assertIn("id: inspectorPanel", qml)
         self.assertIn("markerTimestampField", qml)
+        self.assertIn("markerDurationField", qml)
         self.assertIn("markerLabelField", qml)
         self.assertIn("appController.selectedTrackMarkers", qml)
         self.assertIn("inspectorPanel.selectedMarkerId", qml)
-        self.assertIn("appController.add_marker_to_selected_track", qml)
+        self.assertIn("appController.add_marker_to_selected_track_with_duration", qml)
         self.assertIn("appController.delete_marker_from_selected_track(markerId)", qml)
+        self.assertIn("appController.delete_selected_markers()", qml)
         self.assertIn("appController.selectedTrackIsEditable", qml)
+        self.assertIn("DoubleValidator { bottom: 0.0 }", qml)
+        self.assertIn("validNonNegativeField(markerTimestampField.text)", qml)
+        self.assertIn("validNonNegativeField(markerDurationField.text)", qml)
         self.assertIn(
-            "enabled: inspectorPanel.appController.selectedTrackId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable",
+            "enabled: inspectorPanel.appController.selectedTrackId.length > 0",
             qml,
         )
         self.assertIn(
-            "enabled: inspectorPanel.selectedMarkerId.length > 0 && inspectorPanel.appController.selectedTrackIsEditable",
+            "enabled: inspectorPanel.selectedMarkerCount() > 0 && inspectorPanel.appController.selectedTrackIsEditable",
             qml,
         )
 
@@ -1075,12 +1146,13 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("id: markerColorPicker", qml)
         self.assertIn("id: markerCategoryField", qml)
         self.assertIn("appController.toggle_marker_selection", qml)
-        self.assertIn("appController.update_selected_marker", qml)
+        self.assertIn("appController.update_selected_marker_with_duration", qml)
         self.assertIn("appController.bulk_update_selected_markers", qml)
         self.assertIn("modelData.color", qml)
         self.assertIn("modelData.selected", qml)
         self.assertIn("selectedMarkerIds.length", qml)
         self.assertIn("function syncMarkerEditorFromSelection()", qml)
+        self.assertIn("onSelectedTrackMarkersChanged", qml)
         self.assertIn("markerInspector.syncMarkerEditorFromSelection()", qml)
         self.assertIn("No track selected", qml)
         self.assertNotIn("root.syncMarkerEditor(modelData)", qml)
@@ -1094,7 +1166,8 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
         return add_generated_track(project, source.id, "Generated", "markers.fixed_interval", {}, "1", "markers.v1", "hash")
 
-    def _source_track(self, project):
+    @staticmethod
+    def _source_track(project):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
             write_wav(audio_path)
@@ -1123,6 +1196,12 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
     def _marker_by_id(self, controller, marker_id: str) -> Marker:
         for marker in controller._project.markers:
+            if marker.id == marker_id:
+                return marker
+        self.fail(f"marker not found: {marker_id}")
+
+    def _project_marker_by_id(self, project, marker_id: str) -> Marker:
+        for marker in project.markers:
             if marker.id == marker_id:
                 return marker
         self.fail(f"marker not found: {marker_id}")

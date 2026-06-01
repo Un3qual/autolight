@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -66,18 +66,32 @@ class TrackSnapshotCommand:
     before: Any | None
     after: Any | None
     index: int
+    before_markers: list[Any] = field(default_factory=list)
+    after_markers: list[Any] = field(default_factory=list)
+    before_job_runs: list[Any] = field(default_factory=list)
+    after_job_runs: list[Any] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.before = copy.deepcopy(self.before)
         self.after = copy.deepcopy(self.after)
+        self.before_markers = copy.deepcopy(self.before_markers)
+        self.after_markers = copy.deepcopy(self.after_markers)
+        self.before_job_runs = copy.deepcopy(self.before_job_runs)
+        self.after_job_runs = copy.deepcopy(self.after_job_runs)
 
     def undo(self, project: ProjectDocument) -> None:
-        self._restore(project, self.before)
+        self._restore(project, self.before, self.before_markers, self.before_job_runs)
 
     def redo(self, project: ProjectDocument) -> None:
-        self._restore(project, self.after)
+        self._restore(project, self.after, self.after_markers, self.after_job_runs)
 
-    def _restore(self, project: ProjectDocument, snapshot: Any | None) -> None:
+    def _restore(
+        self,
+        project: ProjectDocument,
+        snapshot: Any | None,
+        markers: list[Any],
+        job_runs: list[Any],
+    ) -> None:
         if snapshot is None:
             dependent = next(
                 (
@@ -95,8 +109,12 @@ class TrackSnapshotCommand:
             return
 
         project.tracks[:] = [track for track in project.tracks if track.id != self.track_id]
+        project.markers[:] = [marker for marker in project.markers if marker.track_id != self.track_id]
+        project.job_runs[:] = [job for job in project.job_runs if job.track_id != self.track_id]
         insert_at = min(max(0, self.index), len(project.tracks))
         project.tracks.insert(insert_at, copy.deepcopy(snapshot))
+        project.markers.extend(copy.deepcopy(markers))
+        project.job_runs.extend(copy.deepcopy(job_runs))
 
 
 @dataclass(slots=True)
@@ -114,7 +132,8 @@ class ProjectSnapshotCommand:
     def redo(self, project: ProjectDocument) -> None:
         self._restore(project, self.after)
 
-    def _restore(self, project: ProjectDocument, snapshot: ProjectDocument) -> None:
+    @staticmethod
+    def _restore(project: ProjectDocument, snapshot: ProjectDocument) -> None:
         project.id = snapshot.id
         project.name = snapshot.name
         project.schema_version = snapshot.schema_version
@@ -131,6 +150,7 @@ class EditHistory:
     def __init__(self):
         self._undo_stack: list[EditCommand] = []
         self._redo_stack: list[EditCommand] = []
+        self._clean_undo_depth: int | None = 0
 
     @property
     def can_undo(self) -> bool:
@@ -141,6 +161,12 @@ class EditHistory:
         return bool(self._redo_stack)
 
     def push(self, command: EditCommand) -> None:
+        if (
+            self._clean_undo_depth is not None
+            and self._redo_stack
+            and self._clean_undo_depth > len(self._undo_stack)
+        ):
+            self._clean_undo_depth = None
         self._undo_stack.append(command)
         self._redo_stack.clear()
 
@@ -171,3 +197,10 @@ class EditHistory:
     def clear(self) -> None:
         self._undo_stack.clear()
         self._redo_stack.clear()
+        self._clean_undo_depth = 0
+
+    def mark_clean(self) -> None:
+        self._clean_undo_depth = len(self._undo_stack)
+
+    def is_clean(self) -> bool:
+        return self._clean_undo_depth == len(self._undo_stack)

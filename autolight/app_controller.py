@@ -89,6 +89,7 @@ class AppController(QObject):
         self._selected_track_id = ""
         self._selected_marker_ids: list[str] = []
         self._is_dirty = False
+        self._non_history_dirty = False
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
         self._playback = PlaybackTransport(parent=self)
@@ -166,7 +167,7 @@ class AppController(QObject):
 
     @Property(str, notify=projectPathChanged)
     def projectPath(self) -> str:
-        return self._project_path
+        return self._session.project_path
 
     @Property(str, notify=lastErrorChanged)
     def lastError(self) -> str:
@@ -200,7 +201,7 @@ class AppController(QObject):
 
     @Property(bool, notify=isDirtyChanged)
     def isDirty(self) -> bool:
-        return self._is_dirty
+        return self._session.dirty
 
     @Slot()
     def new_project(self) -> None:
@@ -210,7 +211,7 @@ class AppController(QObject):
         self._set_project_path("")
         self._set_selected_track_id("")
         self._set_last_error("")
-        self._set_dirty(False)
+        self._mark_clean()
 
     @Slot(str, result=bool)
     def open_project(self, path: str) -> bool:
@@ -226,14 +227,13 @@ class AppController(QObject):
             self._set_last_error("")
             invalid_cache_refs = self.refresh_cache_status()
             self.selectedTrackCanRerunChanged.emit()
-            self._set_dirty(
-                bool(
-                    invalid_cache_refs
-                    or changed_running_state
-                    or changed_audio_asset_ids
-                    or changed_audio_track_ids
-                )
+            self._non_history_dirty = bool(
+                invalid_cache_refs
+                or changed_running_state
+                or changed_audio_asset_ids
+                or changed_audio_track_ids
             )
+            self._sync_dirty_from_history()
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -252,7 +252,7 @@ class AppController(QObject):
             ProjectStore.save(self._project, project_path)
             self._set_project_path(str(project_path))
             self._set_last_error("")
-            self._set_dirty(False)
+            self._mark_clean()
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -267,7 +267,7 @@ class AppController(QObject):
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._mark_non_history_dirty()
             return track.id
         except FileNotFoundError as exc:
             self._set_last_error(f"No such file: {exc}")
@@ -327,7 +327,7 @@ class AppController(QObject):
         self._set_selected_track_id(source.id)
         self._notify_timeline_duration_changed()
         self._set_last_error("")
-        self._set_dirty(False)
+        self._mark_clean()
 
     @Slot(str)
     def select_track(self, track_id: str) -> None:
@@ -366,7 +366,7 @@ class AppController(QObject):
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._mark_non_history_dirty()
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -402,7 +402,7 @@ class AppController(QObject):
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._mark_non_history_dirty()
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -439,7 +439,7 @@ class AppController(QObject):
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._mark_non_history_dirty()
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -465,7 +465,7 @@ class AppController(QObject):
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._mark_non_history_dirty()
             return track.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -483,9 +483,9 @@ class AppController(QObject):
             track_index = self._project.tracks.index(track)
             self.trackModel.set_project(self._project)
             self._set_selected_track_id(track.id)
-            self._set_dirty(True)
             self._notify_timeline_duration_changed()
             self._push_track_creation_command(track, track_index)
+            self._sync_dirty_from_history()
             self._set_last_error("")
             return track.id
         except Exception as exc:
@@ -501,12 +501,47 @@ class AppController(QObject):
         category: str = "cue",
         color: str = DEFAULT_MARKER_COLOR,
     ) -> str:
+        return self._add_marker_to_selected_track(
+            timestamp,
+            label,
+            category=category,
+            color=color,
+            duration=None,
+        )
+
+    @Slot(float, float, str, str, str, result=str)
+    def add_marker_to_selected_track_with_duration(
+        self,
+        timestamp: float,
+        duration: float,
+        label: str,
+        category: str,
+        color: str,
+    ) -> str:
+        return self._add_marker_to_selected_track(
+            timestamp,
+            label,
+            category=category,
+            color=color,
+            duration=duration,
+        )
+
+    def _add_marker_to_selected_track(
+        self,
+        timestamp: float,
+        label: str,
+        *,
+        category: str,
+        color: str,
+        duration: float | None,
+    ) -> str:
         try:
             marker = add_editable_marker(
                 self._project,
                 self._selected_track_id,
                 timestamp,
                 label,
+                duration=duration,
                 category=normalize_marker_category(category),
                 color=normalize_marker_color(color),
             )
@@ -517,7 +552,7 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._sync_dirty_from_history()
             return marker.id
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -525,30 +560,49 @@ class AppController(QObject):
 
     @Slot(str, result=bool)
     def delete_marker_from_selected_track(self, marker_id: str) -> bool:
+        return self._delete_markers_from_selected_track([marker_id]) > 0
+
+    @Slot(result=int)
+    def delete_selected_markers(self) -> int:
+        if not self._selected_marker_ids:
+            self._set_last_error("select at least one marker to delete")
+            return 0
+        return self._delete_markers_from_selected_track(list(self._selected_marker_ids))
+
+    def _delete_markers_from_selected_track(self, marker_ids: list[str]) -> int:
         try:
+            requested_ids = set(marker_ids)
             before = [
                 marker_snapshot(marker)
                 for marker in self._project.markers
-                if marker.track_id == self._selected_track_id and marker.id == marker_id
+                if marker.track_id == self._selected_track_id and marker.id in requested_ids
             ]
-            deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
-            if deleted:
+            deleted_ids = []
+            for marker_id in marker_ids:
+                if delete_editable_marker(self._project, self._selected_track_id, marker_id):
+                    deleted_ids.append(marker_id)
+            if deleted_ids:
                 self._push_marker_snapshot_command(self._selected_track_id, before=before, after=[])
             self._track_model.set_project(self._project)
-            if marker_id in self._selected_marker_ids:
+            ids_to_clear = set(deleted_ids) if deleted_ids else requested_ids
+            if ids_to_clear:
                 self._set_selected_marker_ids(
-                    [selected_id for selected_id in self._selected_marker_ids if selected_id != marker_id],
+                    [
+                        selected_id
+                        for selected_id in self._selected_marker_ids
+                        if selected_id not in ids_to_clear
+                    ],
                     emit_marker_summary=False,
                 )
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
-            if deleted:
+            if deleted_ids:
                 self._notify_timeline_duration_changed()
-                self._set_dirty(True)
-            return deleted
+                self._sync_dirty_from_history()
+            return len(deleted_ids)
         except Exception as exc:
             self._set_last_error(str(exc))
-            return False
+            return 0
 
     @Slot(str, bool)
     def toggle_marker_selection(self, marker_id: str, additive: bool) -> None:
@@ -573,6 +627,40 @@ class AppController(QObject):
 
     @Slot(float, str, str, str, result=bool)
     def update_selected_marker(self, timestamp: float, label: str, category: str, color: str) -> bool:
+        return self._update_selected_marker(
+            timestamp,
+            label,
+            category,
+            color,
+            duration=None,
+        )
+
+    @Slot(float, float, str, str, str, result=bool)
+    def update_selected_marker_with_duration(
+        self,
+        timestamp: float,
+        duration: float,
+        label: str,
+        category: str,
+        color: str,
+    ) -> bool:
+        return self._update_selected_marker(
+            timestamp,
+            label,
+            category,
+            color,
+            duration=duration,
+        )
+
+    def _update_selected_marker(
+        self,
+        timestamp: float,
+        label: str,
+        category: str,
+        color: str,
+        *,
+        duration: float | None,
+    ) -> bool:
         try:
             if len(self._selected_marker_ids) != 1:
                 raise ValueError("select one marker to update")
@@ -583,6 +671,7 @@ class AppController(QObject):
                 self._selected_track_id,
                 self._selected_marker_ids[0],
                 timestamp=timestamp,
+                duration=duration,
                 label=label,
                 category=category,
                 color=color,
@@ -596,7 +685,7 @@ class AppController(QObject):
                 self._notify_timeline_duration_changed()
             self._set_last_error("")
             if changed:
-                self._set_dirty(True)
+                self._sync_dirty_from_history()
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -630,7 +719,7 @@ class AppController(QObject):
             self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
-            self._set_dirty(True)
+            self._sync_dirty_from_history()
             return updated
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -665,7 +754,7 @@ class AppController(QObject):
                 self.trackModel.refresh_track(self._selected_track_id)
                 self.selectedTrackMarkersChanged.emit()
                 self._notify_timeline_duration_changed()
-                self._set_dirty(True)
+                self._sync_dirty_from_history()
             self._set_last_error("")
             return True
         except Exception as exc:
@@ -689,7 +778,7 @@ class AppController(QObject):
                 self.trackModel.refresh_track(self._selected_track_id)
                 self.selectedTrackMarkersChanged.emit()
                 self._notify_timeline_duration_changed()
-                self._set_dirty(True)
+                self._sync_dirty_from_history()
             self._set_last_error("")
             return True
         except Exception as exc:
@@ -745,7 +834,7 @@ class AppController(QObject):
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
-                self._set_dirty(True)
+                self._mark_non_history_dirty()
                 self._set_last_error(f"invalid cache artifacts: {len(invalid_refs)}")
             else:
                 self._set_last_error("")
@@ -765,7 +854,7 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
-            self._set_dirty(True)
+            self._sync_dirty_from_history()
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -782,7 +871,7 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
-            self._set_dirty(True)
+            self._sync_dirty_from_history()
             return True
         except Exception as exc:
             self._set_last_error(str(exc))
@@ -831,7 +920,7 @@ class AppController(QObject):
         if not math.isfinite(value):
             return
         visible_seconds = self._visible_timeline_seconds()
-        playback_position = self._playback.positionSeconds
+        playback_position = float(self._playback.property("positionSeconds") or 0.0)
         playback_position_visible = (
             bool(self._playback.property("sourcePath"))
             and self._timeline_scroll_seconds
@@ -918,6 +1007,7 @@ class AppController(QObject):
     def _set_project(self, project, *, restore_ui_state: bool = False) -> None:
         self._playback.unload()
         self._project = project
+        self._session.project = project
         self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
@@ -933,12 +1023,14 @@ class AppController(QObject):
             self._restore_timeline_ui_state()
             self._refresh_visible_waveforms()
         self._edit_history.clear()
+        self._non_history_dirty = False
         self._notify_history_changed()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
             return
         self._project_path = path
+        self._session.set_project_path(path)
         self.projectPathChanged.emit()
 
     def _set_last_error(self, message: str) -> None:
@@ -971,7 +1063,20 @@ class AppController(QObject):
         if self._is_dirty == dirty:
             return
         self._is_dirty = dirty
+        self._session.set_dirty(dirty)
         self.isDirtyChanged.emit()
+
+    def _mark_clean(self) -> None:
+        self._non_history_dirty = False
+        self._edit_history.mark_clean()
+        self._set_dirty(False)
+
+    def _mark_non_history_dirty(self) -> None:
+        self._non_history_dirty = True
+        self._set_dirty(True)
+
+    def _sync_dirty_from_history(self) -> None:
+        self._set_dirty(self._non_history_dirty or not self._edit_history.is_clean())
 
     def _capture_timeline_ui_state(self) -> None:
         if not isinstance(self._project.ui_state, dict):
@@ -1008,11 +1113,23 @@ class AppController(QObject):
             self.set_timeline_scroll_seconds(scroll_seconds)
 
     def _restore_timeline_zoom(self, pixels_per_second: float) -> None:
+        visible_seconds = self._visible_timeline_seconds()
         clamped = self._viewport.clamp_zoom(pixels_per_second)
         if self._timeline_pixels_per_second == clamped:
             return
+        next_visible_seconds = max(
+            0.01,
+            visible_seconds * self._timeline_pixels_per_second / clamped,
+        )
         self._timeline_pixels_per_second = clamped
         self.timelinePixelsPerSecondChanged.emit()
+        if self._timeline_visible_seconds != next_visible_seconds:
+            self._timeline_visible_seconds = next_visible_seconds
+            self.timelineVisibleSecondsChanged.emit()
+        self._set_timeline_scroll_seconds(
+            self._timeline_scroll_seconds,
+            refresh_visible_waveforms=False,
+        )
         self._refresh_visible_waveforms()
 
     @staticmethod
@@ -1110,6 +1227,7 @@ class AppController(QObject):
             return
         self._edit_history.push(MarkerSnapshotCommand(track_id=track_id, before=before, after=after))
         self._notify_history_changed()
+        self._sync_dirty_from_history()
 
     def _push_project_snapshot_command(self, before_project) -> None:
         self._edit_history.push(
@@ -1119,6 +1237,7 @@ class AppController(QObject):
             )
         )
         self._notify_history_changed()
+        self._sync_dirty_from_history()
 
     def _push_track_creation_command(self, track, index: int) -> None:
         self._edit_history.push(
@@ -1127,9 +1246,16 @@ class AppController(QObject):
                 before=None,
                 after=track,
                 index=index,
+                after_markers=[
+                    marker for marker in self._project.markers if marker.track_id == track.id
+                ],
+                after_job_runs=[
+                    job_run for job_run in self._project.job_runs if job_run.track_id == track.id
+                ],
             )
         )
         self._notify_history_changed()
+        self._sync_dirty_from_history()
 
     def _marker_snapshots_for_track(self, track_id: str, marker_ids: list[str]) -> list[dict]:
         selected_ids = set(marker_ids)
@@ -1360,7 +1486,7 @@ class AppController(QObject):
             transform_params=self._runtime_transform_params_for_track(track),
         )
         self._set_last_error("")
-        self._set_dirty(True)
+        self._mark_non_history_dirty()
         return job_id
 
     def _runtime_transform_params_for_track(self, track) -> dict:

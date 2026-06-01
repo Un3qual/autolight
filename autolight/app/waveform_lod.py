@@ -40,7 +40,7 @@ class WaveformLodStore:
         visible = [
             {
                 **self._sample_dict(sample),
-                "time": (index / max(1, bucket_count - 1)) * duration,
+                "time": (index / max(1, bucket_count)) * duration,
             }
             for index, sample in enumerate(samples[start_index:stop_index], start=start_index)
         ]

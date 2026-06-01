@@ -465,11 +465,13 @@ def _apply_marker_fields(
     marker: Marker,
     *,
     timestamp: float | None = None,
+    duration: float | None = None,
     label: str | None = None,
     category: str | None = None,
     color: str | None = None,
 ) -> bool:
     timestamp_value = _finite_marker_timestamp(timestamp) if timestamp is not None else None
+    duration_value = _finite_marker_duration(duration) if duration is not None else None
     label_value = str(label) if label is not None else None
     category_value = normalize_marker_category(category) if category is not None else None
     color_value = normalize_marker_color(color) if color is not None else None
@@ -477,6 +479,9 @@ def _apply_marker_fields(
     changed = False
     if timestamp_value is not None and marker.timestamp != timestamp_value:
         marker.timestamp = timestamp_value
+        changed = True
+    if duration_value is not None and marker.duration != duration_value:
+        marker.duration = duration_value
         changed = True
     if label_value is not None and marker.label != label_value:
         marker.label = label_value
@@ -615,6 +620,7 @@ def update_editable_marker(
     marker_id: str,
     *,
     timestamp: float,
+    duration: float | None = None,
     label: str,
     category: str,
     color: str,
@@ -624,6 +630,7 @@ def update_editable_marker(
     changed = _apply_marker_fields(
         marker,
         timestamp=timestamp,
+        duration=duration,
         label=label,
         category=category,
         color=color,
@@ -723,6 +730,7 @@ def add_editable_marker(
     timestamp: float,
     label: str,
     *,
+    duration: float | None = None,
     category: str = "cue",
     color: str = DEFAULT_MARKER_COLOR,
 ) -> Marker:
@@ -736,6 +744,7 @@ def add_editable_marker(
         id=new_id("marker"),
         track_id=track_id,
         timestamp=timestamp_value,
+        duration=_finite_marker_duration(duration) if duration is not None else None,
         label=str(label),
         category=normalize_marker_category(category),
         metadata={"created_by": "user", "color": normalize_marker_color(color)},

@@ -41,6 +41,7 @@ Canvas {
         var safePixelsPerSecond = Math.max(0, root.finiteNumber(pixelsPerSecond, 96))
         var safeLeftPadding = root.finiteNumber(leftPadding, 24)
         var waveformHeight = Math.max(1, height - 18)
+        var drawableSamples = []
         for (var i = 0; i < samples.length; i++) {
             var sample = samples[i]
             if (!sample || typeof sample !== "object") {
@@ -54,18 +55,27 @@ Canvas {
             if (x < safeLeftPadding - 2 || x > width + 2) {
                 continue
             }
-            var peakHeight = Math.max(1, root.clampedUnit(sample.peak) * waveformHeight)
-            var rmsHeight = Math.max(1, root.clampedUnit(sample.rms) * waveformHeight)
-            ctx.strokeStyle = peakColor
-            ctx.beginPath()
-            ctx.moveTo(x, centerY - peakHeight / 2)
-            ctx.lineTo(x, centerY + peakHeight / 2)
-            ctx.stroke()
-            ctx.strokeStyle = rmsColor
-            ctx.beginPath()
-            ctx.moveTo(x + 1, centerY - rmsHeight / 2)
-            ctx.lineTo(x + 1, centerY + rmsHeight / 2)
-            ctx.stroke()
+            drawableSamples.push({
+                "x": x,
+                "peakHeight": Math.max(1, root.clampedUnit(sample.peak) * waveformHeight),
+                "rmsHeight": Math.max(1, root.clampedUnit(sample.rms) * waveformHeight)
+            })
         }
+        ctx.strokeStyle = peakColor
+        ctx.beginPath()
+        for (var peakIndex = 0; peakIndex < drawableSamples.length; peakIndex++) {
+            var peakSample = drawableSamples[peakIndex]
+            ctx.moveTo(peakSample.x, centerY - peakSample.peakHeight / 2)
+            ctx.lineTo(peakSample.x, centerY + peakSample.peakHeight / 2)
+        }
+        ctx.stroke()
+        ctx.strokeStyle = rmsColor
+        ctx.beginPath()
+        for (var rmsIndex = 0; rmsIndex < drawableSamples.length; rmsIndex++) {
+            var rmsSample = drawableSamples[rmsIndex]
+            ctx.moveTo(rmsSample.x + 1, centerY - rmsSample.rmsHeight / 2)
+            ctx.lineTo(rmsSample.x + 1, centerY + rmsSample.rmsHeight / 2)
+        }
+        ctx.stroke()
     }
 }
