@@ -274,7 +274,11 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertIn("modelData.peak", qml)
         self.assertIn("clip: true", qml)
         self.assertIn("root.timelineLeftPadding", qml)
-        self.assertIn("waveformSamples.length > 1", qml)
+        self.assertIn(
+            "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)",
+            qml,
+        )
+        self.assertIn("visible: x >= root.timelineLeftPadding - width && x <= parent.width", qml)
 
     def _track_row(self, controller, track_id: str) -> int:
         for index, track in enumerate(controller._project.tracks):
