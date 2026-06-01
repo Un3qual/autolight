@@ -664,16 +664,24 @@ class AppController(QObject):
         value = float(pixels_per_second)
         if not math.isfinite(value):
             return
+        visible_seconds = self._visible_timeline_seconds()
+        playback_position = self._playback.positionSeconds
+        playback_position_visible = (
+            bool(self._playback.property("sourcePath"))
+            and self._timeline_scroll_seconds
+            <= playback_position
+            <= self._timeline_scroll_seconds + visible_seconds
+        )
         anchor = (
-            self._playback.positionSeconds
-            if self._playback.property("sourcePath")
-            else self._timeline_scroll_seconds + self._visible_timeline_seconds() / 2
+            playback_position
+            if playback_position_visible
+            else self._timeline_scroll_seconds + visible_seconds / 2
         )
         clamped, next_scroll = self._viewport.zoom_around_anchor(
             current_zoom=self._timeline_pixels_per_second,
             requested_zoom=value,
             current_scroll=self._timeline_scroll_seconds,
-            visible_seconds=self._visible_timeline_seconds(),
+            visible_seconds=visible_seconds,
             duration_seconds=self._timeline_duration_seconds(),
             anchor_seconds=anchor,
         )
@@ -688,10 +696,11 @@ class AppController(QObject):
         value = float(seconds)
         if not math.isfinite(value):
             return
-        duration = self._timeline_duration_seconds()
-        visible_seconds = self._visible_timeline_seconds()
-        maximum = max(0.0, duration - visible_seconds)
-        clamped = min(max(value, 0.0), maximum)
+        clamped = self._viewport.clamp_scroll(
+            value,
+            visible_seconds=self._visible_timeline_seconds(),
+            duration_seconds=self._timeline_duration_seconds(),
+        )
         if self._timeline_scroll_seconds == clamped:
             return
         self._timeline_scroll_seconds = clamped

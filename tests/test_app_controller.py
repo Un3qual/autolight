@@ -309,8 +309,9 @@ class AppControllerTest(unittest.TestCase):
 
         controller.playback._handle_position_changed(6_500)
 
-        self.assertEqual(scroll_changes, [3.3])
-        self.assertEqual(controller.timelineScrollSeconds, 3.3)
+        self.assertEqual(len(scroll_changes), 1)
+        self.assertAlmostEqual(scroll_changes[0], 3.3)
+        self.assertAlmostEqual(controller.timelineScrollSeconds, 3.3)
 
     def test_playback_follow_updates_scroll_only_when_playhead_enters_edge_band(self):
         controller = self._controller()
@@ -359,6 +360,23 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(zoom, 200.0)
         self.assertAlmostEqual(scroll, 5.0)
+
+    def test_zoom_with_loaded_offscreen_playback_anchors_to_viewport_center(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=800000)
+            controller.import_audio(str(audio_path))
+            controller.playback._source_path = str(audio_path)
+            controller.playback._set_position_seconds(2.0)
+            controller.set_timeline_visible_seconds(10.0)
+            controller.set_timeline_scroll_seconds(60.0)
+
+            controller.set_timeline_zoom(200.0)
+
+        self.assertEqual(controller.timelinePixelsPerSecond, 200.0)
+        self.assertAlmostEqual(controller.timelineScrollSeconds, 62.6)
 
     def test_play_selected_track_loads_resolved_source_audio(self):
         controller = self._controller()
@@ -480,6 +498,17 @@ class AppControllerTest(unittest.TestCase):
 
         controller.set_timeline_scroll_seconds(-10.0)
         self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_timeline_zoom_zero_and_negative_values_clamp_to_minimum(self):
+        controller = self._controller()
+
+        controller.set_timeline_zoom(120.0)
+        controller.set_timeline_zoom(0.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 24.0)
+
+        controller.set_timeline_zoom(120.0)
+        controller.set_timeline_zoom(-10.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 24.0)
 
     def test_timeline_zoom_and_scroll_ignore_non_finite_values(self):
         controller = self._controller()

@@ -14,7 +14,9 @@ class TimelineViewport:
         self._last_follow_emit_seconds = -math.inf
 
     def clamp_zoom(self, pixels_per_second: float) -> float:
-        value = self._finite_positive(pixels_per_second, fallback=96.0)
+        value = float(pixels_per_second)
+        if not math.isfinite(value):
+            value = 96.0
         return min(max(value, TIMELINE_MIN_PIXELS_PER_SECOND), TIMELINE_MAX_PIXELS_PER_SECOND)
 
     def clamp_scroll(
