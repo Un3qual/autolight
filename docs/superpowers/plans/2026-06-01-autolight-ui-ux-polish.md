@@ -34,7 +34,7 @@
 - Modify: `autolight/project/__init__.py`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing store tests for marker polish helpers**
+- [x] **Step 1: Add failing store tests for marker polish helpers**
 
 Add these imports to `tests/test_editable_marker_inspector.py`:
 
@@ -174,7 +174,7 @@ Add these tests to `EditableMarkerInspectorTest`:
         self.assertEqual([first.metadata["color"], second.metadata["color"]], ["blue", "blue"])
 ```
 
-- [ ] **Step 2: Run store tests and verify failure**
+- [x] **Step 2: Run store tests and verify failure**
 
 Run:
 
@@ -184,7 +184,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because `update_editable_marker`, `bulk_update_editable_markers`, `marker_display_color`, and `MARKER_COLOR_PALETTE` do not exist.
 
-- [ ] **Step 3: Implement marker palette and update helpers**
+- [x] **Step 3: Implement marker palette and update helpers**
 
 In `autolight/project/store.py`, add these definitions near the existing marker helpers:
 
@@ -348,7 +348,7 @@ Add the same public names to `__all__`:
     "update_editable_marker",
 ```
 
-- [ ] **Step 4: Run focused marker helper tests**
+- [x] **Step 4: Run focused marker helper tests**
 
 Run:
 
@@ -358,7 +358,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS for the marker helper, controller, and existing inspector tests.
 
-- [ ] **Step 5: Commit marker helper work**
+- [x] **Step 5: Commit marker helper work**
 
 Run:
 
@@ -377,7 +377,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_editable_marker_inspector.py`
 - Modify: `tests/test_timeline_model.py`
 
-- [ ] **Step 1: Add failing controller tests for selected markers and bulk slots**
+- [x] **Step 1: Add failing controller tests for selected markers and bulk slots**
 
 Add these tests to `tests/test_editable_marker_inspector.py`:
 
@@ -443,7 +443,7 @@ Add these tests to `tests/test_editable_marker_inspector.py`:
         self.assertEqual([item["label"] for item in controller.selectedTrackMarkers], ["All", "All"])
 ```
 
-- [ ] **Step 2: Add failing timeline model color role test**
+- [x] **Step 2: Add failing timeline model color role test**
 
 In `tests/test_timeline_model.py`, add `marker_display_color` import:
 
@@ -488,7 +488,7 @@ Add a dedicated color test:
             self.assertEqual(span["color"], marker_display_color(marker))
 ```
 
-- [ ] **Step 3: Run marker controller and timeline tests and verify failure**
+- [x] **Step 3: Run marker controller and timeline tests and verify failure**
 
 Run:
 
@@ -498,7 +498,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_timeli
 
 Expected: FAIL because the controller marker selection API and marker color span field are missing.
 
-- [ ] **Step 4: Add controller marker selection properties and slots**
+- [x] **Step 4: Add controller marker selection properties and slots**
 
 Update imports in `autolight/app_controller.py`:
 
@@ -647,7 +647,7 @@ Update `_marker_summary_for_track`:
         ]
 ```
 
-- [ ] **Step 5: Add color to timeline marker spans**
+- [x] **Step 5: Add color to timeline marker spans**
 
 In `autolight/timeline/model.py`, import the display helper:
 
@@ -669,7 +669,7 @@ Update `_marker_span`:
         }
 ```
 
-- [ ] **Step 6: Run controller and timeline tests**
+- [x] **Step 6: Run controller and timeline tests**
 
 Run:
 
@@ -679,7 +679,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_timeli
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit controller and timeline marker polish**
+- [x] **Step 7: Commit controller and timeline marker polish**
 
 Run:
 
@@ -696,7 +696,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing QML wiring test for labels, colors, and bulk edits**
+- [x] **Step 1: Add failing QML wiring test for labels, colors, and bulk edits**
 
 Add this test to `tests/test_editable_marker_inspector.py`:
 
@@ -714,7 +714,7 @@ Add this test to `tests/test_editable_marker_inspector.py`:
         self.assertIn("selectedMarkerIds.length", qml)
 ```
 
-- [ ] **Step 2: Run QML marker wiring test and verify failure**
+- [x] **Step 2: Run QML marker wiring test and verify failure**
 
 Run:
 
@@ -724,7 +724,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because the inspector does not expose color picker, category field, marker selection, or bulk update controls.
 
-- [ ] **Step 3: Add marker editor helper functions and color model**
+- [x] **Step 3: Add marker editor helper functions and color model**
 
 In `UI/Main.qml`, add these root properties and functions after `statusError`:
 
@@ -759,7 +759,7 @@ In `UI/Main.qml`, add these root properties and functions after `statusError`:
     }
 ```
 
-- [ ] **Step 4: Use resolved marker colors in the timeline lane**
+- [x] **Step 4: Use resolved marker colors in the timeline lane**
 
 Replace the marker rectangle color binding in the `markerSpans` repeater with:
 
@@ -783,7 +783,7 @@ Add a compact label inside the marker rectangle:
                                 }
 ```
 
-- [ ] **Step 5: Replace the simple inspector marker list with selectable marker rows**
+- [x] **Step 5: Replace the simple inspector marker list with selectable marker rows**
 
 Inside the `Repeater` for `appController.selectedTrackMarkers`, replace the delegate `Rectangle` body with:
 
@@ -828,7 +828,7 @@ Inside the `Repeater` for `appController.selectedTrackMarkers`, replace the dele
                                 }
 ```
 
-- [ ] **Step 6: Add category, color, update, and bulk controls to the inspector**
+- [x] **Step 6: Add category, color, update, and bulk controls to the inspector**
 
 Add this `TextField` after `markerLabelField`:
 
@@ -907,7 +907,7 @@ Add these buttons below `Delete Cue`:
                     }
 ```
 
-- [ ] **Step 7: Update controller add-marker slot for metadata arguments**
+- [x] **Step 7: Update controller add-marker slot for metadata arguments**
 
 In `autolight/app_controller.py`, change `add_marker_to_selected_track` to accept category and color while preserving Python callers with defaults:
 
@@ -943,7 +943,7 @@ In `autolight/app_controller.py`, change `add_marker_to_selected_track` to accep
             return ""
 ```
 
-- [ ] **Step 8: Run marker UI tests**
+- [x] **Step 8: Run marker UI tests**
 
 Run:
 
@@ -953,7 +953,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_timeli
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit marker QML polish**
+- [x] **Step 9: Commit marker QML polish**
 
 Run:
 
@@ -976,7 +976,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_app_controller.py`
 - Modify: `tests/test_waveform_summary.py`
 
-- [ ] **Step 1: Add failing playback transport volume test**
+- [x] **Step 1: Add failing playback transport volume test**
 
 Add this test to `tests/test_playback_transport.py`:
 
@@ -996,7 +996,7 @@ Add this test to `tests/test_playback_transport.py`:
         self.assertEqual(transport.volume, 0.0)
 ```
 
-- [ ] **Step 2: Add failing controller and QML playback UX tests**
+- [x] **Step 2: Add failing controller and QML playback UX tests**
 
 Add these tests to `tests/test_app_controller.py`:
 
@@ -1040,7 +1040,7 @@ Add this test to `tests/test_waveform_summary.py`:
         self.assertIn("id: waveformCenterLine", qml)
 ```
 
-- [ ] **Step 3: Run playback UX tests and verify failure**
+- [x] **Step 3: Run playback UX tests and verify failure**
 
 Run:
 
@@ -1050,7 +1050,7 @@ uv run python -m unittest tests.test_playback_transport.PlaybackTransportTest.te
 
 Expected: FAIL because observable volume, nudge playback, and polished QML controls are missing.
 
-- [ ] **Step 4: Make playback volume observable**
+- [x] **Step 4: Make playback volume observable**
 
 In `autolight/playback/transport.py`, add the signal:
 
@@ -1085,7 +1085,7 @@ Replace `set_volume()`:
         self.volumeChanged.emit()
 ```
 
-- [ ] **Step 5: Add playback nudge slot**
+- [x] **Step 5: Add playback nudge slot**
 
 In `autolight/app_controller.py`, add:
 
@@ -1095,7 +1095,7 @@ In `autolight/app_controller.py`, add:
         self.seek_playback(self._playback.positionSeconds + float(delta_seconds))
 ```
 
-- [ ] **Step 6: Add timeline seek helper and polished playback controls to QML**
+- [x] **Step 6: Add timeline seek helper and polished playback controls to QML**
 
 In `UI/Main.qml`, add:
 
@@ -1156,7 +1156,7 @@ Replace the existing Play, Stop, and time label toolbar controls with this group
                 }
 ```
 
-- [ ] **Step 7: Render waveform peak and RMS layers**
+- [x] **Step 7: Render waveform peak and RMS layers**
 
 Inside the lane rectangle that contains the waveform repeater, add a center line before the waveform `Repeater`:
 
@@ -1199,7 +1199,7 @@ Replace the single waveform bar body with peak and RMS nested rectangles:
                             }
 ```
 
-- [ ] **Step 8: Seek when clicking timeline lanes**
+- [x] **Step 8: Seek when clicking timeline lanes**
 
 Update the lane `MouseArea` click handler:
 
@@ -1214,7 +1214,7 @@ Update the lane `MouseArea` click handler:
                         }
 ```
 
-- [ ] **Step 9: Add deterministic screenshot mode**
+- [x] **Step 9: Add deterministic screenshot mode**
 
 In `main.py`, import `QTimer`:
 
@@ -1255,7 +1255,7 @@ In `main()`, replace the smoke return block with:
         return app.exec()
 ```
 
-- [ ] **Step 10: Add QImage visual QA script**
+- [x] **Step 10: Add QImage visual QA script**
 
 Create `scripts/check_qml_screenshot.py`:
 
@@ -1327,7 +1327,7 @@ if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
 ```
 
-- [ ] **Step 11: Run playback and visual QA checks**
+- [x] **Step 11: Run playback and visual QA checks**
 
 Run:
 
@@ -1339,7 +1339,7 @@ uv run python scripts/check_qml_screenshot.py /tmp/autolight-ui-ux-polish.png
 
 Expected: unit tests PASS, screenshot command exits 0, and pixel check exits 0.
 
-- [ ] **Step 12: Commit playback and visual QA polish**
+- [x] **Step 12: Commit playback and visual QA polish**
 
 Run:
 
@@ -1357,7 +1357,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_app_controller.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Add failing UI-state persistence tests**
+- [x] **Step 1: Add failing UI-state persistence tests**
 
 Add these tests to `tests/test_app_controller.py`:
 
@@ -1431,7 +1431,7 @@ Add these tests to `tests/test_app_controller.py`:
         self.assertEqual(reopened.timelineScrollSeconds, 0.0)
 ```
 
-- [ ] **Step 2: Run UI-state tests and verify failure**
+- [x] **Step 2: Run UI-state tests and verify failure**
 
 Run:
 
@@ -1441,7 +1441,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_save_
 
 Expected: FAIL because timeline state is not captured before save or restored on open.
 
-- [ ] **Step 3: Capture timeline UI state before saving**
+- [x] **Step 3: Capture timeline UI state before saving**
 
 In `autolight/app_controller.py`, add:
 
@@ -1467,7 +1467,7 @@ Call it in `save_project()` immediately before `ProjectStore.save(...)`:
             ProjectStore.save(self._project, project_path)
 ```
 
-- [ ] **Step 4: Restore timeline UI state during open**
+- [x] **Step 4: Restore timeline UI state during open**
 
 Add helpers:
 
@@ -1516,7 +1516,7 @@ Remove the unconditional selected-track clearing line from `open_project()`:
 
 Keep `new_project()` and `load_demo_project()` on the default `restore_ui_state=False`.
 
-- [ ] **Step 5: Document persisted timeline context**
+- [x] **Step 5: Document persisted timeline context**
 
 In `README.md`, add a bullet under `Current Scope`:
 
@@ -1530,7 +1530,7 @@ Add this sentence after the Basic Workflow list:
 Timeline zoom, horizontal scroll, and the selected track are stored in the `.autolight` project when you save.
 ```
 
-- [ ] **Step 6: Run UI-state persistence tests**
+- [x] **Step 6: Run UI-state persistence tests**
 
 Run:
 
@@ -1540,7 +1540,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_save_
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit timeline persistence**
+- [x] **Step 7: Commit timeline persistence**
 
 Run:
 
@@ -1559,7 +1559,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_editable_marker_inspector.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Add failing QML polish assertions**
+- [x] **Step 1: Add failing QML polish assertions**
 
 Add this test to `tests/test_app_controller.py`:
 
@@ -1582,7 +1582,7 @@ Add this assertion to `test_qml_exposes_marker_label_color_and_bulk_edit_control
         self.assertIn("No track selected", qml)
 ```
 
-- [ ] **Step 2: Run QML polish assertions and verify failure**
+- [x] **Step 2: Run QML polish assertions and verify failure**
 
 Run:
 
@@ -1592,7 +1592,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_u
 
 Expected: FAIL until the toolbar is grouped, lane height is centralized, and inspector empty states are present.
 
-- [ ] **Step 3: Add theme and stable layout constants**
+- [x] **Step 3: Add theme and stable layout constants**
 
 In `UI/Main.qml`, add these root constants:
 
@@ -1621,7 +1621,7 @@ Replace repeated lane and border colors in the timeline row with root constants:
                         border.color: appController.selectedTrackId === trackId ? root.focusAccent : root.borderSubtle
 ```
 
-- [ ] **Step 4: Split the crowded toolbar into grouped actions**
+- [x] **Step 4: Split the crowded toolbar into grouped actions**
 
 In `UI/Main.qml`, replace the toolbar row after the project title and spacer with three grouped `RowLayout`s:
 
@@ -1731,7 +1731,7 @@ Keep `transformPicker`, `transformParamsField`, `Add Transform`, `Add Vocals Ste
         }
 ```
 
-- [ ] **Step 5: Name timeline control group and improve empty inspector state**
+- [x] **Step 5: Name timeline control group and improve empty inspector state**
 
 Set the zoom/scroll `RowLayout` id:
 
@@ -1761,7 +1761,7 @@ Ensure inspector text fields and buttons remain disabled unless the selected tra
 
 Apply this property to `markerTimestampField`, `markerLabelField`, `markerCategoryField`, and `markerColorPicker`.
 
-- [ ] **Step 6: Run QML polish tests**
+- [x] **Step 6: Run QML polish tests**
 
 Run:
 
@@ -1771,7 +1771,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_u
 
 Expected: PASS.
 
-- [ ] **Step 7: Run visual QA after layout polish**
+- [x] **Step 7: Run visual QA after layout polish**
 
 Run:
 
@@ -1782,7 +1782,7 @@ uv run python scripts/check_qml_screenshot.py /tmp/autolight-ui-polish-final.png
 
 Expected: both commands exit 0.
 
-- [ ] **Step 8: Commit UI polish**
+- [x] **Step 8: Commit UI polish**
 
 Run:
 
@@ -1798,7 +1798,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-01-autolight-ui-ux-polish.md`
 
-- [ ] **Step 1: Run the focused suites from this plan**
+- [x] **Step 1: Run the focused suites from this plan**
 
 Run:
 
@@ -1808,7 +1808,7 @@ uv run python -m unittest tests.test_editable_marker_inspector tests.test_timeli
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run:
 
@@ -1818,7 +1818,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: PASS.
 
-- [ ] **Step 3: Run app smoke and visual QA**
+- [x] **Step 3: Run app smoke and visual QA**
 
 Run:
 
@@ -1830,7 +1830,7 @@ uv run python scripts/check_qml_screenshot.py /tmp/autolight-ui-ux-polish-final.
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Check whitespace and worktree**
+- [x] **Step 4: Check whitespace and worktree**
 
 Run:
 
@@ -1841,11 +1841,11 @@ git status --short
 
 Expected: `git diff --check` exits 0. `git status --short` shows only intended files before the final docs commit.
 
-- [ ] **Step 5: Mark this plan complete**
+- [x] **Step 5: Mark this plan complete**
 
 After all previous steps pass, update every completed checkbox in `docs/superpowers/plans/2026-06-01-autolight-ui-ux-polish.md` to checked.
 
-- [ ] **Step 6: Commit plan closure**
+- [x] **Step 6: Commit plan closure**
 
 Run:
 
