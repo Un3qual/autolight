@@ -399,6 +399,8 @@ class AppController(QObject):
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
             self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
+            self.timelineDurationSecondsChanged.emit()
+            self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
             self._set_last_error("")
             self._set_dirty(True)
             return marker.id
@@ -414,6 +416,8 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             if deleted:
+                self.timelineDurationSecondsChanged.emit()
+                self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
                 self._set_dirty(True)
             return deleted
         except Exception as exc:

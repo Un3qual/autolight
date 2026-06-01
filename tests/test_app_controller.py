@@ -808,6 +808,46 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotEqual(second_job_id, "")
         self.assertNotEqual(child.dependency_hash, first_dependency_hash)
 
+    def test_add_marker_emits_timeline_duration_and_reclamps_scroll(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        controller._timeline_scroll_seconds = 50.0
+        duration_changes = []
+        scroll_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        marker_id = controller.add_marker_to_selected_track(12.0, "Look")
+
+        self.assertNotEqual(marker_id, "")
+        self.assertEqual(duration_changes, [12.0])
+        self.assertEqual(scroll_changes, [4.0])
+        self.assertEqual(controller.timelineScrollSeconds, 4.0)
+
+    def test_delete_marker_emits_timeline_duration_and_reclamps_scroll(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(20.0, "Look")
+        controller.set_timeline_scroll_seconds(12.0)
+        duration_changes = []
+        scroll_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
+
+        self.assertEqual(duration_changes, [1.0])
+        self.assertEqual(scroll_changes, [0.0])
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
     def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
         controller = self._controller()
         controller.load_demo_project()
