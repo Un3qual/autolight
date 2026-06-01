@@ -719,10 +719,51 @@ class AppControllerTest(unittest.TestCase):
         marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
 
         self.assertIn("property real startX", marker_qml)
+        self.assertIn("property real startDuration", marker_qml)
         self.assertIn("startX = mouse.x", marker_qml)
+        self.assertIn("startDuration = root.duration", marker_qml)
         self.assertIn("var widthDelta = mouse.x - startX", marker_qml)
+        self.assertIn("if (Math.abs(widthDelta) < root.dragThresholdPixels)", marker_qml)
+        self.assertIn("startDuration + widthDelta / Math.max(1, root.pixelsPerSecond)", marker_qml)
         self.assertIn("resize_marker", marker_qml)
         self.assertNotIn("var widthDelta = mouse.x\n", marker_qml)
+        self.assertNotIn("property real startWidth", marker_qml)
+        self.assertNotIn("startWidth + widthDelta", marker_qml)
+
+    def test_qml_marker_move_skips_click_release_below_drag_threshold(self):
+        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property real dragThresholdPixels", marker_qml)
+        self.assertIn("var pixelDelta = mouse.x - pressX", marker_qml)
+        self.assertIn("if (Math.abs(pixelDelta) < root.dragThresholdPixels)", marker_qml)
+        self.assertLess(
+            marker_qml.index("if (Math.abs(pixelDelta) < root.dragThresholdPixels)"),
+            marker_qml.index("root.appController.move_selected_markers"),
+        )
+
+    def test_qml_marker_operations_select_track_and_preserve_selected_drags(self):
+        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
+        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property string trackId", marker_qml)
+        self.assertIn("property bool markerSelected", marker_qml)
+        self.assertIn("trackId: root.trackId", lane_qml)
+        self.assertIn("markerSelected: modelData.selected", lane_qml)
+        self.assertIn("root.appController.select_track(root.trackId)", marker_qml)
+        self.assertIn("if (!root.markerSelected)", marker_qml)
+        self.assertLess(
+            lane_qml.index("root.appController.select_track(root.trackId)"),
+            lane_qml.index("root.appController.toggle_marker_selection"),
+        )
+        self.assertLess(
+            marker_qml.index("root.appController.select_track(root.trackId)"),
+            marker_qml.index("root.appController.move_selected_markers"),
+        )
+
+    def test_qml_project_toolbar_requires_app_controller(self):
+        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+
+        self.assertIn("required property var appController", toolbar_qml)
 
     def test_qml_exposes_undo_redo_actions(self):
         qml = Path("UI/Main.qml").read_text(encoding="utf-8")

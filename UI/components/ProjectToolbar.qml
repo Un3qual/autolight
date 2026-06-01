@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 ToolBar {
     id: root
-    property var appController
+    required property var appController
     property int compactButtonHeight: 30
     property color toolbarForeground: "#111318"
     signal newRequested()

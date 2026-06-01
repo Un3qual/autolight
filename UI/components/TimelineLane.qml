@@ -50,9 +50,11 @@ Rectangle {
         model: markerSpans
         MarkerBlock {
             marker: modelData
+            trackId: root.trackId
             markerId: modelData.id
             timestamp: modelData.timestamp
             duration: modelData.duration
+            markerSelected: modelData.selected
             markerColor: modelData.color
             markerLabel: modelData.label
             editable: root.editable
@@ -65,6 +67,7 @@ Rectangle {
             height: parent.height - 18
             y: 9
             onSelected: function(markerId, additive) {
+                root.appController.select_track(root.trackId)
                 root.appController.toggle_marker_selection(markerId, additive)
             }
         }

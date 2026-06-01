@@ -4,11 +4,14 @@ Rectangle {
     id: root
     property var marker: ({ duration: 0, timestamp: 0, label: "", color: "transparent" })
     property var appController
+    property string trackId: ""
     property string markerId: root.marker.id || ""
     property real timestamp: Number(root.marker.timestamp || 0)
     property real duration: Number(root.marker.duration || 0)
+    property bool markerSelected: false
     property bool editable: false
     property real pixelsPerSecond: 96
+    property real dragThresholdPixels: 2
     property color markerColor: root.marker.color || "#22d3ee"
     property string markerLabel: root.marker.label || ""
     property real timelineLeftPadding: 24
@@ -37,7 +40,11 @@ Rectangle {
 
         onPressed: function(mouse) {
             pressX = mouse.x
-            root.selected(root.markerId, (mouse.modifiers & Qt.ShiftModifier) !== 0)
+            var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
+            root.appController.select_track(root.trackId)
+            if (!root.markerSelected) {
+                root.selected(root.markerId, additive)
+            }
         }
 
         onPositionChanged: function(mouse) {
@@ -45,8 +52,14 @@ Rectangle {
         }
 
         onReleased: function(mouse) {
+            var pixelDelta = mouse.x - pressX
+            if (Math.abs(pixelDelta) < root.dragThresholdPixels) {
+                lastPreviewDelta = 0
+                return
+            }
             var bypass = (mouse.modifiers & Qt.AltModifier) !== 0
-            var delta = (mouse.x - pressX) / Math.max(1, root.pixelsPerSecond)
+            var delta = pixelDelta / Math.max(1, root.pixelsPerSecond)
+            root.appController.select_track(root.trackId)
             root.appController.move_selected_markers(delta, bypass)
             lastPreviewDelta = 0
         }
@@ -64,15 +77,20 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.SizeHorCursor
-            property real startWidth: 0
             property real startX: 0
+            property real startDuration: 0
             onPressed: function(mouse) {
-                startWidth = root.width
                 startX = mouse.x
+                startDuration = root.duration
+                root.appController.select_track(root.trackId)
             }
             onReleased: function(mouse) {
                 var widthDelta = mouse.x - startX
-                var nextDuration = Math.max(0, (startWidth + widthDelta) / Math.max(1, root.pixelsPerSecond))
+                if (Math.abs(widthDelta) < root.dragThresholdPixels) {
+                    return
+                }
+                var nextDuration = Math.max(0, startDuration + widthDelta / Math.max(1, root.pixelsPerSecond))
+                root.appController.select_track(root.trackId)
                 root.appController.resize_marker(root.markerId, nextDuration)
             }
         }
