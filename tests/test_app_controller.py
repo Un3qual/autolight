@@ -704,6 +704,26 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: playhead", qml)
         self.assertIn("playheadTimeLabel", qml)
 
+    def test_qml_exposes_direct_marker_drag_resize_and_manual_tracks(self):
+        lane_qml = Path("UI/components/TimelineLane.qml").read_text(encoding="utf-8")
+        marker_qml = Path("UI/components/MarkerBlock.qml").read_text(encoding="utf-8")
+        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+
+        self.assertIn("add_manual_cue_track", toolbar_qml)
+        self.assertIn("snap_timeline_time", lane_qml)
+        self.assertIn("move_selected_markers", marker_qml)
+        self.assertIn("resize_marker", marker_qml)
+        self.assertIn("AltModifier", marker_qml)
+
+    def test_qml_exposes_undo_redo_actions(self):
+        qml = Path("UI/Main.qml").read_text(encoding="utf-8")
+        toolbar_qml = Path("UI/components/ProjectToolbar.qml").read_text(encoding="utf-8")
+
+        self.assertIn("appController.undo()", toolbar_qml + qml)
+        self.assertIn("appController.redo()", toolbar_qml + qml)
+        self.assertIn("canUndo", toolbar_qml + qml)
+        self.assertIn("canRedo", toolbar_qml + qml)
+
     def test_qml_main_composes_milestone_2_components(self):
         qml = Path("UI/Main.qml").read_text(encoding="utf-8")
 
@@ -1899,10 +1919,11 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("root.timelineX(root.marker.timestamp)", qml)
         self.assertIn("appController.timelinePixelsPerSecond", qml)
         self.assertIn("root.marker.duration : 0.08) * root.appController.timelinePixelsPerSecond", qml)
+        self.assertIn("pixelsPerSecond: root.appController.timelinePixelsPerSecond", qml)
+        self.assertIn("editable: root.editable", qml)
         self.assertNotIn("Math.max(0, Math.min(parent.width - width, root.timelineX(root.marker.timestamp)))", qml)
         self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)
-        self.assertNotIn("pixelsPerSecond: 96", qml)
         self.assertNotIn("model: markerCount", qml)
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)

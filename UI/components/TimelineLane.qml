@@ -8,6 +8,7 @@ Rectangle {
     property var markerSpans: []
     property var waveformSamples: []
     property real waveformDurationSeconds: 0
+    property bool editable: false
     property real timelineLeftPadding: 24
     property color laneBackground: "#171a20"
     property color laneBackgroundAlt: "#14171d"
@@ -20,9 +21,21 @@ Rectangle {
         return root.timelineLeftPadding + (seconds - root.appController.timelineScrollSeconds) * root.appController.timelinePixelsPerSecond
     }
 
+    function snapTimelineTime(seconds, bypassSnap) {
+        return root.appController.snap_timeline_time(seconds, bypassSnap)
+    }
+
     color: root.rowIndex % 2 === 0 ? root.laneBackground : root.laneBackgroundAlt
     border.color: root.appController.selectedTrackId === root.trackId ? root.focusAccent : root.borderSubtle
     clip: true
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        onClicked: function(mouse) {
+            root.clicked(mouse.x)
+        }
+    }
 
     WaveformStrip {
         anchors.fill: parent
@@ -37,9 +50,23 @@ Rectangle {
         model: markerSpans
         MarkerBlock {
             marker: modelData
+            markerId: modelData.id
+            timestamp: modelData.timestamp
+            duration: modelData.duration
+            markerColor: modelData.color
+            markerLabel: modelData.label
+            editable: root.editable
+            pixelsPerSecond: root.appController.timelinePixelsPerSecond
             appController: root.appController
             timelineLeftPadding: root.timelineLeftPadding
             markerLabelText: root.markerLabelText
+            x: root.timelineX(modelData.timestamp)
+            width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.appController.timelinePixelsPerSecond)
+            height: parent.height - 18
+            y: 9
+            onSelected: function(markerId, additive) {
+                root.appController.toggle_marker_selection(markerId, additive)
+            }
         }
     }
 
@@ -53,13 +80,5 @@ Rectangle {
             && x >= root.timelineLeftPadding
             && x <= parent.width
         z: 10
-    }
-
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
-        onClicked: function(mouse) {
-            root.clicked(mouse.x)
-        }
     }
 }

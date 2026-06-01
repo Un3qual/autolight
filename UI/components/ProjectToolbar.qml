@@ -41,6 +41,24 @@ ToolBar {
             Button { text: "Save As"; implicitHeight: root.compactButtonHeight; onClicked: root.saveAsRequested() }
             Button { text: "Demo"; implicitHeight: root.compactButtonHeight; onClicked: root.demoRequested() }
             Button { text: "Import Audio"; implicitHeight: root.compactButtonHeight; onClicked: root.importAudioRequested() }
+            Button {
+                text: "Manual Track"
+                implicitHeight: root.compactButtonHeight
+                enabled: root.appController.selectedTrackId.length > 0
+                onClicked: root.appController.add_manual_cue_track("Manual Cues")
+            }
+            Button {
+                text: "Undo"
+                implicitHeight: root.compactButtonHeight
+                enabled: root.appController.canUndo
+                onClicked: root.appController.undo()
+            }
+            Button {
+                text: "Redo"
+                implicitHeight: root.compactButtonHeight
+                enabled: root.appController.canRedo
+                onClicked: root.appController.redo()
+            }
         }
     }
 }

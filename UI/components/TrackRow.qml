@@ -107,6 +107,7 @@ Row {
         markerSpans: root.markerSpans
         waveformSamples: root.waveformSamples
         waveformDurationSeconds: root.waveformDurationSeconds
+        editable: root.trackType === "editable"
         timelineLeftPadding: root.timelineLeftPadding
         laneBackground: root.laneBackground
         laneBackgroundAlt: root.laneBackgroundAlt
