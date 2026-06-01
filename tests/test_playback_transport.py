@@ -76,6 +76,15 @@ class FakeMediaPlayer:
         self.positionChanged.emit(value)
 
 
+class PositionFirstStopMediaPlayer(FakeMediaPlayer):
+    def stop(self):
+        self.events.append(("stop", None))
+        self.stop_calls += 1
+        self.positionChanged.emit(0)
+        self.state = self.PlaybackState.StoppedState
+        self.playbackStateChanged.emit(self.state)
+
+
 class PlaybackTransportTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -115,6 +124,27 @@ class PlaybackTransportTest(unittest.TestCase):
         self.assertEqual(player.source.toLocalFile(), "")
         self.assertEqual(transport.sourcePath, "")
 
+    def test_missing_file_load_clears_existing_source_and_playback(self):
+        player = FakeMediaPlayer()
+        transport = PlaybackTransport(player=player, audio_output=FakeAudioOutput())
+
+        with tempfile.TemporaryDirectory() as directory:
+            current_path = self._temp_audio_path(directory)
+            missing_path = str(Path(directory) / "removed.wav")
+
+            self.assertTrue(transport.load_source(current_path, 12.5))
+            transport.play()
+
+            self.assertFalse(transport.load_source(missing_path, 9.0))
+
+        self.assertEqual(transport.lastError, f"audio file not found: {missing_path}")
+        self.assertEqual(player.source.toLocalFile(), "")
+        self.assertEqual(transport.sourcePath, "")
+        self.assertEqual(transport.durationSeconds, 0.0)
+        self.assertEqual(transport.positionSeconds, 0.0)
+        self.assertFalse(transport.isPlaying)
+        self.assertEqual(player.stop_calls, 2)
+
     def test_load_source_stops_playback_before_setting_new_source(self):
         player = FakeMediaPlayer()
         transport = PlaybackTransport(player=player, audio_output=FakeAudioOutput())
@@ -145,6 +175,24 @@ class PlaybackTransportTest(unittest.TestCase):
             self.assertFalse(transport.isPlaying)
             self.assertEqual(player.stop_calls, 1)
             self.assertEqual(transport.positionSeconds, 0.0)
+
+    def test_stop_marks_not_playing_before_position_reset_signal(self):
+        player = PositionFirstStopMediaPlayer()
+        transport = PlaybackTransport(player=player, audio_output=FakeAudioOutput())
+        with tempfile.TemporaryDirectory() as directory:
+            transport.load_source(self._temp_audio_path(directory), 8.0)
+            transport.play()
+            transport.seek_seconds(2.0)
+            playing_states_on_position_change = []
+            transport.positionSecondsChanged.connect(
+                lambda: playing_states_on_position_change.append(transport.isPlaying)
+            )
+
+            transport.stop()
+
+        self.assertEqual(playing_states_on_position_change, [False])
+        self.assertFalse(transport.isPlaying)
+        self.assertEqual(transport.positionSeconds, 0.0)
 
     def test_seek_clamps_to_duration(self):
         player = FakeMediaPlayer()

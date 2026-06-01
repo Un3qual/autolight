@@ -53,6 +53,8 @@ class PlaybackTransport(QObject):
     def load_source(self, path: str, duration_seconds: float = 0.0) -> bool:
         source_path = str(Path(path))
         if not Path(source_path).is_file():
+            if self._source_path:
+                self.unload()
             self._set_last_error(f"audio file not found: {source_path}")
             return False
         self.stop()
@@ -86,6 +88,7 @@ class PlaybackTransport(QObject):
 
     @Slot()
     def stop(self) -> None:
+        self._set_is_playing(False)
         self._player.stop()
         self._player.setPosition(0)
         self._set_position_seconds(0.0)

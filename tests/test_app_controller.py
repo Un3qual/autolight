@@ -126,6 +126,38 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertNotEqual(first_path, second_path)
 
+    def test_cleanup_unloads_playback_before_removing_demo_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        demo_temp_dir = controller._demo_temp_dir
+        original_demo_cleanup = demo_temp_dir.cleanup
+        calls = []
+
+        controller.playback.unload = Mock(side_effect=lambda: calls.append("unload"))
+        demo_temp_dir.cleanup = Mock(
+            side_effect=lambda: (calls.append("demo_cleanup"), original_demo_cleanup())
+        )
+
+        controller.cleanup()
+
+        self.assertEqual(calls[:2], ["unload", "demo_cleanup"])
+
+    def test_reloading_demo_unloads_playback_before_removing_previous_demo_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        demo_temp_dir = controller._demo_temp_dir
+        original_demo_cleanup = demo_temp_dir.cleanup
+        calls = []
+
+        controller.playback.unload = Mock(side_effect=lambda: calls.append("unload"))
+        demo_temp_dir.cleanup = Mock(
+            side_effect=lambda: (calls.append("demo_cleanup"), original_demo_cleanup())
+        )
+
+        controller.load_demo_project()
+
+        self.assertEqual(calls[:2], ["unload", "demo_cleanup"])
+
     def test_demo_project_emits_final_timeline_duration_after_content_loads(self):
         controller = self._controller()
         duration_changes = []
@@ -188,6 +220,21 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(duration_changes, [2.0])
         self.assertEqual(controller.timelineDurationSeconds, 2.0)
 
+    def test_playback_position_change_keeps_playhead_visible_during_playback(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(4.0)
+        controller.playback._handle_duration_changed(20_000)
+        controller.playback._set_is_playing(True)
+        scroll_changes = []
+        controller.timelineScrollSecondsChanged.connect(
+            lambda: scroll_changes.append(controller.timelineScrollSeconds)
+        )
+
+        controller.playback._handle_position_changed(6_500)
+
+        self.assertEqual(scroll_changes, [2.5])
+        self.assertEqual(controller.timelineScrollSeconds, 2.5)
+
     def test_play_selected_track_loads_resolved_source_audio(self):
         controller = self._controller()
         controller.playback.load_source = Mock(return_value=True)
@@ -247,6 +294,7 @@ class AppControllerTest(unittest.TestCase):
             def __init__(self):
                 self.load_source = Mock(return_value=False)
                 self.play = Mock()
+                self.unload = Mock()
                 self.lastError = "direct lastError should not be used"
 
             @staticmethod

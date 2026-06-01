@@ -58,6 +58,7 @@ class AppController(QObject):
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
         self._playback = PlaybackTransport(parent=self)
         self._playback.durationSecondsChanged.connect(self._notify_timeline_duration_changed)
+        self._playback.positionSecondsChanged.connect(self._keep_playback_position_visible)
         self._timeline_pixels_per_second = 96.0
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
@@ -226,6 +227,7 @@ class AppController(QObject):
         if not self._can_replace_project():
             return
         if self._demo_temp_dir is not None:
+            self._playback.unload()
             self._demo_temp_dir.cleanup()
         self._demo_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-demo-")
         demo_audio_name = Path(self._demo_temp_dir.name).name
@@ -551,6 +553,7 @@ class AppController(QObject):
     @Slot()
     def cleanup(self) -> None:
         self._job_queue.shutdown()
+        self._playback.unload()
         if self._demo_temp_dir is not None:
             self._demo_temp_dir.cleanup()
             self._demo_temp_dir = None
@@ -668,6 +671,13 @@ class AppController(QObject):
     def _notify_timeline_duration_changed(self) -> None:
         self.timelineDurationSecondsChanged.emit()
         self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
+    def _keep_playback_position_visible(self) -> None:
+        if not self._playback.isPlaying:
+            return
+        self.set_timeline_scroll_seconds(
+            self._scroll_for_visible_time(self._playback.positionSeconds)
+        )
 
     def _visible_timeline_seconds(self) -> float:
         return self._timeline_visible_seconds
