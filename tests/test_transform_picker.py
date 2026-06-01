@@ -221,6 +221,16 @@ class TransformPickerTest(unittest.TestCase):
         self.assertEqual(track_id, "")
         self.assertIn("source audio track", controller.lastError)
 
+    def test_qml_uses_transform_model_and_generic_add_action(self):
+        from pathlib import Path
+
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        self.assertIn("model: appController.transformModel", qml)
+        self.assertIn("textRole: \"name\"", qml)
+        self.assertIn("appController.add_transform_track(", qml)
+        self.assertIn("appController.transformModel.version_at(transformPicker.currentIndex)", qml)
+        self.assertIn("transformParamsField.text", qml)
+
 
 if __name__ == "__main__":
     unittest.main()

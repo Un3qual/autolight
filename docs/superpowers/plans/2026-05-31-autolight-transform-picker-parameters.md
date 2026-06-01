@@ -508,7 +508,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_transform_picker.py`
 
-- [ ] **Step 1: Add failing QML picker test**
+- [x] **Step 1: Add failing QML picker test**
 
 Add this test:
 
@@ -524,7 +524,7 @@ Add this test:
         self.assertIn("transformParamsField.text", qml)
 ```
 
-- [ ] **Step 2: Run QML picker test and verify failure**
+- [x] **Step 2: Run QML picker test and verify failure**
 
 Run:
 
@@ -534,7 +534,7 @@ uv run python -m unittest tests.test_transform_picker.TransformPickerTest.test_q
 
 Expected: FAIL because QML still uses hard-coded transform actions.
 
-- [ ] **Step 3: Add QML transform picker controls**
+- [x] **Step 3: Add QML transform picker controls**
 
 Add these controls to the toolbar near `Add Markers`:
 
@@ -566,7 +566,7 @@ Add these controls to the toolbar near `Add Markers`:
                 }
 ```
 
-- [ ] **Step 4: Run picker tests and smoke**
+- [x] **Step 4: Run picker tests and smoke**
 
 Run:
 
@@ -577,7 +577,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit transform picker UI**
+- [x] **Step 5: Commit transform picker UI**
 
 Run:
 

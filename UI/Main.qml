@@ -168,6 +168,32 @@ Window {
                     onClicked: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
                 }
 
+                ComboBox {
+                    id: transformPicker
+                    model: appController.transformModel
+                    textRole: "name"
+                    valueRole: "transformId"
+                    Layout.preferredWidth: 190
+                }
+
+                TextField {
+                    id: transformParamsField
+                    text: "{\"duration\": 8.0, \"interval\": 0.5}"
+                    placeholderText: "JSON params"
+                    Layout.preferredWidth: 210
+                }
+
+                Button {
+                    text: "Add Transform"
+                    enabled: appController.selectedTrackId.length > 0 && transformPicker.currentIndex >= 0
+                    onClicked: appController.add_transform_track(
+                        appController.selectedTrackId,
+                        transformPicker.currentValue,
+                        appController.transformModel.version_at(transformPicker.currentIndex),
+                        transformParamsField.text
+                    )
+                }
+
                 Button {
                     text: "Add Vocals Stem"
                     enabled: appController.selectedTrackId.length > 0
