@@ -4,12 +4,12 @@ import copy
 import shutil
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Callable
 
-from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry
+from autolight.analysis.registry import TransformCancelled, TransformContext, TransformRegistry, TransformResult
 from autolight.cache.store import CacheStore
 from autolight.project.models import CacheEntry, JobRun, Marker, ProjectDocument, ResultState, Track
 from autolight.project.store import find_track, mark_dependents_stale, new_id
@@ -74,7 +74,7 @@ class LocalJobQueue:
                 transform_id=snapshot.transform_id,
                 parameters_hash=snapshot.dependency_hash,
                 state=ResultState.RUNNING,
-                started_at=datetime.now(timezone.utc).isoformat(),
+                started_at=datetime.now(UTC).isoformat(),
             )
             project.job_runs.append(run)
             track.result_state = ResultState.RUNNING
@@ -113,15 +113,39 @@ class LocalJobQueue:
         self._executor.shutdown(wait=True)
 
     def refresh_cache_validity(self, project: ProjectDocument) -> list[str]:
+        entry_snapshots = self._cache_entry_snapshots(project)
+        validation_status_by_id = self._validate_cache_entries(entry_snapshots)
+        invalid_refs, changed_track_ids = self._apply_cache_validation(project, validation_status_by_id)
+
+        for changed_track_id in changed_track_ids:
+            self._notify_track_changed(changed_track_id)
+        return invalid_refs
+
+    def _cache_entry_snapshots(self, project: ProjectDocument) -> list[CacheEntry]:
+        with self._lock:
+            return [copy.copy(entry) for entry in project.cache_entries]
+
+    def _validate_cache_entries(self, entries: list[CacheEntry]) -> dict[str, str]:
+        return {
+            entry.id: "valid" if self.cache_store.is_entry_valid(entry) else "invalid"
+            for entry in entries
+        }
+
+    def _apply_cache_validation(
+        self,
+        project: ProjectDocument,
+        validation_status_by_id: dict[str, str],
+    ) -> tuple[list[str], list[str]]:
         invalid_refs: list[str] = []
         changed_track_ids: list[str] = []
+        directly_invalid_track_ids: list[str] = []
         with self._lock:
             entries_by_id = {entry.id: entry for entry in project.cache_entries}
-            for entry in project.cache_entries:
-                if self.cache_store.is_entry_valid(entry):
-                    entry.validation_status = "valid"
-                else:
-                    entry.validation_status = "invalid"
+            previous_states = {track.id: track.result_state for track in project.tracks}
+            for entry_id, validation_status in validation_status_by_id.items():
+                entry = entries_by_id.get(entry_id)
+                if entry is not None:
+                    entry.validation_status = validation_status
 
             for track in project.tracks:
                 track_invalid_refs = [
@@ -133,14 +157,20 @@ class LocalJobQueue:
                 if not track_invalid_refs:
                     continue
                 invalid_refs.extend(track_invalid_refs)
+                directly_invalid_track_ids.append(track.id)
                 if track.result_state == ResultState.COMPLETE:
                     track.result_state = ResultState.STALE
                 track.error = f"cache artifact missing or invalid: {track_invalid_refs[0]}"
                 changed_track_ids.append(track.id)
 
-        for changed_track_id in changed_track_ids:
-            self._notify_track_changed(changed_track_id)
-        return invalid_refs
+            for track_id in directly_invalid_track_ids:
+                mark_dependents_stale(project, track_id)
+
+            for track in project.tracks:
+                if track.id not in changed_track_ids and track.result_state != previous_states[track.id]:
+                    changed_track_ids.append(track.id)
+
+        return invalid_refs, changed_track_ids
 
     def _run(
         self,
@@ -153,72 +183,143 @@ class LocalJobQueue:
         artifact_dir = self._work_root / run.id
         additional_changed_track_ids: list[str] = []
 
-        def progress(value: float) -> None:
-            with self._lock:
-                run.progress = max(0.0, min(1.0, value))
-
         try:
-            transform = self.registry.get(snapshot.transform_id, version=snapshot.transform_version)
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            context = TransformContext(
-                artifact_dir=artifact_dir,
-                cancel_requested=cancel_event.is_set,
-                progress=progress,
+            result = self._execute_transform(
+                artifact_dir,
+                cancel_event,
+                snapshot,
+                self._progress_callback(run, snapshot),
             )
-            result = transform.run(context, snapshot.transform_params)
-            if cancel_event.is_set():
-                self._mark_finished(track, run, ResultState.CANCELLED, snapshot)
-                return
-            markers = [
-                self._marker_from_result(snapshot.track_id, snapshot.transform_id, item)
-                for item in result.markers
-            ]
-            cache_entries = self._cache_entries_from_artifacts(result.artifacts, snapshot)
-            cache_refs = [entry.id for entry in cache_entries]
-            with self._lock:
-                if cancel_event.is_set():
-                    self._mark_finished_locked(track, run, ResultState.CANCELLED, snapshot)
-                    return
-                if self._can_commit_locked(track, run, snapshot):
-                    run.state = ResultState.COMPLETE
-                    run.progress = 1.0
-                    run.produced_cache_refs = cache_refs
-                    self._upsert_cache_entries_locked(project, cache_entries)
-                    replacement_markers = [
-                        marker for marker in project.markers if marker.track_id != track.id
-                    ]
-                    replacement_markers.extend(markers)
-                    project.markers[:] = replacement_markers
-                    track.cache_refs = cache_refs
-                    track.result_state = ResultState.COMPLETE
-                    track.error = ""
-                    previous_states = {
-                        candidate.id: candidate.result_state for candidate in project.tracks
-                    }
-                    mark_dependents_stale(project, track.id)
-                    additional_changed_track_ids = [
-                        candidate.id
-                        for candidate in project.tracks
-                        if candidate.id != track.id and candidate.result_state != previous_states[candidate.id]
-                    ]
-                else:
-                    self._mark_stale_run_locked(run)
+            additional_changed_track_ids = self._handle_transform_result(
+                project,
+                track,
+                run,
+                cancel_event,
+                snapshot,
+                result,
+            )
         except TransformCancelled:
             self._mark_finished(track, run, ResultState.CANCELLED, snapshot)
         except Exception as exc:
             self._mark_finished(track, run, ResultState.FAILED, snapshot, error=str(exc))
         finally:
+            self._finish_run(track, run, artifact_dir, additional_changed_track_ids)
+
+    def _progress_callback(self, run: JobRun, snapshot: _JobSnapshot) -> Callable[[float], None]:
+        last_notified_progress = 0.0
+
+        def progress(value: float) -> None:
+            nonlocal last_notified_progress
+            should_notify = False
             with self._lock:
-                run.completed_at = datetime.now(timezone.utc).isoformat()
-                if self._active_job_by_track.get(track.id) == run.id:
-                    self._active_job_by_track.pop(track.id, None)
-            shutil.rmtree(artifact_dir, ignore_errors=True)
-            notified_track_ids = {track.id}
-            self._notify_track_changed(track.id)
-            for changed_track_id in additional_changed_track_ids:
-                if changed_track_id not in notified_track_ids:
-                    notified_track_ids.add(changed_track_id)
-                    self._notify_track_changed(changed_track_id)
+                run.progress = max(0.0, min(1.0, value))
+                if run.progress >= 1.0 or run.progress - last_notified_progress >= 0.05:
+                    last_notified_progress = run.progress
+                    should_notify = True
+            if should_notify:
+                self._notify_track_changed(snapshot.track_id)
+
+        return progress
+
+    def _execute_transform(
+        self,
+        artifact_dir: Path,
+        cancel_event: Event,
+        snapshot: _JobSnapshot,
+        progress: Callable[[float], None],
+    ) -> TransformResult:
+        transform = self.registry.get(snapshot.transform_id, version=snapshot.transform_version)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        context = TransformContext(
+            artifact_dir=artifact_dir,
+            cancel_requested=cancel_event.is_set,
+            progress=progress,
+        )
+        return transform.run(context, snapshot.transform_params)
+
+    def _handle_transform_result(
+        self,
+        project: ProjectDocument,
+        track: Track,
+        run: JobRun,
+        cancel_event: Event,
+        snapshot: _JobSnapshot,
+        result: TransformResult,
+    ) -> list[str]:
+        if cancel_event.is_set():
+            self._mark_finished(track, run, ResultState.CANCELLED, snapshot)
+            return []
+        markers = [
+            self._marker_from_result(snapshot.track_id, snapshot.transform_id, item)
+            for item in result.markers
+        ]
+        cache_entries = self._cache_entries_from_artifacts(result.artifacts, snapshot)
+        with self._lock:
+            if cancel_event.is_set():
+                self._mark_finished_locked(track, run, ResultState.CANCELLED, snapshot)
+                return []
+            return self._commit_transform_result_locked(project, track, run, snapshot, markers, cache_entries)
+
+    def _commit_transform_result_locked(
+        self,
+        project: ProjectDocument,
+        track: Track,
+        run: JobRun,
+        snapshot: _JobSnapshot,
+        markers: list[Marker],
+        cache_entries: list[CacheEntry],
+    ) -> list[str]:
+        if not self._can_commit_locked(track, run, snapshot):
+            self._mark_stale_run_locked(run)
+            return []
+        cache_refs = [entry.id for entry in cache_entries]
+        run.state = ResultState.COMPLETE
+        run.progress = 1.0
+        run.produced_cache_refs = cache_refs
+        self._upsert_cache_entries_locked(project, cache_entries)
+        self._replace_track_markers_locked(project, track, markers)
+        track.cache_refs = cache_refs
+        track.result_state = ResultState.COMPLETE
+        track.error = ""
+        return self._mark_dependents_stale_locked(project, track.id)
+
+    @staticmethod
+    def _replace_track_markers_locked(project: ProjectDocument, track: Track, markers: list[Marker]) -> None:
+        replacement_markers = [marker for marker in project.markers if marker.track_id != track.id]
+        replacement_markers.extend(markers)
+        project.markers[:] = replacement_markers
+
+    @staticmethod
+    def _mark_dependents_stale_locked(project: ProjectDocument, track_id: str) -> list[str]:
+        previous_states = {candidate.id: candidate.result_state for candidate in project.tracks}
+        mark_dependents_stale(project, track_id)
+        return [
+            candidate.id
+            for candidate in project.tracks
+            if candidate.id != track_id and candidate.result_state != previous_states[candidate.id]
+        ]
+
+    def _finish_run(
+        self,
+        track: Track,
+        run: JobRun,
+        artifact_dir: Path,
+        additional_changed_track_ids: list[str],
+    ) -> None:
+        with self._lock:
+            run.completed_at = datetime.now(UTC).isoformat()
+            if self._active_job_by_track.get(track.id) == run.id:
+                self._active_job_by_track.pop(track.id, None)
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        self._notify_changed_tracks(track.id, additional_changed_track_ids)
+
+    def _notify_changed_tracks(self, track_id: str, additional_track_ids: list[str]) -> None:
+        notified_track_ids = {track_id}
+        self._notify_track_changed(track_id)
+        for changed_track_id in additional_track_ids:
+            if changed_track_id not in notified_track_ids:
+                notified_track_ids.add(changed_track_id)
+                self._notify_track_changed(changed_track_id)
 
     def _mark_finished(
         self,

@@ -125,7 +125,7 @@ Window {
 
             RowLayout {
                 anchors.fill: parent
-                spacing: 12
+                spacing: 8
 
                 Label {
                     text: appController.projectName
@@ -170,8 +170,25 @@ Window {
 
                 Button {
                     text: "Run"
-                    enabled: appController.selectedTrackId.length > 0
+                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
                     onClicked: appController.run_track(appController.selectedTrackId)
+                }
+
+                Button {
+                    text: "Cancel"
+                    enabled: appController.selectedTrackHasRunningJob
+                    onClicked: appController.cancel_selected_job()
+                }
+
+                Button {
+                    text: "Rerun"
+                    enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob
+                    onClicked: appController.rerun_track(appController.selectedTrackId)
+                }
+
+                Button {
+                    text: "Check Cache"
+                    onClicked: appController.refresh_cache_status()
                 }
 
                 Button {
@@ -225,75 +242,193 @@ Window {
             }
         }
 
-        ListView {
-            id: timelineRows
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: appController.trackModel
-            clip: true
+            spacing: 0
 
-            delegate: Row {
-                width: timelineRows.width
-                height: 74
-                spacing: 0
+            ListView {
+                id: timelineRows
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                model: appController.trackModel
+                clip: true
 
-                Rectangle {
-                    width: 280
-                    height: parent.height
-                    color: index % 2 === 0 ? "#23262d" : "#1f2229"
-                    border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
+                delegate: Row {
+                    width: timelineRows.width
+                    height: 74
+                    spacing: 0
 
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 4
+                    Rectangle {
+                        width: 280
+                        height: parent.height
+                        color: index % 2 === 0 ? "#23262d" : "#1f2229"
+                        border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
 
-                        Text {
-                            text: name
-                            color: "#f4f4f5"
-                            font.pixelSize: 14
-                            elide: Text.ElideRight
-                            width: parent.width
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 4
+
+                            Text {
+                                text: name
+                                color: "#f4f4f5"
+                                font.pixelSize: 14
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+
+                            Text {
+                                text: trackType + " - " + resultState + " - " + markerCount + " markers"
+                                color: resultState === "failed" || resultState === "stale" ? "#f87171" : "#a1a1aa"
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+
+                            Text {
+                                text: error
+                                visible: error.length > 0
+                                color: "#fca5a5"
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+
+                            ProgressBar {
+                                width: parent.width
+                                from: 0
+                                to: 1
+                                value: jobProgress
+                                visible: activeJobId.length > 0
+                            }
                         }
 
-                        Text {
-                            text: trackType + " - " + resultState + " - " + markerCount + " markers"
-                            color: resultState === "failed" ? "#f87171" : "#a1a1aa"
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                            width: parent.width
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: appController.select_track(trackId)
                         }
                     }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton
-                        onClicked: appController.select_track(trackId)
+                    Rectangle {
+                        width: Math.max(0, parent.width - 280)
+                        height: parent.height
+                        color: index % 2 === 0 ? "#171a20" : "#14171d"
+                        border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
+
+                        Repeater {
+                            model: markerSpans
+                            Rectangle {
+                                width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
+                                height: parent.height - 18
+                                x: Math.max(0, Math.min(parent.width - width, root.timelineLeftPadding + modelData.timestamp * root.timelinePixelsPerSecond))
+                                y: 9
+                                radius: 2
+                                color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: appController.select_track(trackId)
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: inspectorPanel
+                Layout.preferredWidth: 260
+                Layout.fillHeight: true
+                color: "#1c1f26"
+                border.color: "#2f333d"
+                property string selectedMarkerId: ""
+
+                Connections {
+                    target: appController
+                    function onSelectedTrackIdChanged() {
+                        inspectorPanel.selectedMarkerId = ""
                     }
                 }
 
-                Rectangle {
-                    width: Math.max(0, parent.width - 280)
-                    height: parent.height
-                    color: index % 2 === 0 ? "#171a20" : "#14171d"
-                    border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
 
-                    Repeater {
-                        model: markerSpans
-                        Rectangle {
-                            width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
-                            height: parent.height - 18
-                            x: Math.max(0, Math.min(parent.width - width, root.timelineLeftPadding + modelData.timestamp * root.timelinePixelsPerSecond))
-                            y: 9
-                            radius: 2
-                            color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
+                    Label {
+                        text: "Inspector"
+                        color: "#f4f4f5"
+                        font.bold: true
+                    }
+
+                    TextField {
+                        id: markerTimestampField
+                        placeholderText: "Timestamp"
+                        text: "0.0"
+                    }
+
+                    TextField {
+                        id: markerLabelField
+                        placeholderText: "Label"
+                        text: "Cue"
+                    }
+
+                    ScrollView {
+                        id: markerScroll
+                        width: parent.width
+                        height: 120
+                        clip: true
+
+                        Column {
+                            id: markerList
+                            width: markerScroll.availableWidth
+                            spacing: 2
+
+                            Repeater {
+                                model: appController.selectedTrackMarkers
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    width: markerList.width
+                                    height: 28
+                                    color: inspectorPanel.selectedMarkerId === modelData.id ? "#2f4366" : "transparent"
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: Number(modelData.timestamp).toFixed(2) + "  " + modelData.label
+                                        color: "#f4f4f5"
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: inspectorPanel.selectedMarkerId = modelData.id
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton
-                        onClicked: appController.select_track(trackId)
+                    Button {
+                        text: "Add Cue"
+                        enabled: appController.selectedTrackId.length > 0 && appController.selectedTrackIsEditable
+                        onClicked: appController.add_marker_to_selected_track(
+                            Number(markerTimestampField.text),
+                            markerLabelField.text
+                        )
+                    }
+
+                    Button {
+                        text: "Delete Cue"
+                        enabled: inspectorPanel.selectedMarkerId.length > 0 && appController.selectedTrackIsEditable
+                        onClicked: {
+                            if (appController.delete_marker_from_selected_track(inspectorPanel.selectedMarkerId)) {
+                                inspectorPanel.selectedMarkerId = ""
+                            }
+                        }
                     }
                 }
             }

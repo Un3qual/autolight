@@ -10,12 +10,17 @@ from autolight.project.models import (
 )
 from autolight.project.store import (
     ProjectStore,
+    add_editable_marker,
     add_generated_track,
     create_editable_track_from_markers,
+    delete_editable_marker,
     find_track,
     import_audio_asset,
     mark_dependents_stale,
     new_project,
+    refresh_audio_asset_status,
+    refresh_audio_track_status,
+    track_dependency_inputs,
     validate_graph,
 )
 
@@ -29,11 +34,16 @@ __all__ = [
     "ResultState",
     "Track",
     "TrackType",
+    "add_editable_marker",
     "add_generated_track",
     "create_editable_track_from_markers",
+    "delete_editable_marker",
     "find_track",
     "import_audio_asset",
     "mark_dependents_stale",
     "new_project",
+    "refresh_audio_asset_status",
+    "refresh_audio_track_status",
+    "track_dependency_inputs",
     "validate_graph",
 ]

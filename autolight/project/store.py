@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from autolight.cache.keys import canonical_hash
+from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import (
     AudioAsset,
     CacheEntry,
@@ -21,6 +25,9 @@ from autolight.project.models import (
     Track,
     TrackType,
 )
+
+MAX_RELINK_CANDIDATES = 2048
+MAX_RELINK_DIRECTORIES = 512
 
 
 def new_id(prefix: str) -> str:
@@ -41,17 +48,13 @@ def fingerprint_file(path: Path) -> str:
 
 def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
     audio_path = Path(path)
-    if audio_path.exists() and not audio_path.is_file():
-        raise IsADirectoryError(f"audio asset path is not a file: {audio_path}")
-    if not audio_path.is_file():
-        raise FileNotFoundError(str(audio_path))
-
+    metadata = probe_audio_file(audio_path)
     asset = AudioAsset(
         id=new_id("asset"),
         path=str(audio_path),
-        duration=0.0,
-        sample_rate=0,
-        channels=0,
+        duration=metadata.duration,
+        sample_rate=metadata.sample_rate,
+        channels=metadata.channels,
         fingerprint=fingerprint_file(audio_path),
     )
     track = Track(
@@ -64,6 +67,309 @@ def import_audio_asset(project: ProjectDocument, path: str | Path) -> Track:
     project.audio_assets.append(asset)
     project.tracks.append(track)
     return track
+
+
+def refresh_audio_asset_status(project: ProjectDocument, search_dirs: list[str | Path] | None = None) -> list[str]:
+    changed_asset_ids: list[str] = []
+    search_roots = [Path(root) for root in search_dirs or []]
+    candidate_index: _RelinkCandidateIndex | None = None
+
+    def find_replacement(fingerprint: str, hint: str) -> Path | None:
+        nonlocal candidate_index
+        if Path(hint).stem:
+            if candidate_index is None:
+                candidate_index = _RelinkCandidateIndex(search_roots)
+            return candidate_index.find(fingerprint, hint)
+        return None
+
+    for asset in project.audio_assets:
+        if _refresh_audio_asset(asset, find_replacement):
+            changed_asset_ids.append(asset.id)
+
+    return changed_asset_ids
+
+
+def _refresh_audio_asset(asset: AudioAsset, find_replacement: Callable[[str, str], Path | None]) -> bool:
+    asset_path = Path(asset.path)
+    hint = asset_path.name
+
+    if asset_path.is_file():
+        if _fingerprint_matches(asset_path, asset.fingerprint):
+            return _mark_audio_asset_online(asset)
+        replacement = find_replacement(asset.fingerprint, hint)
+        if replacement is not None:
+            return _relink_audio_asset(asset, replacement)
+        return _mark_audio_asset_modified(asset)
+
+    replacement = find_replacement(asset.fingerprint, hint)
+    if replacement is not None:
+        return _relink_audio_asset(asset, replacement)
+
+    return _mark_audio_asset_offline(asset, hint)
+
+
+def _mark_audio_asset_online(asset: AudioAsset) -> bool:
+    if asset.import_status == "online" and not asset.relink_hint:
+        return False
+    asset.import_status = "online"
+    asset.relink_hint = ""
+    return True
+
+
+def _relink_audio_asset(asset: AudioAsset, replacement: Path) -> bool:
+    if asset.path == str(replacement) and asset.import_status == "online" and not asset.relink_hint:
+        return False
+    asset.path = str(replacement)
+    asset.import_status = "online"
+    asset.relink_hint = ""
+    return True
+
+
+def _mark_audio_asset_offline(asset: AudioAsset, hint: str) -> bool:
+    if asset.import_status == "offline" and asset.relink_hint == hint:
+        return False
+    asset.import_status = "offline"
+    asset.relink_hint = hint
+    return True
+
+
+def _mark_audio_asset_modified(asset: AudioAsset) -> bool:
+    if asset.import_status == "modified" and not asset.relink_hint:
+        return False
+    asset.import_status = "modified"
+    asset.relink_hint = ""
+    return True
+
+
+def _fingerprint_matches(path: Path, fingerprint: str) -> bool:
+    try:
+        return fingerprint_file(path) == fingerprint
+    except OSError:
+        return False
+
+
+class _RelinkCandidateIndex:
+    def __init__(self, search_roots: list[Path]):
+        self._candidates: list[tuple[str, Path]] = []
+        self._fingerprints: dict[Path, str | None] = {}
+        seen_roots: set[Path] = set()
+        for root in search_roots:
+            if root in seen_roots or not root.is_dir():
+                continue
+            seen_roots.add(root)
+            for candidate in _iter_relink_candidates(root):
+                self._candidates.append((candidate.stem.casefold(), candidate))
+
+    def find(self, fingerprint: str, filename_hint: str) -> Path | None:
+        hinted_stem = Path(filename_hint).stem.casefold()
+        if not hinted_stem:
+            return None
+        for candidate_stem, candidate in self._candidates:
+            if candidate_stem.startswith(hinted_stem) and self._fingerprint_matches(candidate, fingerprint):
+                return candidate
+        return None
+
+    def _fingerprint_matches(self, path: Path, fingerprint: str) -> bool:
+        if path not in self._fingerprints:
+            try:
+                self._fingerprints[path] = fingerprint_file(path)
+            except OSError:
+                self._fingerprints[path] = None
+        return self._fingerprints[path] == fingerprint
+
+
+def _iter_relink_candidates(root: Path):
+    candidate_count = 0
+    searched_directories = 0
+    stack: list[Path] = [root]
+    while stack and searched_directories < MAX_RELINK_DIRECTORIES:
+        current = stack.pop()
+        searched_directories += 1
+        try:
+            children = current.iterdir()
+        except OSError:
+            continue
+        for child in children:
+            if child.is_file():
+                yield child
+                candidate_count += 1
+                if candidate_count >= MAX_RELINK_CANDIDATES:
+                    return
+            elif child.is_dir() and not child.is_symlink():
+                stack.append(child)
+
+
+def _find_relink_candidate(fingerprint: str, search_roots: list[Path], filename_hint: str) -> Path | None:
+    return _RelinkCandidateIndex(search_roots).find(fingerprint, filename_hint)
+
+
+def refresh_audio_track_status(project: ProjectDocument) -> list[str]:
+    changed_track_ids: list[str] = []
+    problem_assets = {asset.id: asset for asset in project.audio_assets if asset.import_status != "online"}
+    previous_states = {track.id: track.result_state for track in project.tracks}
+    problem_source_tracks: list[tuple[str, str]] = []
+    restored_source_track_ids: list[str] = []
+
+    for track in _source_tracks(project):
+        track_changed, problem_error, restored = _refresh_source_audio_track(track, problem_assets)
+        if track_changed:
+            changed_track_ids.append(track.id)
+        if problem_error:
+            problem_source_tracks.append((track.id, problem_error))
+        if restored:
+            restored_source_track_ids.append(track.id)
+
+    for track_id, problem_error in problem_source_tracks:
+        mark_dependents_stale(project, track_id, error=_input_audio_problem_error(problem_error))
+
+    for track_id in restored_source_track_ids:
+        _restore_audio_problem_dependents(project, track_id)
+
+    _append_changed_dependents(project, previous_states, changed_track_ids)
+
+    return changed_track_ids
+
+
+def _source_tracks(project: ProjectDocument) -> list[Track]:
+    return [track for track in project.tracks if track.type == TrackType.SOURCE]
+
+
+def _refresh_source_audio_track(
+    track: Track,
+    problem_assets: dict[str, AudioAsset],
+) -> tuple[bool, str, bool]:
+    asset = _problem_audio_asset_for_track(track, problem_assets)
+    if asset is None:
+        restored = _clear_audio_problem_error(track)
+        return restored, "", restored
+    error = _audio_problem_error(asset)
+    return _mark_source_audio_problem(track, error), error, False
+
+
+def _problem_audio_asset_for_track(
+    track: Track,
+    problem_assets: dict[str, AudioAsset],
+) -> AudioAsset | None:
+    asset_id = track.provenance.get("asset_id")
+    if not isinstance(asset_id, str):
+        return None
+    return problem_assets.get(asset_id)
+
+
+def _clear_audio_problem_error(track: Track) -> bool:
+    if not _is_audio_problem_error(track.error):
+        return False
+    track.error = ""
+    if track.result_state == ResultState.STALE:
+        track.result_state = ResultState.COMPLETE
+    return True
+
+
+def _is_audio_problem_error(error: str) -> bool:
+    return error.startswith("audio asset offline:") or error.startswith("audio asset modified:")
+
+
+def _is_audio_dependency_error(error: str) -> bool:
+    return error.startswith("input audio asset offline:") or error.startswith("input audio asset modified:")
+
+
+def _mark_source_audio_problem(track: Track, error: str) -> bool:
+    changed = False
+    if track.result_state == ResultState.COMPLETE:
+        track.result_state = ResultState.STALE
+        changed = True
+    if track.error != error:
+        track.error = error
+        changed = True
+    return changed
+
+
+def _input_audio_problem_error(source_error: str) -> str:
+    return f"input {source_error}"
+
+
+def _audio_problem_error(asset: AudioAsset) -> str:
+    hint = asset.relink_hint or Path(asset.path).name or asset.id
+    return f"audio asset {asset.import_status}: {hint}"
+
+
+def _restore_audio_problem_dependents(project: ProjectDocument, restored_track_id: str) -> None:
+    restored_ids = {restored_track_id}
+    changed = True
+    while changed:
+        changed = False
+        for track in project.tracks:
+            if track.type == TrackType.SOURCE or track.id in restored_ids:
+                continue
+            if track.result_state != ResultState.STALE or not _is_audio_dependency_error(track.error):
+                continue
+            if not _all_inputs_complete(project, track):
+                continue
+            track.result_state = ResultState.COMPLETE
+            track.error = ""
+            restored_ids.add(track.id)
+            changed = True
+
+
+def _all_inputs_complete(project: ProjectDocument, track: Track) -> bool:
+    return all(
+        (input_track := find_track(project, input_id)) is not None
+        and input_track.result_state == ResultState.COMPLETE
+        for input_id in track.input_track_ids
+    )
+
+
+def _append_changed_dependents(
+    project: ProjectDocument,
+    previous_states: dict[str, ResultState],
+    changed_track_ids: list[str],
+) -> None:
+    for track in project.tracks:
+        if track.id not in changed_track_ids and track.result_state != previous_states[track.id]:
+            changed_track_ids.append(track.id)
+
+
+def track_dependency_inputs(project: ProjectDocument, track: Track) -> list[str]:
+    if track.cache_refs:
+        return list(track.cache_refs)
+    return [f"track:{track.id}:{_track_content_hash(project, track)}"]
+
+
+def _track_content_hash(project: ProjectDocument, track: Track) -> str:
+    payload = {
+        "track_id": track.id,
+        "track_type": track.type.value,
+        "input_track_ids": list(track.input_track_ids),
+        "dependency_hash": track.dependency_hash,
+        "provenance": track.provenance,
+        "markers": [_to_json(marker) for marker in _markers_for_track(project, track.id)],
+    }
+    if track.type == TrackType.SOURCE:
+        payload["audio_asset"] = _source_audio_asset_payload(project, track)
+    return canonical_hash(payload)
+
+
+def _markers_for_track(project: ProjectDocument, track_id: str) -> list[Marker]:
+    return sorted(
+        (marker for marker in project.markers if marker.track_id == track_id),
+        key=lambda marker: (marker.timestamp, marker.id),
+    )
+
+
+def _source_audio_asset_payload(project: ProjectDocument, track: Track) -> dict[str, str]:
+    asset_id = track.provenance.get("asset_id")
+    asset = next(
+        (candidate for candidate in project.audio_assets if isinstance(asset_id, str) and candidate.id == asset_id),
+        None,
+    )
+    if asset is None:
+        return {"asset_id": str(asset_id or ""), "status": "missing"}
+    return {
+        "asset_id": asset.id,
+        "fingerprint": asset.fingerprint,
+        "import_status": asset.import_status,
+        "relink_hint": asset.relink_hint,
+    }
 
 
 def add_generated_track(
@@ -139,6 +445,44 @@ def create_editable_track_from_markers(
     return track
 
 
+def add_editable_marker(project: ProjectDocument, track_id: str, timestamp: float, label: str) -> Marker:
+    track = find_track(project, track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.type != TrackType.EDITABLE:
+        raise ValueError("markers can only be added to an editable track")
+    timestamp_value = float(timestamp)
+    if not math.isfinite(timestamp_value):
+        raise ValueError("marker timestamp must be finite")
+    marker = Marker(
+        id=new_id("marker"),
+        track_id=track_id,
+        timestamp=timestamp_value,
+        label=str(label),
+        category="cue",
+        metadata={"created_by": "user"},
+    )
+    project.markers.append(marker)
+    mark_dependents_stale(project, track_id)
+    return marker
+
+
+def delete_editable_marker(project: ProjectDocument, track_id: str, marker_id: str) -> bool:
+    track = find_track(project, track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.type != TrackType.EDITABLE:
+        raise ValueError("markers can only be deleted from an editable track")
+    before = len(project.markers)
+    project.markers[:] = [
+        marker for marker in project.markers if not (marker.track_id == track_id and marker.id == marker_id)
+    ]
+    deleted = len(project.markers) != before
+    if deleted:
+        mark_dependents_stale(project, track_id)
+    return deleted
+
+
 def find_track(project: ProjectDocument, track_id: str) -> Track | None:
     return next((track for track in project.tracks if track.id == track_id), None)
 
@@ -190,7 +534,7 @@ def validate_graph(project: ProjectDocument) -> None:
     _validate_acyclic(project)
 
 
-def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> None:
+def mark_dependents_stale(project: ProjectDocument, changed_track_id: str, error: str = "") -> None:
     changed = True
     stale_ids = {changed_track_id}
     while changed:
@@ -201,7 +545,10 @@ def mark_dependents_stale(project: ProjectDocument, changed_track_id: str) -> No
             if track.id in stale_ids:
                 continue
             if any(input_id in stale_ids for input_id in track.input_track_ids):
+                was_complete = track.result_state == ResultState.COMPLETE
                 track.result_state = ResultState.STALE
+                if error and (was_complete or _is_audio_dependency_error(track.error)):
+                    track.error = error
                 stale_ids.add(track.id)
                 changed = True
 

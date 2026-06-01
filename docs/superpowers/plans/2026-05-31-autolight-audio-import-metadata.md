@@ -24,7 +24,7 @@
 - Create: `autolight/project/audio_probe.py`
 - Create: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Write failing probe tests**
+- [x] **Step 1: Write failing probe tests**
 
 Create `tests/test_audio_import_metadata.py`:
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run probe tests and verify failure**
+- [x] **Step 2: Run probe tests and verify failure**
 
 Run:
 
@@ -78,7 +78,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'autolight.project.audio_probe'`.
 
-- [ ] **Step 3: Implement `audio_probe.py`**
+- [x] **Step 3: Implement `audio_probe.py`**
 
 Create `autolight/project/audio_probe.py`:
 
@@ -114,7 +114,7 @@ def probe_audio_file(path: str | Path) -> AudioMetadata:
     )
 ```
 
-- [ ] **Step 4: Run probe tests and verify pass**
+- [x] **Step 4: Run probe tests and verify pass**
 
 Run:
 
@@ -124,7 +124,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: PASS with 2 tests.
 
-- [ ] **Step 5: Commit audio probe module**
+- [x] **Step 5: Commit audio probe module**
 
 Run:
 
@@ -141,7 +141,7 @@ Expected: commit succeeds.
 - Modify: `autolight/project/store.py`
 - Modify: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Add failing project import metadata test**
+- [x] **Step 1: Add failing project import metadata test**
 
 Append this import to `tests/test_audio_import_metadata.py`:
 
@@ -171,7 +171,7 @@ Add this test:
         self.assertNotEqual(asset.fingerprint, "")
 ```
 
-- [ ] **Step 2: Run the new import test and verify failure**
+- [x] **Step 2: Run the new import test and verify failure**
 
 Run:
 
@@ -181,7 +181,7 @@ uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTe
 
 Expected: FAIL because `duration`, `sample_rate`, and `channels` are still zero.
 
-- [ ] **Step 3: Use the probe in `import_audio_asset`**
+- [x] **Step 3: Use the probe in `import_audio_asset`**
 
 Add this import to `autolight/project/store.py`:
 
@@ -203,7 +203,7 @@ Replace the `AudioAsset` construction in `import_audio_asset` with:
     )
 ```
 
-- [ ] **Step 4: Run audio metadata and project store tests**
+- [x] **Step 4: Run audio metadata and project store tests**
 
 Run:
 
@@ -213,7 +213,7 @@ uv run python -m unittest tests.test_audio_import_metadata tests.test_project_st
 
 Expected: PASS. Update every test or fixture that imports audio from a `.wav` path to write decodable audio with this file's `write_wav` helper instead of placeholder bytes. This includes the existing project-store, end-to-end, timeline-model, jobs, and app-controller workflow tests, plus `AppController.load_demo_project`; replace fake writes such as `audio_path.write_bytes(b"fake audio bytes")`, `audio_path.write_bytes(b"audio")`, and `demo_audio_path.write_bytes(b"demo audio")` with `write_wav(...)`.
 
-- [ ] **Step 5: Commit import metadata**
+- [x] **Step 5: Commit import metadata**
 
 Run:
 
@@ -231,7 +231,7 @@ Expected: commit succeeds.
 - Modify: `autolight/project/__init__.py`
 - Modify: `tests/test_audio_import_metadata.py`
 
-- [ ] **Step 1: Add failing offline and relink tests**
+- [x] **Step 1: Add failing offline and relink tests**
 
 Add these tests to `AudioImportMetadataTest`:
 
@@ -307,7 +307,7 @@ Add these tests to `AudioImportMetadataTest`:
         self.assertNotIn(unrelated_path, checked_paths)
 ```
 
-- [ ] **Step 2: Run offline tests and verify failure**
+- [x] **Step 2: Run offline tests and verify failure**
 
 Run:
 
@@ -317,7 +317,7 @@ uv run python -m unittest tests.test_audio_import_metadata.AudioImportMetadataTe
 
 Expected: FAIL because `refresh_audio_asset_status` is not defined.
 
-- [ ] **Step 3: Implement `refresh_audio_asset_status`**
+- [x] **Step 3: Implement `refresh_audio_asset_status`**
 
 Add this function to `autolight/project/store.py` below `import_audio_asset`:
 
@@ -375,7 +375,7 @@ from autolight.project.store import refresh_audio_asset_status
 
 Add `"refresh_audio_asset_status"` to `__all__`.
 
-- [ ] **Step 4: Run audio import tests**
+- [x] **Step 4: Run audio import tests**
 
 Run:
 
@@ -385,7 +385,7 @@ uv run python -m unittest tests.test_audio_import_metadata -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit offline status and relink**
+- [x] **Step 5: Commit offline status and relink**
 
 Run:
 
@@ -398,7 +398,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run the full unit suite**
+- [x] **Step 1: Run the full unit suite**
 
 Run:
 
@@ -408,7 +408,7 @@ uv run python -m unittest discover -s tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run the headless smoke check**
+- [x] **Step 2: Run the headless smoke check**
 
 Run:
 
@@ -418,7 +418,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: command exits 0.
 
-- [ ] **Step 3: Check whitespace and status**
+- [x] **Step 3: Check whitespace and status**
 
 Run:
 

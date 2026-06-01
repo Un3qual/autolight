@@ -13,6 +13,7 @@ from autolight.project.store import (
     import_audio_asset,
     new_project,
 )
+from tests.helpers import write_wav
 
 
 class EndToEndFlowTest(unittest.TestCase):
@@ -23,7 +24,7 @@ class EndToEndFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             audio_path = root / "song.wav"
-            audio_path.write_bytes(b"audio")
+            write_wav(audio_path)
             project_path = root / "show.autolight"
             project = new_project("Demo")
             source = import_audio_asset(project, audio_path)

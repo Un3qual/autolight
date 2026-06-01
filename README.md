@@ -38,3 +38,7 @@ uv run python -m unittest discover -s tests -v
 5. After completion, choose `Derive Editable` to create editable cue markers from the generated track.
 6. Use `Save` or `Save As` to write a `.autolight` project file.
 7. Use `Open` to reload a saved project.
+
+## Cache Recovery
+
+Autolight records generated artifact metadata in the `.autolight` project file and stores artifact bytes under the app runtime cache. If a cached artifact is missing or corrupted, `Check Cache` marks affected generated tracks as `stale` while preserving visible markers and editable derived tracks. Select a stale or failed generated track and choose `Rerun` to regenerate its output.

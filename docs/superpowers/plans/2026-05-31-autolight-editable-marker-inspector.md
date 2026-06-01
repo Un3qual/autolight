@@ -27,7 +27,7 @@
 - Modify: `autolight/project/__init__.py`
 - Create: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Write failing marker mutation tests**
+- [x] **Step 1: Write failing marker mutation tests**
 
 Create `tests/test_editable_marker_inspector.py`:
 
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run marker mutation tests and verify failure**
+- [x] **Step 2: Run marker mutation tests and verify failure**
 
 Run:
 
@@ -112,7 +112,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: FAIL because `add_editable_marker` and `delete_editable_marker` are missing.
 
-- [ ] **Step 3: Implement marker mutation helpers**
+- [x] **Step 3: Implement marker mutation helpers**
 
 Add this code to `autolight/project/store.py`:
 
@@ -156,7 +156,7 @@ def delete_editable_marker(project: ProjectDocument, track_id: str, marker_id: s
 
 Export both helpers from `autolight/project/__init__.py`.
 
-- [ ] **Step 4: Run marker mutation tests**
+- [x] **Step 4: Run marker mutation tests**
 
 Run:
 
@@ -166,7 +166,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit marker mutation helpers**
+- [x] **Step 5: Commit marker mutation helpers**
 
 Run:
 
@@ -183,7 +183,7 @@ Expected: commit succeeds.
 - Modify: `autolight/app_controller.py`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing controller inspector tests**
+- [x] **Step 1: Add failing controller inspector tests**
 
 Add this test:
 
@@ -248,7 +248,7 @@ Add this test:
         self.assertEqual(controller.lastError, "")
 ```
 
-- [ ] **Step 2: Run controller inspector test and verify failure**
+- [x] **Step 2: Run controller inspector test and verify failure**
 
 Run:
 
@@ -258,7 +258,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because `add_marker_to_selected_track` is missing.
 
-- [ ] **Step 3: Implement controller marker slots**
+- [x] **Step 3: Implement controller marker slots**
 
 Extend imports:
 
@@ -320,7 +320,7 @@ Add slots:
             return False
 ```
 
-- [ ] **Step 4: Run editable marker tests**
+- [x] **Step 4: Run editable marker tests**
 
 Run:
 
@@ -330,7 +330,7 @@ uv run python -m unittest tests.test_editable_marker_inspector -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit controller inspector slots**
+- [x] **Step 5: Commit controller inspector slots**
 
 Run:
 
@@ -347,7 +347,7 @@ Expected: commit succeeds.
 - Modify: `UI/Main.qml`
 - Modify: `tests/test_editable_marker_inspector.py`
 
-- [ ] **Step 1: Add failing QML inspector test**
+- [x] **Step 1: Add failing QML inspector test**
 
 Add this test:
 
@@ -365,7 +365,7 @@ Add this test:
         self.assertEqual(qml.count("ListView {"), 1)
 ```
 
-- [ ] **Step 2: Run QML inspector test and verify failure**
+- [x] **Step 2: Run QML inspector test and verify failure**
 
 Run:
 
@@ -375,7 +375,7 @@ uv run python -m unittest tests.test_editable_marker_inspector.EditableMarkerIns
 
 Expected: FAIL because the inspector controls are not present.
 
-- [ ] **Step 3: Add QML inspector panel**
+- [x] **Step 3: Add QML inspector panel**
 
 Use `ScrollView` and `Repeater` for the marker list rather than adding a second `ListView`, so the existing timeline shell test that enforces one row-oriented timeline `ListView` remains meaningful.
 
@@ -480,7 +480,7 @@ Add a right-side `Rectangle` with this core content:
 
 Wrap the existing timeline `ListView` and the new inspector in a `RowLayout`; keep the existing `ListView` as `Layout.fillWidth: true` and put the inspector `Rectangle` beside it.
 
-- [ ] **Step 4: Run inspector tests and smoke**
+- [x] **Step 4: Run inspector tests and smoke**
 
 Run:
 
@@ -491,7 +491,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 5: Commit inspector UI**
+- [x] **Step 5: Commit inspector UI**
 
 Run:
 
@@ -504,7 +504,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Run all tests and smoke**
+- [x] **Step 1: Run all tests and smoke**
 
 Run:
 
@@ -515,7 +515,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: tests pass and smoke exits 0.
 
-- [ ] **Step 2: Check diff**
+- [x] **Step 2: Check diff**
 
 Run:
 

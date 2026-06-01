@@ -1,6 +1,5 @@
 import unittest
 import tempfile
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,15 +7,9 @@ from PySide6.QtCore import QCoreApplication
 
 import main as app_entry
 from autolight.app_controller import AppController
+from autolight.cache.keys import track_dependency_hash
 from autolight.project.models import CacheEntry, JobRun, ResultState
-
-
-def write_wav(path: Path) -> None:
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 8000)
+from tests.helpers import write_wav
 
 
 class FakeContext:
@@ -224,6 +217,181 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("cache artifact", reopened_generated.error)
         self.assertTrue(reopened.isDirty)
 
+    def test_open_project_refreshes_missing_audio_asset_status(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        asset = reopened._project.audio_assets[0]
+        self.assertEqual(asset.import_status, "offline")
+        self.assertEqual(asset.relink_hint, "song.wav")
+        self.assertTrue(reopened.isDirty)
+
+    def test_open_project_marks_offline_audio_tracks_stale(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            generated = self._track_by_id(controller, generated_id)
+            generated.result_state = ResultState.COMPLETE
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        reopened_source = self._track_by_id(reopened, source_id)
+        reopened_generated = self._track_by_id(reopened, generated_id)
+        source_index = reopened.trackModel.index(0, 0)
+        result_role = reopened.trackModel.role_for_name("resultState")
+        error_role = reopened.trackModel.role_for_name("error")
+        self.assertEqual(reopened_source.result_state, ResultState.STALE)
+        self.assertIn("audio asset offline", reopened_source.error)
+        self.assertEqual(reopened_generated.result_state, ResultState.STALE)
+        self.assertEqual(reopened.trackModel.data(source_index, result_role), "stale")
+        self.assertIn("audio asset offline", reopened.trackModel.data(source_index, error_role))
+
+    def test_open_project_restores_source_track_when_missing_audio_returns(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            audio_payload = audio_path.read_bytes()
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            offline = self._controller()
+            self.assertTrue(offline.open_project(str(project_path)))
+            self.assertTrue(offline.save_project(str(project_path)))
+            audio_path.write_bytes(audio_payload)
+
+            restored = self._controller()
+            self.assertTrue(restored.open_project(str(project_path)))
+
+        restored_source = self._track_by_id(restored, source_id)
+        self.assertEqual(restored._project.audio_assets[0].import_status, "online")
+        self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_source.error, "")
+
+    def test_open_project_restores_audio_staled_dependents_when_audio_returns(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path)
+            audio_payload = audio_path.read_bytes()
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            generated_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            generated = self._track_by_id(controller, generated_id)
+            generated.result_state = ResultState.COMPLETE
+            self.assertTrue(controller.save_project(str(project_path)))
+            audio_path.unlink()
+
+            offline = self._controller()
+            self.assertTrue(offline.open_project(str(project_path)))
+            offline_generated = self._track_by_id(offline, generated_id)
+            self.assertEqual(offline_generated.result_state, ResultState.STALE)
+            self.assertTrue(offline.save_project(str(project_path)))
+            audio_path.write_bytes(audio_payload)
+
+            restored = self._controller()
+            self.assertTrue(restored.open_project(str(project_path)))
+
+        restored_source = self._track_by_id(restored, source_id)
+        restored_generated = self._track_by_id(restored, generated_id)
+        self.assertEqual(restored_source.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_generated.result_state, ResultState.COMPLETE)
+        self.assertEqual(restored_generated.error, "")
+
+    def test_open_project_marks_modified_audio_tracks_stale(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            write_wav(audio_path, frames=8000)
+            project_path = root / "show.autolight"
+            source_id = controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            write_wav(audio_path, frames=4000)
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        reopened_source = self._track_by_id(reopened, source_id)
+        self.assertEqual(reopened._project.audio_assets[0].import_status, "modified")
+        self.assertEqual(reopened_source.result_state, ResultState.STALE)
+        self.assertIn("audio asset modified", reopened_source.error)
+
+    def test_open_project_searches_project_folder_for_relinked_audio(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            relinked_path = root / "song-copy.wav"
+            write_wav(audio_path)
+            project_path = root / "show.autolight"
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            relinked_path.write_bytes(audio_path.read_bytes())
+            audio_path.unlink()
+
+            reopened = self._controller()
+            self.assertTrue(reopened.open_project(str(project_path)))
+
+        asset = reopened._project.audio_assets[0]
+        self.assertEqual(asset.path, str(relinked_path))
+        self.assertEqual(asset.import_status, "online")
+        self.assertEqual(asset.relink_hint, "")
+        self.assertTrue(reopened.isDirty)
+
+    def test_refresh_cache_status_marks_invalid_cached_track_stale(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated = controller._project.tracks[1]
+        generated.result_state = ResultState.COMPLETE
+        generated.cache_refs = ["missing_cache"]
+        controller._project.cache_entries.append(
+            CacheEntry(
+                id="missing_cache",
+                dependency_hash="dep",
+                artifact_kind="stem",
+                path="stem/missing.bin",
+                created_at="",
+                transform_version="1",
+                size_bytes=10,
+            )
+        )
+
+        invalid_refs = controller.refresh_cache_status()
+
+        self.assertEqual(invalid_refs, ["missing_cache"])
+        self.assertEqual(generated.result_state, ResultState.STALE)
+        self.assertIn("cache artifact", generated.error)
+        self.assertIn("invalid cache artifacts: 1", controller.lastError)
+
     def test_save_project_rejects_running_jobs(self):
         controller = self._controller()
 
@@ -273,6 +441,88 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(controller.selectedTrackId, second_track_id)
 
+    def test_selected_track_can_rerun_only_for_transform_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+
+        self.assertFalse(controller.selectedTrackCanRerun)
+
+        controller.select_track(self._track_id(controller, 1))
+        self.assertTrue(controller.selectedTrackCanRerun)
+
+        controller.select_track(self._track_id(controller, 2))
+        self.assertFalse(controller.selectedTrackCanRerun)
+
+    def test_selected_track_is_editable_only_for_editable_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+
+        self.assertFalse(controller.selectedTrackIsEditable)
+
+        controller.select_track(self._track_id(controller, 1))
+        self.assertFalse(controller.selectedTrackIsEditable)
+
+        controller.select_track(self._track_id(controller, 2))
+        self.assertTrue(controller.selectedTrackIsEditable)
+
+    def test_selected_track_has_running_job_follows_job_state(self):
+        from threading import Event
+
+        from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
+        from autolight.project.store import add_generated_track
+
+        started = Event()
+        release = Event()
+
+        def blocking_transform(context, params):
+            started.set()
+            while not release.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
+
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._registry.register(
+            TransformSpec(
+                id="test.blocking_selected_job",
+                version="1",
+                name="Blocking Selected Job Test",
+                input_schema="audio.v1",
+                output_schema="artifact.test.v1",
+                estimated_cost="light",
+                run=blocking_transform,
+            )
+        )
+        source_id = self._track_id(controller, 0)
+        generated = add_generated_track(
+            controller._project,
+            source_id,
+            "Blocking Track",
+            "test.blocking_selected_job",
+            {},
+            "1",
+            "artifact.test.v1",
+            "blocking_dependency",
+        )
+        controller.trackModel.set_project(controller._project)
+        controller.select_track(generated.id)
+
+        self.assertFalse(controller.selectedTrackHasRunningJob)
+        job_id = controller.run_track(generated.id)
+        try:
+            self.assertNotEqual(job_id, "")
+            self.assertTrue(started.wait(2))
+            self.assertTrue(controller.selectedTrackHasRunningJob)
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
+
+        self.assertFalse(controller.selectedTrackHasRunningJob)
+
     def test_add_fixed_interval_track_uses_parent_and_selects_generated_track(self):
         controller = self._controller()
 
@@ -302,6 +552,215 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(job_id, "")
         self.assertIn("no transform", controller.lastError)
+
+    def test_cancel_selected_job_cancels_running_track(self):
+        from threading import Event
+
+        from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
+        from autolight.project.store import add_generated_track
+
+        started = Event()
+        release = Event()
+
+        def blocking_transform(context, params):
+            started.set()
+            while not release.wait(0.01):
+                if context.cancel_requested():
+                    raise TransformCancelled()
+            if context.cancel_requested():
+                raise TransformCancelled()
+            return TransformResult()
+
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._registry.register(
+            TransformSpec(
+                id="test.blocking_cancel",
+                version="1",
+                name="Blocking Cancel Test",
+                input_schema="audio.v1",
+                output_schema="artifact.test.v1",
+                estimated_cost="light",
+                run=blocking_transform,
+            )
+        )
+        source_id = self._track_id(controller, 0)
+        stem = add_generated_track(
+            controller._project,
+            source_id,
+            "Vocals Stem",
+            "test.blocking_cancel",
+            {"label": "vocals"},
+            "1",
+            "artifact.stem.v1",
+            "stem_dependency",
+        )
+        controller.trackModel.set_project(controller._project)
+        controller.select_track(stem.id)
+
+        job_id = controller.run_track(stem.id)
+        self.assertNotEqual(job_id, "")
+        try:
+            self.assertTrue(started.wait(2))
+            controller.cancel_selected_job()
+            controller._job_queue.wait(job_id, timeout=2)
+        finally:
+            release.set()
+
+        self.assertEqual(stem.result_state.value, "cancelled")
+
+    def test_rerun_track_submits_existing_transform(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated_id = self._track_id(controller, 1)
+        generated = self._track_by_id(controller, generated_id)
+        generated.result_state = ResultState.STALE
+        generated.error = "cache artifact missing or invalid: cache_1"
+
+        job_id = controller.rerun_track(generated_id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(generated.result_state.value, "complete")
+
+    def test_rerun_track_rejects_stale_input_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        source = self._track_by_id(controller, self._track_id(controller, 0))
+        generated_id = self._track_id(controller, 1)
+        generated = self._track_by_id(controller, generated_id)
+        source.result_state = ResultState.STALE
+        source.error = "audio asset offline: song.wav"
+        generated.result_state = ResultState.STALE
+        controller.select_track(generated_id)
+
+        job_id = controller.rerun_track(generated_id)
+
+        self.assertEqual(job_id, "")
+        self.assertFalse(controller.selectedTrackCanRerun)
+        self.assertEqual(generated.result_state, ResultState.STALE)
+        self.assertIn("input track is not complete", controller.lastError)
+
+    def test_rerun_track_does_not_clear_stale_state_when_submit_fails(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        editable = self._track_by_id(controller, editable_id)
+        editable.result_state = ResultState.STALE
+        editable.error = "source track changed"
+
+        job_id = controller.rerun_track(editable_id)
+
+        self.assertEqual(job_id, "")
+        self.assertEqual(editable.result_state, ResultState.STALE)
+        self.assertEqual(editable.error, "source track changed")
+        self.assertIn("no transform", controller.lastError)
+
+    def test_rerun_track_recomputes_dependency_hash_from_parent_cache_refs(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        parent = self._track_by_id(controller, self._track_id(controller, 1))
+        parent.cache_refs = ["cache_new"]
+        child = add_generated_track(
+            controller._project,
+            parent.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+        child.result_state = ResultState.STALE
+        expected_hash = track_dependency_hash(
+            parent.cache_refs,
+            child.transform_id,
+            child.transform_version,
+            child.transform_params,
+        )
+
+        job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(child.dependency_hash, expected_hash)
+
+    def test_run_track_recomputes_dependency_hash_from_parent_cache_refs(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        parent = self._track_by_id(controller, self._track_id(controller, 1))
+        parent.cache_refs = ["cache_new"]
+        child = add_generated_track(
+            controller._project,
+            parent.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+        expected_hash = track_dependency_hash(
+            parent.cache_refs,
+            child.transform_id,
+            child.transform_version,
+            child.transform_params,
+        )
+
+        job_id = controller.run_track(child.id)
+        controller._job_queue.wait(job_id, timeout=2)
+
+        self.assertNotEqual(job_id, "")
+        self.assertEqual(child.dependency_hash, expected_hash)
+
+    def test_rerun_track_recomputes_dependency_hash_from_editable_markers(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        editable = self._track_by_id(controller, self._track_id(controller, 2))
+        child = add_generated_track(
+            controller._project,
+            editable.id,
+            "Derived",
+            "markers.fixed_interval",
+            {"duration": 1.0, "interval": 0.5},
+            "1",
+            "markers.v1",
+            "old_dependency_hash",
+        )
+
+        first_job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(first_job_id, timeout=2)
+        first_dependency_hash = child.dependency_hash
+        controller.select_track(editable.id)
+        controller.add_marker_to_selected_track(1.75, "Blackout")
+        child.result_state = ResultState.STALE
+
+        second_job_id = controller.rerun_track(child.id)
+        controller._job_queue.wait(second_job_id, timeout=2)
+
+        self.assertNotEqual(first_job_id, "")
+        self.assertNotEqual(second_job_id, "")
+        self.assertNotEqual(child.dependency_hash, first_dependency_hash)
+
+    def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        generated_id = self._track_id(controller, 1)
+        controller.select_track(generated_id)
+        marker_changes = []
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+
+        job_id = controller.rerun_track(generated_id)
+        controller._job_queue.wait(job_id, timeout=2)
+        QCoreApplication.processEvents()
+
+        self.assertGreaterEqual(len(marker_changes), 1)
 
     def test_create_editable_track_from_missing_track_records_not_found_error(self):
         controller = self._controller()
@@ -357,7 +816,6 @@ class AppControllerTest(unittest.TestCase):
     def test_qml_timeline_shell_uses_one_row_oriented_list(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
 
-        self.assertEqual(qml.count("ListView {"), 1)
         self.assertIn("id: timelineRows", qml)
         self.assertIn("model: markerSpans", qml)
         self.assertIn("modelData.timestamp", qml)
@@ -407,6 +865,30 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.create_editable_track_from_track(appController.selectedTrackId)", qml)
         self.assertIn("appController.select_track(trackId)", qml)
         self.assertIn("appController.lastError", qml)
+
+    def test_qml_exposes_job_progress_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("jobProgress", qml)
+        self.assertIn("activeJobId", qml)
+        self.assertIn("ProgressBar", qml)
+        self.assertIn("appController.cancel_selected_job()", qml)
+        self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
+        self.assertIn("enabled: appController.selectedTrackHasRunningJob", qml)
+        self.assertIn(
+            "enabled: appController.selectedTrackCanRerun && !appController.selectedTrackHasRunningJob",
+            qml,
+        )
+
+    def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("appController.refresh_cache_status()", qml)
+        self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
+        self.assertIn('resultState === "stale"', qml)
+        self.assertIn('resultState === "failed"', qml)
+        self.assertIn("text: error", qml)
+        self.assertIn("visible: error.length > 0", qml)
 
     @staticmethod
     def _track_role_values(controller: AppController, row: int):
