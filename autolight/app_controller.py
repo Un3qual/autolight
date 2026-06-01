@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
 from autolight.demo_audio import write_silent_wav
 from autolight.jobs.queue import LocalJobQueue
-from autolight.project.models import Marker, ResultState, TrackType
+from autolight.playback import PlaybackTransport
+from autolight.project.models import AudioAsset, Marker, ResultState, TrackType
 from autolight.project.store import (
     ProjectStore,
     add_editable_marker,
@@ -37,6 +39,11 @@ class AppController(QObject):
     selectedTrackMarkersChanged = Signal()
     selectedTrackHasRunningJobChanged = Signal()
     selectedTrackCanRerunChanged = Signal()
+    selectedTrackCanPlayChanged = Signal()
+    timelineDurationSecondsChanged = Signal()
+    timelinePixelsPerSecondChanged = Signal()
+    timelineScrollSecondsChanged = Signal()
+    timelineVisibleSecondsChanged = Signal()
     isDirtyChanged = Signal()
     _track_changed_on_main_thread = Signal(str)
 
@@ -49,6 +56,12 @@ class AppController(QObject):
         self._is_dirty = False
         self._demo_temp_dir: tempfile.TemporaryDirectory | None = None
         self._runtime_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-runtime-")
+        self._playback = PlaybackTransport(parent=self)
+        self._playback.durationSecondsChanged.connect(self._notify_timeline_duration_changed)
+        self._playback.positionSecondsChanged.connect(self._keep_playback_position_visible)
+        self._timeline_pixels_per_second = 96.0
+        self._timeline_scroll_seconds = 0.0
+        self._timeline_visible_seconds = 8.0
         self._track_model = TimelineTrackModel(parent=self)
         self._track_model.set_project(self._project)
         self._registry = TransformRegistry()
@@ -71,6 +84,31 @@ class AppController(QObject):
     @Property(QObject, constant=True)
     def transformModel(self):
         return self._transform_model
+
+    @Property(QObject, constant=True)
+    def playback(self):
+        return self._playback
+
+    @Property(bool, notify=selectedTrackCanPlayChanged)
+    def selectedTrackCanPlay(self) -> bool:
+        asset = self._source_audio_asset_for_track_id(self._selected_track_id)
+        return asset is not None and asset.import_status == "online"
+
+    @Property(float, notify=timelineDurationSecondsChanged)
+    def timelineDurationSeconds(self) -> float:
+        return self._timeline_duration_seconds()
+
+    @Property(float, notify=timelinePixelsPerSecondChanged)
+    def timelinePixelsPerSecond(self) -> float:
+        return self._timeline_pixels_per_second
+
+    @Property(float, notify=timelineScrollSecondsChanged)
+    def timelineScrollSeconds(self) -> float:
+        return self._timeline_scroll_seconds
+
+    @Property(float, notify=timelineVisibleSecondsChanged)
+    def timelineVisibleSeconds(self) -> float:
+        return self._timeline_visible_seconds
 
     @Property(str, notify=projectNameChanged)
     def projectName(self) -> str:
@@ -173,6 +211,7 @@ class AppController(QObject):
             track = import_audio_asset(self._project, audio_path)
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -188,6 +227,7 @@ class AppController(QObject):
         if not self._can_replace_project():
             return
         if self._demo_temp_dir is not None:
+            self._playback.unload()
             self._demo_temp_dir.cleanup()
         self._demo_temp_dir = tempfile.TemporaryDirectory(prefix="autolight-demo-")
         demo_audio_name = Path(self._demo_temp_dir.name).name
@@ -218,6 +258,7 @@ class AppController(QObject):
         create_editable_track_from_markers(self._project, beats.id, "Editable Cues", ["marker_demo_1", "marker_demo_2"])
         self._track_model.set_project(self._project)
         self._set_selected_track_id(source.id)
+        self._notify_timeline_duration_changed()
         self._set_last_error("")
         self._set_dirty(False)
 
@@ -256,6 +297,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -291,6 +333,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -327,6 +370,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -352,6 +396,7 @@ class AppController(QObject):
             )
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return track.id
@@ -365,6 +410,7 @@ class AppController(QObject):
             marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
             self._track_model.set_project(self._project)
             self.selectedTrackMarkersChanged.emit()
+            self._notify_timeline_duration_changed()
             self._set_last_error("")
             self._set_dirty(True)
             return marker.id
@@ -380,6 +426,7 @@ class AppController(QObject):
             self.selectedTrackMarkersChanged.emit()
             self._set_last_error("")
             if deleted:
+                self._notify_timeline_duration_changed()
                 self._set_dirty(True)
             return deleted
         except Exception as exc:
@@ -432,20 +479,97 @@ class AppController(QObject):
             self._set_last_error(str(exc))
             return []
 
+    @Slot(result=bool)
+    def play_selected_track(self) -> bool:
+        asset = self._source_audio_asset_for_track_id(self._selected_track_id)
+        if asset is None:
+            self._set_last_error("selected track has no source audio")
+            return False
+        if asset.import_status != "online":
+            self._set_last_error(f"source audio is {asset.import_status}")
+            return False
+        loaded_source_path = self._playback.property("sourcePath")
+        if loaded_source_path != asset.path and not self._playback.load_source(
+            asset.path,
+            asset.duration,
+        ):
+            self._set_last_error(self._playback.property("lastError"))
+            return False
+        self._playback.play()
+        self._set_last_error("")
+        return True
+
+    @Slot()
+    def pause_playback(self) -> None:
+        self._playback.pause()
+
+    @Slot()
+    def stop_playback(self) -> None:
+        self._playback.stop()
+
+    @Slot(float)
+    def seek_playback(self, seconds: float) -> None:
+        self._playback.seek_seconds(seconds)
+        self.set_timeline_scroll_seconds(self._scroll_for_visible_time(seconds))
+
+    @Slot(float)
+    def set_timeline_zoom(self, pixels_per_second: float) -> None:
+        value = float(pixels_per_second)
+        if not math.isfinite(value):
+            return
+        clamped = min(max(value, 24.0), 240.0)
+        if self._timeline_pixels_per_second == clamped:
+            return
+        self._timeline_pixels_per_second = clamped
+        self.timelinePixelsPerSecondChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
+    @Slot(float)
+    def set_timeline_scroll_seconds(self, seconds: float) -> None:
+        value = float(seconds)
+        if not math.isfinite(value):
+            return
+        duration = self._timeline_duration_seconds()
+        visible_seconds = self._visible_timeline_seconds()
+        maximum = max(0.0, duration - visible_seconds)
+        clamped = min(max(value, 0.0), maximum)
+        if self._timeline_scroll_seconds == clamped:
+            return
+        self._timeline_scroll_seconds = clamped
+        self.timelineScrollSecondsChanged.emit()
+
+    @Slot(float)
+    def set_timeline_visible_seconds(self, seconds: float) -> None:
+        value = float(seconds)
+        if not math.isfinite(value):
+            return
+        clamped = max(value, 0.01)
+        if self._timeline_visible_seconds == clamped:
+            return
+        self._timeline_visible_seconds = clamped
+        self.timelineVisibleSecondsChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
     @Slot()
     def cleanup(self) -> None:
         self._job_queue.shutdown()
+        self._playback.unload()
         if self._demo_temp_dir is not None:
             self._demo_temp_dir.cleanup()
             self._demo_temp_dir = None
         self._runtime_temp_dir.cleanup()
 
     def _set_project(self, project) -> None:
+        self._playback.unload()
         self._project = project
         self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
+        self._timeline_scroll_seconds = 0.0
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
+        self.selectedTrackCanPlayChanged.emit()
+        self._notify_timeline_duration_changed()
+        self.timelineScrollSecondsChanged.emit()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
@@ -467,6 +591,7 @@ class AppController(QObject):
         self.selectedTrackMarkersChanged.emit()
         self.selectedTrackHasRunningJobChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
+        self.selectedTrackCanPlayChanged.emit()
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -482,6 +607,7 @@ class AppController(QObject):
         self._load_waveform_samples(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
+        self._notify_timeline_duration_changed()
         if track_id == self._selected_track_id:
             self.selectedTrackMarkersChanged.emit()
             self.selectedTrackHasRunningJobChanged.emit()
@@ -500,6 +626,16 @@ class AppController(QObject):
         return audio_path
 
     def _source_audio_path_for_track(self, track) -> str:
+        asset = self._source_audio_asset_for_track(track)
+        return asset.path if asset is not None else ""
+
+    def _source_audio_asset_for_track_id(self, track_id: str) -> AudioAsset | None:
+        track = find_track(self._project, track_id)
+        if track is None:
+            return None
+        return self._source_audio_asset_for_track(track)
+
+    def _source_audio_asset_for_track(self, track) -> AudioAsset | None:
         seen_track_ids = set()
         pending = [track]
         while pending:
@@ -510,7 +646,7 @@ class AppController(QObject):
             asset_id = current.provenance.get("asset_id")
             asset = next((item for item in self._project.audio_assets if item.id == asset_id), None)
             if asset is not None:
-                return asset.path
+                return asset
             next_track_ids = list(current.input_track_ids)
             source_track_id = current.provenance.get("source_track_id", "")
             if source_track_id:
@@ -519,7 +655,40 @@ class AppController(QObject):
                 candidate = find_track(self._project, next_track_id)
                 if candidate is not None:
                     pending.append(candidate)
-        return ""
+        return None
+
+    def _timeline_duration_seconds(self) -> float:
+        audio_duration = max((asset.duration for asset in self._project.audio_assets), default=0.0)
+        marker_duration = max(
+            (
+                marker.timestamp + (marker.duration or 0.0)
+                for marker in self._project.markers
+            ),
+            default=0.0,
+        )
+        return max(audio_duration, marker_duration, self._playback.durationSeconds)
+
+    def _notify_timeline_duration_changed(self) -> None:
+        self.timelineDurationSecondsChanged.emit()
+        self.set_timeline_scroll_seconds(self._timeline_scroll_seconds)
+
+    def _keep_playback_position_visible(self) -> None:
+        if not self._playback.isPlaying:
+            return
+        self.set_timeline_scroll_seconds(
+            self._scroll_for_visible_time(self._playback.positionSeconds)
+        )
+
+    def _visible_timeline_seconds(self) -> float:
+        return self._timeline_visible_seconds
+
+    def _scroll_for_visible_time(self, seconds: float) -> float:
+        visible_seconds = self._visible_timeline_seconds()
+        if seconds < self._timeline_scroll_seconds:
+            return seconds
+        if seconds > self._timeline_scroll_seconds + visible_seconds:
+            return seconds - visible_seconds
+        return self._timeline_scroll_seconds
 
     def _load_waveform_samples(self, track_id: str) -> None:
         track = find_track(self._project, track_id)
@@ -527,6 +696,7 @@ class AppController(QObject):
             return
         if track.result_state != ResultState.COMPLETE:
             track.provenance.pop("waveform_samples", None)
+            track.provenance.pop("waveform_duration_seconds", None)
             return
         entries_by_id = {entry.id: entry for entry in self._project.cache_entries}
         for cache_ref in track.cache_refs:
@@ -538,14 +708,18 @@ class AppController(QObject):
                 payload = json.loads(artifact_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, TypeError):
                 track.provenance.pop("waveform_samples", None)
+                track.provenance.pop("waveform_duration_seconds", None)
                 return
             samples = payload.get("samples", [])
             if isinstance(samples, list):
                 track.provenance["waveform_samples"] = samples
+                track.provenance["waveform_duration_seconds"] = payload.get("duration", 0.0)
             else:
                 track.provenance.pop("waveform_samples", None)
+                track.provenance.pop("waveform_duration_seconds", None)
             return
         track.provenance.pop("waveform_samples", None)
+        track.provenance.pop("waveform_duration_seconds", None)
 
     def _load_all_waveform_samples(self) -> None:
         for track in list(self._project.tracks):

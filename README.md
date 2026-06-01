@@ -33,11 +33,13 @@ uv run python -m unittest discover -s tests -v
 
 1. Launch the app with `uv run python main.py`.
 2. Use `Import Audio` to add a local audio file as a source track.
-3. With the source track selected, choose `Add Markers` to create a generated fixed-interval marker track.
-4. Run the generated marker track by selecting it and choosing `Run`.
-5. After completion, choose `Derive Editable` to create editable cue markers from the generated track.
-6. Use `Save` or `Save As` to write a `.autolight` project file.
-7. Use `Open` to reload a saved project.
+3. Select the source track and use `Play`, `Pause`, `Stop`, or the scrubber to inspect the audio.
+4. Use the timeline zoom and horizontal navigation controls to inspect markers at the needed time scale.
+5. With the source track selected, choose `Add Markers` or `Add Transform` to create generated marker tracks.
+6. Run generated tracks by selecting them and choosing `Run`.
+7. After completion, choose `Derive Editable` to create editable cue markers from a generated track.
+8. Use `Save` or `Save As` to write a `.autolight` project file.
+9. Use `Open` to reload a saved project.
 
 ## Cache Recovery
 

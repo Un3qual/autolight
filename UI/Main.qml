@@ -10,11 +10,38 @@ Window {
     visible: true
     title: appController.projectName
     color: "#181a1f"
-    readonly property real timelinePixelsPerSecond: 96
     readonly property real timelineLeftPadding: 24
+    readonly property real timelineLabelWidth: 280
     readonly property real timelineRulerHeight: 32
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
+    readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
+
+    function timelineX(seconds) {
+        return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
+    }
+
+    function updateTimelineVisibleSeconds() {
+        var laneWidth = Math.max(0, timelineRows.width - root.timelineLabelWidth - root.timelineLeftPadding)
+        appController.set_timeline_visible_seconds(laneWidth / appController.timelinePixelsPerSecond)
+    }
+
+    function formatSeconds(seconds) {
+        var safeSeconds = Math.max(0, Number(seconds))
+        var minutes = Math.floor(safeSeconds / 60)
+        var remaining = Math.floor(safeSeconds % 60)
+        return minutes + ":" + (remaining < 10 ? "0" + remaining : remaining)
+    }
+
+    function togglePlayback() {
+        if (appController.playback.isPlaying) {
+            appController.pause_playback()
+        } else if (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) {
+            appController.playback.play()
+        } else {
+            appController.play_selected_track()
+        }
+    }
 
     function newProjectWithConfirmation() {
         if (appController.isDirty) {
@@ -56,6 +83,15 @@ Window {
         }
         discardChangesDialog.pendingAction = ""
         discardChangesDialog.pendingPath = ""
+    }
+
+    Component.onCompleted: root.updateTimelineVisibleSeconds()
+
+    Connections {
+        target: appController
+        function onTimelinePixelsPerSecondChanged() {
+            root.updateTimelineVisibleSeconds()
+        }
     }
 
     FileDialog {
@@ -136,6 +172,25 @@ Window {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                Button {
+                    text: appController.playback.isPlaying ? "Pause" : "Play"
+                    enabled: appController.selectedTrackCanPlay || (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) || appController.playback.isPlaying
+                    onClicked: root.togglePlayback()
+                }
+
+                Button {
+                    text: "Stop"
+                    enabled: appController.playback.sourcePath.length > 0
+                    onClicked: appController.stop_playback()
+                }
+
+                Label {
+                    id: playheadTimeLabel
+                    text: root.formatSeconds(appController.playback.positionSeconds) + " / " + root.formatSeconds(appController.playback.durationSeconds)
+                    color: "#d4d4d8"
+                    font.pixelSize: 12
+                }
 
                 Button {
                     text: "New"
@@ -245,7 +300,7 @@ Window {
             spacing: 0
 
             Rectangle {
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: root.timelineLabelWidth
                 Layout.fillHeight: true
                 color: "#1c1f26"
                 border.color: "#2f333d"
@@ -256,21 +311,66 @@ Window {
                 Layout.fillHeight: true
                 color: "#1c1f26"
 
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: root.timelineLeftPadding
-                    spacing: root.timelinePixelsPerSecond
-
-                    Repeater {
-                        model: 9
-                        Text {
-                            text: index + "s"
-                            color: "#a1a1aa"
-                            font.pixelSize: 12
-                        }
+                Repeater {
+                    model: Math.ceil(appController.timelineVisibleSeconds) + 1
+                    Text {
+                        property real tickSecond: Math.ceil(appController.timelineScrollSeconds) + index
+                        x: root.timelineX(tickSecond)
+                        y: 9
+                        text: tickSecond + "s"
+                        color: "#a1a1aa"
+                        font.pixelSize: 12
                     }
                 }
+            }
+        }
+
+        Slider {
+            id: playbackScrubber
+            Layout.fillWidth: true
+            from: 0
+            to: Math.max(0.01, appController.playback.durationSeconds)
+            value: appController.playback.positionSeconds
+            enabled: appController.playback.sourcePath.length > 0
+            live: true
+            onMoved: appController.seek_playback(value)
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            spacing: 10
+
+            Label {
+                text: "Zoom"
+                color: "#d4d4d8"
+                font.pixelSize: 12
+            }
+
+            Slider {
+                id: timelineZoomSlider
+                from: 24
+                to: 240
+                value: appController.timelinePixelsPerSecond
+                Layout.preferredWidth: 180
+                onMoved: appController.set_timeline_zoom(value)
+            }
+
+            Label {
+                text: Math.round(appController.timelinePixelsPerSecond) + " px/s"
+                color: "#a1a1aa"
+                font.pixelSize: 12
+                Layout.preferredWidth: 64
+            }
+
+            Slider {
+                id: timelineScrollSlider
+                from: 0
+                to: Math.max(0, appController.timelineDurationSeconds - appController.timelineVisibleSeconds)
+                value: appController.timelineScrollSeconds
+                Layout.fillWidth: true
+                onMoved: appController.set_timeline_scroll_seconds(value)
             }
         }
 
@@ -285,6 +385,7 @@ Window {
                 Layout.fillHeight: true
                 model: appController.trackModel
                 clip: true
+                onWidthChanged: root.updateTimelineVisibleSeconds()
 
                 delegate: Row {
                     width: timelineRows.width
@@ -292,7 +393,7 @@ Window {
                     spacing: 0
 
                     Rectangle {
-                        width: 280
+                        width: root.timelineLabelWidth
                         height: parent.height
                         color: index % 2 === 0 ? "#23262d" : "#1f2229"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#343842"
@@ -353,7 +454,7 @@ Window {
                     }
 
                     Rectangle {
-                        width: Math.max(0, parent.width - 280)
+                        width: Math.max(0, parent.width - root.timelineLabelWidth)
                         height: parent.height
                         color: index % 2 === 0 ? "#171a20" : "#14171d"
                         border.color: appController.selectedTrackId === trackId ? "#facc15" : "#2f333d"
@@ -364,8 +465,9 @@ Window {
                             Rectangle {
                                 width: 2
                                 height: Math.max(2, modelData.peak * (parent.height - 18))
-                                x: root.timelineLeftPadding + (waveformSamples.length > 1 ? index * Math.max(0, parent.width - root.timelineLeftPadding - width) / (waveformSamples.length - 1) : 0)
+                                x: root.timelineX(index / Math.max(1, waveformSamples.length - 1) * waveformDurationSeconds)
                                 y: (parent.height - height) / 2
+                                visible: x >= root.timelineLeftPadding - width && x <= parent.width
                                 color: "#60a5fa"
                             }
                         }
@@ -373,13 +475,26 @@ Window {
                         Repeater {
                             model: markerSpans
                             Rectangle {
-                                width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * root.timelinePixelsPerSecond)
+                                width: Math.max(8, (modelData.duration > 0 ? modelData.duration : 0.08) * appController.timelinePixelsPerSecond)
                                 height: parent.height - 18
-                                x: Math.max(0, Math.min(parent.width - width, root.timelineLeftPadding + modelData.timestamp * root.timelinePixelsPerSecond))
+                                x: root.timelineX(modelData.timestamp)
                                 y: 9
+                                visible: x + width >= root.timelineLeftPadding && x <= parent.width
                                 radius: 2
                                 color: trackType === "editable" ? "#67e8f9" : "#a7f3d0"
                             }
+                        }
+
+                        Rectangle {
+                            id: playhead
+                            width: 2
+                            height: parent.height
+                            x: root.timelineX(appController.playback.positionSeconds)
+                            color: "#facc15"
+                            visible: appController.playback.sourcePath.length > 0
+                                && x >= root.timelineLeftPadding
+                                && x <= parent.width
+                            z: 10
                         }
 
                         MouseArea {
@@ -498,10 +613,10 @@ Window {
                 anchors.left: parent.left
                 anchors.leftMargin: 12
                 width: parent.width - 24
-                text: appController.lastError.length > 0
-                    ? appController.lastError
+                text: root.statusError.length > 0
+                    ? root.statusError
                     : (appController.projectPath.length > 0 ? appController.projectPath : "Unsaved project")
-                color: appController.lastError.length > 0 ? "#f87171" : "#a1a1aa"
+                color: root.statusError.length > 0 ? "#f87171" : "#a1a1aa"
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
 from autolight.project.models import JobRun, Marker, ProjectDocument, ResultState, Track
@@ -22,6 +24,7 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 11: b"waveformSamples",
         Qt.ItemDataRole.UserRole + 12: b"cacheRefCount",
         Qt.ItemDataRole.UserRole + 13: b"artifactKinds",
+        Qt.ItemDataRole.UserRole + 14: b"waveformDurationSeconds",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -47,6 +50,7 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("artifactKinds"): lambda track: ", ".join(
                 self._artifact_kinds_for_track(track.cache_refs)
             ),
+            self.role_for_name("waveformDurationSeconds"): self._waveform_duration_seconds_for_track,
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
@@ -154,6 +158,17 @@ class TimelineTrackModel(QAbstractListModel):
             return []
         samples = track.provenance.get("waveform_samples", [])
         return samples if isinstance(samples, list) else []
+
+    def _waveform_duration_seconds_for_track(self, track: Track) -> float:
+        if self._project is None or track.result_state != ResultState.COMPLETE:
+            return 0.0
+        if not self._has_valid_waveform_cache(track.cache_refs):
+            return 0.0
+        try:
+            duration = float(track.provenance.get("waveform_duration_seconds", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        return duration if math.isfinite(duration) and duration >= 0.0 else 0.0
 
     def _has_valid_waveform_cache(self, cache_refs: list[str]) -> bool:
         if self._project is None:

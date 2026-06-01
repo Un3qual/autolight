@@ -1,6 +1,8 @@
 import unittest
 import tempfile
+import math
 from pathlib import Path
+from unittest.mock import Mock
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
@@ -124,6 +126,50 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertNotEqual(first_path, second_path)
 
+    def test_cleanup_unloads_playback_before_removing_demo_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        demo_temp_dir = controller._demo_temp_dir
+        original_demo_cleanup = demo_temp_dir.cleanup
+        calls = []
+
+        controller.playback.unload = Mock(side_effect=lambda: calls.append("unload"))
+        demo_temp_dir.cleanup = Mock(
+            side_effect=lambda: (calls.append("demo_cleanup"), original_demo_cleanup())
+        )
+
+        controller.cleanup()
+
+        self.assertEqual(calls[:2], ["unload", "demo_cleanup"])
+
+    def test_reloading_demo_unloads_playback_before_removing_previous_demo_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        demo_temp_dir = controller._demo_temp_dir
+        original_demo_cleanup = demo_temp_dir.cleanup
+        calls = []
+
+        controller.playback.unload = Mock(side_effect=lambda: calls.append("unload"))
+        demo_temp_dir.cleanup = Mock(
+            side_effect=lambda: (calls.append("demo_cleanup"), original_demo_cleanup())
+        )
+
+        controller.load_demo_project()
+
+        self.assertEqual(calls[:2], ["unload", "demo_cleanup"])
+
+    def test_demo_project_emits_final_timeline_duration_after_content_loads(self):
+        controller = self._controller()
+        duration_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+
+        controller.load_demo_project()
+
+        self.assertGreater(controller.timelineDurationSeconds, 0.0)
+        self.assertEqual(duration_changes[-1], controller.timelineDurationSeconds)
+
     def test_new_project_resets_project_path_and_timeline_model(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -149,6 +195,260 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.selectedTrackId, track_id)
         self.assertEqual(controller.lastError, "")
         self.assertTrue(controller.isDirty)
+
+    def test_selected_source_track_can_play(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=16000)
+            track_id = controller.import_audio(str(audio_path))
+
+            self.assertEqual(controller.selectedTrackId, track_id)
+            self.assertTrue(controller.selectedTrackCanPlay)
+            self.assertAlmostEqual(controller.timelineDurationSeconds, 2.0, places=2)
+
+    def test_playback_duration_change_notifies_timeline_duration(self):
+        controller = self._controller()
+        duration_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+
+        controller.playback._handle_duration_changed(2_000)
+
+        self.assertEqual(duration_changes, [2.0])
+        self.assertEqual(controller.timelineDurationSeconds, 2.0)
+
+    def test_playback_position_change_keeps_playhead_visible_during_playback(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(4.0)
+        controller.playback._handle_duration_changed(20_000)
+        controller.playback._set_is_playing(True)
+        scroll_changes = []
+        controller.timelineScrollSecondsChanged.connect(
+            lambda: scroll_changes.append(controller.timelineScrollSeconds)
+        )
+
+        controller.playback._handle_position_changed(6_500)
+
+        self.assertEqual(scroll_changes, [2.5])
+        self.assertEqual(controller.timelineScrollSeconds, 2.5)
+
+    def test_play_selected_track_loads_resolved_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+
+            self.assertTrue(controller.play_selected_track())
+
+        controller.playback.load_source.assert_called_once()
+        loaded_path, loaded_duration = controller.playback.load_source.call_args.args
+        self.assertEqual(loaded_path, str(audio_path))
+        self.assertAlmostEqual(loaded_duration, 1.5, places=2)
+        controller.playback.play.assert_called_once()
+
+    def test_play_selected_track_reuses_loaded_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+            controller.playback._source_path = str(audio_path)
+
+            self.assertTrue(controller.play_selected_track())
+
+        controller.playback.load_source.assert_not_called()
+        controller.playback.play.assert_called_once()
+
+    def test_play_selected_generated_track_loads_resolved_source_audio(self):
+        controller = self._controller()
+        controller.playback.load_source = Mock(return_value=True)
+        controller.playback.play = Mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            source_id = controller.import_audio(str(audio_path))
+            controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+
+            self.assertTrue(controller.play_selected_track())
+
+        loaded_path, loaded_duration = controller.playback.load_source.call_args.args
+        self.assertEqual(loaded_path, str(audio_path))
+        self.assertAlmostEqual(loaded_duration, 1.5, places=2)
+        controller.playback.play.assert_called_once()
+
+    def test_play_selected_track_copies_playback_last_error_when_load_source_fails(self):
+        controller = self._controller()
+
+        class FakePlayback:
+            def __init__(self):
+                self.load_source = Mock(return_value=False)
+                self.play = Mock()
+                self.unload = Mock()
+                self.lastError = "direct lastError should not be used"
+
+            @staticmethod
+            def property(name):
+                if name == "sourcePath":
+                    return ""
+                if name == "lastError":
+                    return "decoder failed"
+                raise AssertionError(f"unexpected property lookup: {name}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path, frames=12000)
+            controller.import_audio(str(audio_path))
+            controller._playback = FakePlayback()
+
+            self.assertFalse(controller.play_selected_track())
+
+        controller.playback.load_source.assert_called_once()
+        controller.playback.play.assert_not_called()
+        self.assertEqual(controller.lastError, "decoder failed")
+
+    def test_play_selected_track_rejects_track_without_source_audio(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = controller._project.tracks[-1].id
+        controller._project.audio_assets.clear()
+        controller.select_track(editable_id)
+
+        self.assertFalse(controller.play_selected_track())
+
+        self.assertIn("source audio", controller.lastError)
+
+    def test_timeline_zoom_and_scroll_are_clamped(self):
+        controller = self._controller()
+        self.assertEqual(controller.timelinePixelsPerSecond, 96.0)
+
+        controller.set_timeline_zoom(500.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 240.0)
+
+        controller.set_timeline_zoom(5.0)
+        self.assertEqual(controller.timelinePixelsPerSecond, 24.0)
+
+        controller.set_timeline_scroll_seconds(-10.0)
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_timeline_zoom_and_scroll_ignore_non_finite_values(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller.select_track(self._track_id(controller, 2))
+        controller.add_marker_to_selected_track(20.0, "Look")
+        controller.set_timeline_zoom(120.0)
+        controller.set_timeline_scroll_seconds(4.0)
+
+        controller.set_timeline_zoom(math.nan)
+        controller.set_timeline_zoom(math.inf)
+        controller.set_timeline_scroll_seconds(math.nan)
+        controller.set_timeline_scroll_seconds(math.inf)
+
+        self.assertEqual(controller.timelinePixelsPerSecond, 120.0)
+        self.assertEqual(controller.timelineScrollSeconds, 4.0)
+
+    def test_timeline_visible_seconds_controls_scroll_clamp(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller.select_track(self._track_id(controller, 2))
+        controller.add_marker_to_selected_track(20.0, "Look")
+        visible_changes = []
+        scroll_changes = []
+        controller.timelineVisibleSecondsChanged.connect(
+            lambda: visible_changes.append(controller.timelineVisibleSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        controller.set_timeline_visible_seconds(2.0)
+        controller.set_timeline_scroll_seconds(50.0)
+
+        self.assertEqual(visible_changes, [2.0])
+        self.assertEqual(controller.timelineScrollSeconds, 18.0)
+
+        controller.set_timeline_visible_seconds(8.0)
+
+        self.assertEqual(controller.timelineScrollSeconds, 12.0)
+        self.assertIn(12.0, scroll_changes)
+
+    def test_timeline_visible_seconds_ignores_non_finite_and_clamps_minimum(self):
+        controller = self._controller()
+        controller.set_timeline_visible_seconds(4.0)
+
+        controller.set_timeline_visible_seconds(math.nan)
+        controller.set_timeline_visible_seconds(math.inf)
+
+        self.assertEqual(controller.timelineVisibleSeconds, 4.0)
+
+        controller.set_timeline_visible_seconds(0.0)
+
+        self.assertEqual(controller.timelineVisibleSeconds, 0.01)
+
+    def test_qml_exposes_transport_controls_and_playhead(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("appController.play_selected_track()", qml)
+        self.assertIn("appController.pause_playback()", qml)
+        self.assertIn("appController.stop_playback()", qml)
+        self.assertIn("appController.seek_playback", qml)
+        self.assertIn("appController.selectedTrackCanPlay", qml)
+        self.assertIn("appController.playback.isPlaying", qml)
+        self.assertIn("appController.playback.positionSeconds", qml)
+        self.assertIn("appController.playback.durationSeconds", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
+        self.assertIn("id: playhead", qml)
+        self.assertIn("playheadTimeLabel", qml)
+
+    def test_qml_playback_fallback_only_runs_without_selected_track(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        no_selected_track_guard = (
+            "appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0"
+        )
+        self.assertIn(no_selected_track_guard, qml)
+        self.assertIn(
+            "appController.selectedTrackCanPlay || (" + no_selected_track_guard + ") || appController.playback.isPlaying",
+            qml,
+        )
+        self.assertIn("} else if (" + no_selected_track_guard + ") {", qml)
+        self.assertIn("appController.playback.play()", qml)
+        self.assertLess(
+            qml.index("} else if (" + no_selected_track_guard + ") {"),
+            qml.index("appController.playback.play()"),
+        )
+
+    def test_qml_exposes_timeline_zoom_and_scroll_controls(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("id: timelineZoomSlider", qml)
+        self.assertIn("appController.set_timeline_zoom", qml)
+        self.assertIn("id: timelineScrollSlider", qml)
+        self.assertIn("appController.set_timeline_scroll_seconds", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
+        self.assertIn("appController.timelineScrollSeconds", qml)
+        self.assertIn("appController.timelineDurationSeconds", qml)
+        self.assertIn("appController.timelineVisibleSeconds", qml)
+        self.assertIn("appController.set_timeline_visible_seconds", qml)
+        self.assertNotIn("readonly property real timelinePixelsPerSecond: 96", qml)
+        self.assertNotIn("property real timelineVisibleSeconds: 8.0", qml)
+        self.assertNotIn("root.timelineVisibleSeconds", qml)
+
+    def test_qml_ruler_ticks_use_whole_second_boundaries_after_fractional_pan(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property real tickSecond: Math.ceil(appController.timelineScrollSeconds) + index", qml)
+        self.assertIn("x: root.timelineX(tickSecond)", qml)
+        self.assertIn("text: tickSecond + \"s\"", qml)
+        self.assertNotIn("Math.floor(appController.timelineScrollSeconds + index)", qml)
 
     def test_import_audio_records_error_for_missing_file(self):
         controller = self._controller()
@@ -753,6 +1053,58 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotEqual(second_job_id, "")
         self.assertNotEqual(child.dependency_hash, first_dependency_hash)
 
+    def test_add_marker_emits_timeline_duration_and_reclamps_scroll(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        controller._timeline_scroll_seconds = 50.0
+        duration_changes = []
+        scroll_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        marker_id = controller.add_marker_to_selected_track(12.0, "Look")
+
+        self.assertNotEqual(marker_id, "")
+        self.assertEqual(duration_changes, [12.0])
+        self.assertEqual(scroll_changes, [4.0])
+        self.assertEqual(controller.timelineScrollSeconds, 4.0)
+
+    def test_delete_marker_emits_timeline_duration_and_reclamps_scroll(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(editable_id)
+        marker_id = controller.add_marker_to_selected_track(20.0, "Look")
+        controller.set_timeline_scroll_seconds(12.0)
+        duration_changes = []
+        scroll_changes = []
+        controller.timelineDurationSecondsChanged.connect(
+            lambda: duration_changes.append(controller.timelineDurationSeconds)
+        )
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        self.assertTrue(controller.delete_marker_from_selected_track(marker_id))
+
+        self.assertEqual(duration_changes, [1.0])
+        self.assertEqual(scroll_changes, [0.0])
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
+    def test_handle_track_changed_reclamps_timeline_scroll_after_duration_change(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        controller._timeline_scroll_seconds = 50.0
+        scroll_changes = []
+        controller.timelineScrollSecondsChanged.connect(lambda: scroll_changes.append(controller.timelineScrollSeconds))
+
+        controller._handle_track_changed(controller.selectedTrackId)
+
+        self.assertEqual(scroll_changes, [0.0])
+        self.assertEqual(controller.timelineScrollSeconds, 0.0)
+
     def test_selected_track_markers_changed_emits_when_selected_job_updates_markers(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -824,14 +1176,28 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("id: timelineRows", qml)
         self.assertIn("model: markerSpans", qml)
         self.assertIn("modelData.timestamp", qml)
-        self.assertIn("spacing: root.timelinePixelsPerSecond", qml)
-        self.assertIn("anchors.leftMargin: root.timelineLeftPadding", qml)
-        self.assertIn("modelData.timestamp * root.timelinePixelsPerSecond", qml)
+        self.assertIn("root.timelineX(modelData.timestamp)", qml)
+        self.assertIn("appController.timelinePixelsPerSecond", qml)
+        self.assertIn("modelData.duration : 0.08) * appController.timelinePixelsPerSecond", qml)
+        self.assertNotIn("Math.max(0, Math.min(parent.width - width, root.timelineX(modelData.timestamp)))", qml)
+        self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)
         self.assertNotIn("pixelsPerSecond: 96", qml)
         self.assertNotIn("model: markerCount", qml)
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)
+
+    def test_qml_uses_named_timeline_label_width(self):
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("readonly property real timelineLabelWidth: 280", qml)
+        self.assertIn("timelineRows.width - root.timelineLabelWidth - root.timelineLeftPadding", qml)
+        self.assertIn("Layout.preferredWidth: root.timelineLabelWidth", qml)
+        self.assertIn("width: root.timelineLabelWidth", qml)
+        self.assertIn("parent.width - root.timelineLabelWidth", qml)
+        self.assertNotIn("timelineRows.width - 280 - root.timelineLeftPadding", qml)
+        self.assertNotIn("Layout.preferredWidth: 280", qml)
+        self.assertNotIn("width: 280", qml)
 
     def test_qml_timeline_ruler_has_fixed_height(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
@@ -870,6 +1236,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.create_editable_track_from_track(appController.selectedTrackId)", qml)
         self.assertIn("appController.select_track(trackId)", qml)
         self.assertIn("appController.lastError", qml)
+        self.assertIn("appController.playback.lastError", qml)
+        self.assertIn("statusError", qml)
 
     def test_qml_exposes_job_progress_controls(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
