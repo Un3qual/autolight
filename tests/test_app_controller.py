@@ -130,7 +130,7 @@ class AppControllerTest(unittest.TestCase):
 
         controller.load_demo_project()
 
-        source = next(track for track in controller._project.tracks if track.type == TrackType.SOURCE)
+        source = self._track_by_type(controller, TrackType.SOURCE)
         dependency_inputs = track_dependency_inputs(controller._project, source)
 
         self.assertEqual(source.cache_refs, [])
@@ -293,7 +293,6 @@ class AppControllerTest(unittest.TestCase):
 
     def test_nudge_playback_seeks_relative_to_current_position(self):
         controller = self._controller()
-        controller.playback.load_source = Mock(return_value=True)
         controller.playback.play = Mock()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,10 +301,10 @@ class AppControllerTest(unittest.TestCase):
             controller.import_audio(str(audio_path))
             self.assertTrue(controller.play_selected_track())
 
-        controller.seek_playback(2.0)
-        controller.nudge_playback(1.5)
+            controller.seek_playback(2.0)
+            controller.nudge_playback(1.5)
 
-        self.assertEqual(controller.playback.positionSeconds, 3.5)
+            self.assertEqual(controller.playback.positionSeconds, 3.5)
 
     def test_play_selected_generated_track_loads_resolved_source_audio(self):
         controller = self._controller()
@@ -417,6 +416,22 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(controller.timelineScrollSeconds, 12.0)
         self.assertIn(12.0, scroll_changes)
+
+    def test_seek_playback_clamps_to_loaded_media_duration_without_inflating_transport(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        source_id = self._track_id(controller, 0)
+        editable_id = self._track_id(controller, 2)
+        controller.select_track(source_id)
+        self.assertTrue(controller.play_selected_track())
+        controller.select_track(editable_id)
+        controller.add_marker_to_selected_track(20.0, "Long tail")
+
+        controller.seek_playback(20.0)
+
+        self.assertEqual(controller.playback.durationSeconds, 1.0)
+        self.assertEqual(controller.playback.positionSeconds, 1.0)
+        self.assertEqual(controller.timelineDurationSeconds, 20.0)
 
     def test_timeline_visible_seconds_ignores_non_finite_and_clamps_minimum(self):
         controller = self._controller()
@@ -666,6 +681,23 @@ class AppControllerTest(unittest.TestCase):
                     self.assertEqual(reopened.timelinePixelsPerSecond, 96.0)
                     self.assertEqual(reopened.timelineScrollSeconds, 0.0)
 
+    def test_open_project_without_zoom_state_resets_previous_zoom(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "song.wav"
+            project_path = root / "show.autolight"
+            write_wav(audio_path)
+            controller.import_audio(str(audio_path))
+            self.assertTrue(controller.save_project(str(project_path)))
+            self._write_saved_ui_state(project_path, {})
+            controller.set_timeline_zoom(180.0)
+
+            self.assertTrue(controller.open_project(str(project_path)))
+
+        self.assertEqual(controller.timelinePixelsPerSecond, 96.0)
+
     def test_open_project_ignores_non_numeric_timeline_ui_state_values(self):
         controller = self._controller()
 
@@ -730,7 +762,7 @@ class AppControllerTest(unittest.TestCase):
         controller.load_demo_project()
         editable_id = self._track_id(controller, 2)
         controller.select_track(editable_id)
-        marker_id = controller.selectedTrackMarkers[0]["id"]
+        marker_id = self._selected_track_markers(controller)[0]["id"]
         controller.toggle_marker_selection(marker_id, False)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1377,7 +1409,7 @@ class AppControllerTest(unittest.TestCase):
         generated_id = self._track_id(controller, 1)
         controller.select_track(generated_id)
         marker_changes = []
-        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(controller.selectedTrackMarkers))
+        controller.selectedTrackMarkersChanged.connect(lambda: marker_changes.append(self._selected_track_markers(controller)))
 
         job_id = controller.rerun_track(generated_id)
         controller._job_queue.wait(job_id, timeout=2)
@@ -1436,6 +1468,16 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(exit_code, -1)
 
+    def test_screenshot_argument_requires_a_non_flag_value(self):
+        self.assertEqual(
+            app_entry._argument_value(["main.py", "--screenshot", "capture.png"], "--screenshot"),
+            "capture.png",
+        )
+        self.assertEqual(
+            app_entry._argument_value(["main.py", "--screenshot", "--smoke"], "--screenshot"),
+            "",
+        )
+
     def test_screenshot_checker_distinguishes_blank_dark_from_toolbar_clip(self):
         from scripts import check_qml_screenshot
 
@@ -1469,6 +1511,24 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("model: markerCount", qml)
         self.assertNotIn("onContentYChanged", qml)
         self.assertNotIn("contentY =", qml)
+
+    def test_qml_marker_color_options_are_bound_from_controller(self):
+        controller = self._controller()
+        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+
+        self.assertEqual(
+            controller.markerColorOptions,
+            [
+                {"key": "cyan", "label": "Cyan", "color": "#67e8f9"},
+                {"key": "green", "label": "Green", "color": "#a7f3d0"},
+                {"key": "amber", "label": "Amber", "color": "#fbbf24"},
+                {"key": "violet", "label": "Violet", "color": "#c4b5fd"},
+                {"key": "rose", "label": "Rose", "color": "#fda4af"},
+                {"key": "blue", "label": "Blue", "color": "#93c5fd"},
+            ],
+        )
+        self.assertIn("readonly property var markerColorOptions: appController.markerColorOptions", qml)
+        self.assertNotIn('{ key: "cyan", label: "Cyan", color: "#67e8f9" }', qml)
 
     def test_qml_uses_named_timeline_label_width(self):
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
@@ -1586,6 +1646,16 @@ class AppControllerTest(unittest.TestCase):
             if track.id == track_id:
                 return track
         self.fail(f"track not found: {track_id}")
+
+    def _track_by_type(self, controller: AppController, track_type: TrackType):
+        for track in controller._project.tracks:
+            if track.type == track_type:
+                return track
+        self.fail(f"track type not found: {track_type}")
+
+    @staticmethod
+    def _selected_track_markers(controller: AppController) -> list[dict]:
+        return list(controller.selectedTrackMarkers)
 
     def _add_running_job(self, controller: AppController, root: Path) -> str:
         audio_path = root / "song.wav"

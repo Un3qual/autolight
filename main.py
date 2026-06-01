@@ -1,7 +1,7 @@
 import sys
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
 from autolight.app_controller import AppController
@@ -9,12 +9,13 @@ from autolight.app_controller import AppController
 
 def _argument_value(args: list[str], flag: str) -> str:
     try:
-        return args[args.index(flag) + 1]
+        value = args[args.index(flag) + 1]
     except (ValueError, IndexError):
         return ""
+    return "" if value.startswith("--") else value
 
 
-def _grab_root_image(root):
+def _grab_root_image(root) -> QImage:
     if hasattr(root, "grabWindow"):
         return root.grabWindow()
     screen = root.screen() or QGuiApplication.primaryScreen()

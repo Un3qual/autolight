@@ -25,8 +25,11 @@ from autolight.project.store import (
     delete_editable_marker,
     find_track,
     import_audio_asset,
+    marker_color_key,
     marker_display_color,
     new_project,
+    normalize_marker_category,
+    normalize_marker_color,
     refresh_audio_asset_status,
     refresh_audio_track_status,
     track_dependency_inputs,
@@ -37,6 +40,7 @@ from autolight.timeline.transform_model import TransformSpecModel
 
 
 TIMELINE_UI_STATE_KEY = "timeline"
+TIMELINE_DEFAULT_PIXELS_PER_SECOND = 96.0
 
 
 class AppController(QObject):
@@ -69,7 +73,7 @@ class AppController(QObject):
         self._playback = PlaybackTransport(parent=self)
         self._playback.durationSecondsChanged.connect(self._notify_timeline_duration_changed)
         self._playback.positionSecondsChanged.connect(self._keep_playback_position_visible)
-        self._timeline_pixels_per_second = 96.0
+        self._timeline_pixels_per_second = TIMELINE_DEFAULT_PIXELS_PER_SECOND
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
         self._track_model = TimelineTrackModel(parent=self)
@@ -98,6 +102,13 @@ class AppController(QObject):
     @Property(QObject, constant=True)
     def playback(self):
         return self._playback
+
+    @Property(list, constant=True)
+    def markerColorOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": key, "label": key.title(), "color": color}
+            for key, color in MARKER_COLOR_PALETTE.items()
+        ]
 
     @Property(bool, notify=selectedTrackCanPlayChanged)
     def selectedTrackCanPlay(self) -> bool:
@@ -440,17 +451,13 @@ class AppController(QObject):
         color: str = DEFAULT_MARKER_COLOR,
     ) -> str:
         try:
-            category_value = self._normalized_marker_category(category)
-            color_value = self._normalized_marker_color(color)
-            marker = add_editable_marker(self._project, self._selected_track_id, timestamp, label)
-            update_editable_marker(
+            marker = add_editable_marker(
                 self._project,
                 self._selected_track_id,
-                marker.id,
-                timestamp=marker.timestamp,
-                label=marker.label,
-                category=category_value,
-                color=color_value,
+                timestamp,
+                label,
+                category=normalize_marker_category(category),
+                color=normalize_marker_color(color),
             )
             self._track_model.set_project(self._project)
             self._set_selected_marker_ids([marker.id], emit_marker_summary=False)
@@ -468,7 +475,7 @@ class AppController(QObject):
         try:
             deleted = delete_editable_marker(self._project, self._selected_track_id, marker_id)
             self._track_model.set_project(self._project)
-            if deleted and marker_id in self._selected_marker_ids:
+            if marker_id in self._selected_marker_ids:
                 self._set_selected_marker_ids(
                     [selected_id for selected_id in self._selected_marker_ids if selected_id != marker_id],
                     emit_marker_summary=False,
@@ -632,9 +639,8 @@ class AppController(QObject):
 
     @Slot(float)
     def seek_playback(self, seconds: float) -> None:
-        self._ensure_playback_seek_duration()
         self._playback.seek_seconds(seconds)
-        self.set_timeline_scroll_seconds(self._scroll_for_visible_time(seconds))
+        self.set_timeline_scroll_seconds(self._scroll_for_visible_time(self._playback.positionSeconds))
 
     @Slot(float)
     def nudge_playback(self, delta_seconds: float) -> None:
@@ -692,6 +698,7 @@ class AppController(QObject):
         self._project = project
         self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
+        self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
         self._timeline_scroll_seconds = 0.0
         self._set_selected_track_id("")
         self.projectNameChanged.emit()
@@ -909,11 +916,6 @@ class AppController(QObject):
             if track.transform_id == "waveform.summary":
                 self._load_waveform_samples(track.id)
 
-    def _ensure_playback_seek_duration(self) -> None:
-        duration = self._timeline_duration_seconds()
-        if duration > self._playback.durationSeconds:
-            self._playback._set_duration_seconds(duration)
-
     def _attach_demo_waveform(self, waveform_track) -> None:
         samples = self._demo_waveform_samples()
         payload = json.dumps({"version": 1, "duration": 1.0, "samples": samples}).encode("utf-8")
@@ -947,7 +949,7 @@ class AppController(QObject):
                 "label": marker.label,
                 "category": marker.category,
                 "color": marker_display_color(marker),
-                "colorKey": self._marker_color_key(marker),
+                "colorKey": marker_color_key(marker),
                 "selected": marker.id in selected_ids,
             }
             for marker in sorted(
@@ -964,25 +966,8 @@ class AppController(QObject):
 
     @staticmethod
     def _marker_update_snapshot(marker: Marker) -> tuple[float, str, str, object]:
-        return (marker.timestamp, marker.label, marker.category, marker.metadata.get("color"))
-
-    @staticmethod
-    def _marker_color_key(marker: Marker) -> str:
-        color = marker.metadata.get("color", "")
-        if isinstance(color, str) and color in MARKER_COLOR_PALETTE:
-            return color
-        return DEFAULT_MARKER_COLOR
-
-    @staticmethod
-    def _normalized_marker_category(category: str) -> str:
-        return str(category or "cue")
-
-    @staticmethod
-    def _normalized_marker_color(color: str) -> str:
-        value = str(color or DEFAULT_MARKER_COLOR).strip().lower()
-        if value not in MARKER_COLOR_PALETTE:
-            raise ValueError(f"marker color must be one of: {', '.join(MARKER_COLOR_PALETTE)}")
-        return value
+        metadata = marker.metadata if isinstance(marker.metadata, dict) else {}
+        return (marker.timestamp, marker.label, marker.category, metadata.get("color"))
 
     def _refresh_dependency_hash(self, track) -> None:
         if not track.transform_id or not track.input_track_ids:

@@ -24,17 +24,17 @@ Window {
     readonly property color textPrimary: "#f4f4f5"
     readonly property color textMuted: "#a1a1aa"
     readonly property color focusAccent: "#facc15"
+    readonly property color toolbarForeground: "#111318"
+    readonly property color secondaryText: "#d4d4d8"
+    readonly property color markerLabelText: "#111318"
+    readonly property color selectedMarkerBackground: "#2f4366"
+    readonly property color statusErrorColor: "#f87171"
+    readonly property color artifactAccent: "#93c5fd"
+    readonly property color footerBackground: "#111318"
     readonly property color controlTextColor: root.textPrimary
     readonly property color controlMutedTextColor: root.textMuted
     readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
-    readonly property var markerColorOptions: [
-        { key: "cyan", label: "Cyan", color: "#67e8f9" },
-        { key: "green", label: "Green", color: "#a7f3d0" },
-        { key: "amber", label: "Amber", color: "#fbbf24" },
-        { key: "violet", label: "Violet", color: "#c4b5fd" },
-        { key: "rose", label: "Rose", color: "#fda4af" },
-        { key: "blue", label: "Blue", color: "#93c5fd" }
-    ]
+    readonly property var markerColorOptions: appController.markerColorOptions
 
     function timelineX(seconds) {
         return root.timelineLeftPadding + (seconds - appController.timelineScrollSeconds) * appController.timelinePixelsPerSecond
@@ -227,7 +227,7 @@ Window {
 
                 Label {
                     text: appController.projectName
-                    color: "#111318"
+                    color: root.toolbarForeground
                     font.pixelSize: 16
                     font.bold: true
                     Layout.leftMargin: 12
@@ -460,7 +460,7 @@ Window {
                 Label {
                     id: playheadTimeLabel
                     text: root.formatSeconds(appController.playback.positionSeconds) + " / " + root.formatSeconds(appController.playback.durationSeconds)
-                    color: "#d4d4d8"
+                    color: root.secondaryText
                     font.pixelSize: 12
                 }
             }
@@ -486,7 +486,7 @@ Window {
 
             Label {
                 text: "Zoom"
-                color: "#d4d4d8"
+                color: root.secondaryText
                 font.pixelSize: 12
             }
 
@@ -555,7 +555,7 @@ Window {
 
                             Text {
                                 text: trackType + " - " + resultState + " - " + markerCount + " markers"
-                                color: resultState === "failed" || resultState === "stale" ? "#f87171" : root.textMuted
+                                color: resultState === "failed" || resultState === "stale" ? root.statusErrorColor : root.textMuted
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                                 width: parent.width
@@ -563,7 +563,7 @@ Window {
 
                             Text {
                                 text: cacheRefCount > 0 ? artifactKinds + " artifact" : ""
-                                color: "#93c5fd"
+                                color: root.artifactAccent
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                                 width: parent.width
@@ -653,7 +653,7 @@ Window {
                                     anchors.centerIn: parent
                                     width: parent.width - 6
                                     text: modelData.label
-                                    color: "#111318"
+                                    color: root.markerLabelText
                                     font.pixelSize: 10
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
@@ -795,7 +795,7 @@ Window {
                                     width: markerList.width
                                     height: 34
                                     radius: 3
-                                    color: modelData.selected ? "#2f4366" : "transparent"
+                                    color: modelData.selected ? root.selectedMarkerBackground : "transparent"
                                     border.color: modelData.selected ? modelData.color : "transparent"
 
                                     Rectangle {
@@ -880,7 +880,7 @@ Window {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            color: "#111318"
+            color: root.footerBackground
             border.color: root.borderSubtle
 
             Text {
@@ -891,7 +891,7 @@ Window {
                 text: root.statusError.length > 0
                     ? root.statusError
                     : (appController.projectPath.length > 0 ? appController.projectPath : "Unsaved project")
-                color: root.statusError.length > 0 ? "#f87171" : root.textMuted
+                color: root.statusError.length > 0 ? root.statusErrorColor : root.textMuted
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }
