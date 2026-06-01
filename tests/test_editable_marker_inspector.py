@@ -924,7 +924,7 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             "cyan",
         )
 
-        summary = next(item for item in self._selected_track_markers(controller) if item["id"] == marker_id)
+        summary = self._selected_marker_summary_by_id(controller, marker_id)
         self.assertEqual(summary["duration"], 1.25)
 
     def test_controller_clears_marker_selection_when_selected_track_changes(self):
@@ -1326,6 +1326,12 @@ class EditableMarkerInspectorTest(unittest.TestCase):
     @staticmethod
     def _selected_track_markers(controller) -> list[dict]:
         return list(controller.selectedTrackMarkers)
+
+    def _selected_marker_summary_by_id(self, controller, marker_id: str) -> dict:
+        for item in self._selected_track_markers(controller):
+            if item["id"] == marker_id:
+                return item
+        self.fail(f"marker summary not found: {marker_id}")
 
     def _marker_by_id(self, controller, marker_id: str) -> Marker:
         for marker in controller._project.markers:
