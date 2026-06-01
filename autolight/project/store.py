@@ -415,11 +415,38 @@ def _editable_marker_or_raise(project: ProjectDocument, track_id: str, marker_id
     raise ValueError(f"marker not found on track {track_id}: {marker_id}")
 
 
+def _editable_markers_or_raise(project: ProjectDocument, track_id: str, marker_ids: list[str]) -> list[Marker]:
+    markers_by_id = {marker.id: marker for marker in project.markers if marker.track_id == track_id}
+    markers = []
+    for marker_id in marker_ids:
+        try:
+            markers.append(markers_by_id[marker_id])
+        except KeyError as exc:
+            raise ValueError(f"marker not found on track {track_id}: {marker_id}") from exc
+    return markers
+
+
 def _finite_marker_timestamp(timestamp: float) -> float:
     timestamp_value = float(timestamp)
     if not math.isfinite(timestamp_value):
         raise ValueError("marker timestamp must be finite")
     return timestamp_value
+
+
+def _finite_marker_delta(value: float) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("marker delta must be finite")
+    return number
+
+
+def _finite_marker_duration(value: float) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("marker duration must be finite")
+    if number < 0.0:
+        raise ValueError("marker duration must be greater than or equal to zero")
+    return number
 
 
 def normalize_marker_color(color: str) -> str:
@@ -541,6 +568,46 @@ def create_editable_track_from_markers(
     return track
 
 
+def create_manual_editable_track(project: ProjectDocument, context_track_id: str, name: str) -> Track:
+    source_track = _source_track_for_context(project, context_track_id)
+    if source_track is None:
+        raise ValueError("manual cue tracks require a source audio context")
+    track = Track(
+        id=new_id("track"),
+        type=TrackType.EDITABLE,
+        name=str(name) or "Manual Cues",
+        input_track_ids=[source_track.id],
+        result_state=ResultState.COMPLETE,
+        provenance={
+            "source_track_id": source_track.id,
+            "manual_track": True,
+            "created_by": "user",
+        },
+    )
+    project.tracks.append(track)
+    return track
+
+
+def _source_track_for_context(project: ProjectDocument, track_id: str) -> Track | None:
+    track = find_track(project, track_id)
+    if track is None:
+        return None
+    visited: set[str] = set()
+    stack = [track]
+    while stack:
+        current = stack.pop()
+        if current.id in visited:
+            continue
+        visited.add(current.id)
+        if current.type == TrackType.SOURCE:
+            return current
+        for input_id in current.input_track_ids:
+            parent = find_track(project, input_id)
+            if parent is not None:
+                stack.append(parent)
+    return None
+
+
 def update_editable_marker(
     project: ProjectDocument,
     track_id: str,
@@ -587,6 +654,57 @@ def bulk_update_editable_markers(
     if changed_count:
         mark_dependents_stale(project, track_id)
     return changed_count
+
+
+def move_editable_markers(
+    project: ProjectDocument,
+    track_id: str,
+    marker_ids: list[str],
+    delta_seconds: float,
+) -> list[Marker]:
+    _editable_track_or_raise(project, track_id)
+    selected = _editable_markers_or_raise(project, track_id, marker_ids)
+    delta = _finite_marker_delta(delta_seconds)
+    next_timestamps = [marker.timestamp + delta for marker in selected]
+    if any(timestamp < 0.0 for timestamp in next_timestamps):
+        raise ValueError("marker move would create a negative timestamp")
+    for marker, timestamp in zip(selected, next_timestamps, strict=True):
+        marker.timestamp = timestamp
+    if selected:
+        mark_dependents_stale(project, track_id)
+    return selected
+
+
+def resize_editable_marker(
+    project: ProjectDocument,
+    track_id: str,
+    marker_id: str,
+    duration: float,
+) -> Marker:
+    _editable_track_or_raise(project, track_id)
+    marker = _editable_marker_or_raise(project, track_id, marker_id)
+    duration_value = _finite_marker_duration(duration)
+    if marker.duration == duration_value:
+        return marker
+    marker.duration = duration_value
+    mark_dependents_stale(project, track_id)
+    return marker
+
+
+def marker_snapshot(marker: Marker) -> dict[str, Any]:
+    return {
+        "id": marker.id,
+        "track_id": marker.track_id,
+        "timestamp": marker.timestamp,
+        "duration": marker.duration,
+        "label": marker.label,
+        "category": marker.category,
+        "confidence": marker.confidence,
+        "tags": list(marker.tags),
+        "source_transform": marker.source_transform,
+        "source_marker_ids": list(marker.source_marker_ids),
+        "metadata": dict(marker.metadata) if isinstance(marker.metadata, dict) else {},
+    }
 
 
 def add_editable_marker(

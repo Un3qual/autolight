@@ -4,25 +4,118 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autolight.project.models import Marker, ResultState
+from autolight.app.marker_editing import MarkerEditingService
+from autolight.project.models import Marker, ResultState, TrackType
 from autolight.project.store import (
     MARKER_COLOR_PALETTE,
     ProjectStore,
     add_editable_marker,
     add_generated_track,
     bulk_update_editable_markers,
+    create_manual_editable_track,
     create_editable_track_from_markers,
     delete_editable_marker,
     import_audio_asset,
     marker_color_key,
     marker_display_color,
+    move_editable_markers,
     new_project,
+    resize_editable_marker,
     update_editable_marker,
 )
 from tests.helpers import write_wav
 
 
 class EditableMarkerInspectorTest(unittest.TestCase):
+    def test_create_manual_editable_track_uses_resolved_source_track(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        generated = add_generated_track(
+            project,
+            source.id,
+            "Generated",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+
+        manual = create_manual_editable_track(project, generated.id, "Manual Cues")
+
+        self.assertEqual(manual.type, TrackType.EDITABLE)
+        self.assertEqual(manual.input_track_ids, [source.id])
+        self.assertEqual(manual.result_state, ResultState.COMPLETE)
+        self.assertEqual(manual.provenance["manual_track"], True)
+        self.assertEqual(manual.provenance["created_by"], "user")
+
+    def test_create_manual_editable_track_rejects_track_without_source_context(self):
+        project = new_project("Demo")
+
+        with self.assertRaisesRegex(ValueError, "source audio"):
+            create_manual_editable_track(project, "", "Manual Cues")
+
+    def test_move_editable_markers_is_atomic_for_negative_result(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        first = add_editable_marker(project, editable.id, 0.25, "First")
+        second = add_editable_marker(project, editable.id, 1.25, "Second")
+
+        with self.assertRaisesRegex(ValueError, "negative timestamp"):
+            move_editable_markers(project, editable.id, [first.id, second.id], -0.5)
+
+        self.assertEqual(first.timestamp, 0.25)
+        self.assertEqual(second.timestamp, 1.25)
+
+    def test_resize_editable_marker_sets_duration_and_rejects_negative_duration(self):
+        project = new_project("Demo")
+        editable = self._editable_track(project)
+        marker = add_editable_marker(project, editable.id, 0.25, "Cue")
+
+        resize_editable_marker(project, editable.id, marker.id, 1.5)
+        self.assertEqual(marker.duration, 1.5)
+
+        with self.assertRaisesRegex(ValueError, "duration"):
+            resize_editable_marker(project, editable.id, marker.id, -0.1)
+        self.assertEqual(marker.duration, 1.5)
+
+    def test_marker_editing_service_snaps_to_visible_timing_markers(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        timing = add_generated_track(
+            project,
+            source.id,
+            "Beat Markers",
+            "timing.beats",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+        timing.result_state = ResultState.COMPLETE
+        project.markers.append(Marker(id="beat_1", track_id=timing.id, timestamp=1.0, category="timing"))
+        service = MarkerEditingService()
+
+        snapped = service.snap_time(
+            project,
+            requested_seconds=1.03,
+            pixels_per_second=100.0,
+            visible_track_ids=[timing.id],
+            bypass=False,
+        )
+
+        self.assertEqual(snapped, 1.0)
+        self.assertEqual(
+            service.snap_time(
+                project,
+                requested_seconds=1.03,
+                pixels_per_second=100.0,
+                visible_track_ids=[timing.id],
+                bypass=True,
+            ),
+            1.03,
+        )
+
     def test_add_editable_marker_rejects_generated_track(self):
         project = new_project("Demo")
         generated = self._generated_track(project)
@@ -637,6 +730,12 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             source = import_audio_asset(project, audio_path)
 
         return add_generated_track(project, source.id, "Generated", "markers.fixed_interval", {}, "1", "markers.v1", "hash")
+
+    def _source_track(self, project):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            return import_audio_asset(project, audio_path)
 
     @staticmethod
     def _editable_track(project):
