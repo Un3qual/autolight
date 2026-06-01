@@ -263,8 +263,6 @@ class TransformPickerTest(unittest.TestCase):
         self.assertNotIn("audio_path", track.transform_params)
 
     def test_qml_uses_transform_model_and_generic_add_action(self):
-        from pathlib import Path
-
         qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
         self.assertIn("model: appController.transformModel", qml)
         self.assertIn("textRole: \"name\"", qml)
