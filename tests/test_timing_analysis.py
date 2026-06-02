@@ -42,6 +42,7 @@ class TimingAnalysisTest(unittest.TestCase):
 
         self.assertGreaterEqual(len(markers), 1)
         self.assertTrue(all(marker["label"] == "Beat" for marker in markers))
+        self.assertTrue(all(marker["category"] == "beat" for marker in markers))
         self.assertTrue(all(marker["confidence"] is None for marker in markers))
 
     def test_detect_beat_markers_handles_scalar_numpy_tempo(self):

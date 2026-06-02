@@ -13,10 +13,10 @@ from autolight.analysis.registry import (
     TransformSpec,
 )
 from autolight.analysis.timing import detect_beat_markers, detect_onset_markers
-from autolight.analysis.waveform import build_waveform_summary
+from autolight.analysis.waveform import MAX_WAVEFORM_LOD_BUCKETS, build_waveform_summary
 
 MAX_FIXED_INTERVAL_MARKERS = 100_000
-MAX_WAVEFORM_BUCKETS = 4_096
+MAX_WAVEFORM_BUCKETS = MAX_WAVEFORM_LOD_BUCKETS
 
 
 def register_builtin_transforms(registry: TransformRegistry) -> None:

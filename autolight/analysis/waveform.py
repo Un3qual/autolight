@@ -11,6 +11,7 @@ import soundfile
 from autolight.analysis.registry import TransformCancelled
 
 WAVEFORM_READ_BLOCK_FRAMES = 65_536
+MAX_WAVEFORM_LOD_BUCKETS = 4_096
 
 
 def build_waveform_summary(
@@ -23,26 +24,174 @@ def build_waveform_summary(
         raise ValueError("buckets must be greater than zero")
 
     _raise_if_cancelled(cancel_requested)
+    sample_rate, frame_count = _audio_info(audio_path)
+    levels = []
+    if frame_count > 0:
+        base_bucket_count = min(buckets, frame_count)
+        level_bucket_counts = _waveform_level_bucket_counts(base_bucket_count, frame_count)
+        finest_bucket_count = level_bucket_counts[-1]
+        finest_samples = _summarize_samples(audio_path, finest_bucket_count, cancel_requested)
+        for bucket_count in level_bucket_counts:
+            levels.append(
+                {
+                    "bucket_count": bucket_count,
+                    "samples": _derive_waveform_level(finest_samples, bucket_count),
+                }
+            )
+
+    payload = {
+        "version": 2,
+        "sample_rate": sample_rate,
+        "duration": 0.0 if sample_rate == 0 else float(frame_count / sample_rate),
+        "samples": levels[0]["samples"] if levels else [],
+        "levels": levels,
+    }
+    Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _audio_info(audio_path: str | Path) -> tuple[int, int]:
     try:
-        sample_rate, frame_count, samples = _build_soundfile_summary(
+        with soundfile.SoundFile(str(audio_path)) as audio:
+            return int(audio.samplerate), int(audio.frames)
+    except (soundfile.SoundFileError, RuntimeError):
+        pass
+
+    try:
+        import audioread
+    except ImportError as exc:
+        raise RuntimeError(
+            "audioread is required to summarize this unsupported audio container"
+        ) from exc
+
+    with audioread.audio_open(str(audio_path)) as reader:
+        sample_rate = int(reader.samplerate)
+        frame_count = max(0, int(round(float(reader.duration) * sample_rate)))
+        return sample_rate, frame_count
+
+
+def _waveform_level_bucket_counts(base_bucket_count: int, frame_count: int) -> list[int]:
+    maximum = min(MAX_WAVEFORM_LOD_BUCKETS, max(1, frame_count))
+    counts = [max(1, min(base_bucket_count, maximum))]
+    while counts[-1] < maximum:
+        next_count = min(maximum, counts[-1] * 4)
+        if next_count == counts[-1]:
+            break
+        counts.append(next_count)
+    return counts
+
+
+def _derive_waveform_level(
+    source_samples: list[dict[str, float]],
+    bucket_count: int,
+) -> list[dict[str, float]]:
+    source_count = len(source_samples)
+    if bucket_count >= source_count:
+        return [_sample_with_energy(sample) for sample in source_samples]
+
+    source_ranges = _sample_frame_ranges(source_samples)
+    total_frames = source_ranges[-1][1] if source_ranges else 0
+    if total_frames <= 0:
+        return [{"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0} for _ in range(bucket_count)]
+
+    samples = []
+    for bucket_index in range(bucket_count):
+        start = math.floor(bucket_index * total_frames / bucket_count)
+        stop = math.floor((bucket_index + 1) * total_frames / bucket_count)
+        peak = 0.0
+        frame_total = 0
+        square_total = 0.0
+        for sample_start, sample_stop, sample in source_ranges:
+            overlap = min(stop, sample_stop) - max(start, sample_start)
+            if overlap <= 0:
+                continue
+            source_frames = max(1, sample_stop - sample_start)
+            peak = max(peak, _sample_peak(sample))
+            frame_total += overlap
+            square_total += _sample_square_total(sample) / source_frames * overlap
+        samples.append(
+            {
+                "peak": peak,
+                "rms": float(math.sqrt(square_total / max(1, frame_total))),
+                "count": frame_total,
+                "sum_squares": square_total,
+            }
+        )
+    return samples
+
+
+def _sample_frame_ranges(
+    source_samples: list[dict[str, float]],
+) -> list[tuple[int, int, dict[str, float]]]:
+    ranges = []
+    cursor = 0
+    for sample in source_samples:
+        count = _sample_frame_count(sample)
+        if count <= 0:
+            continue
+        stop = cursor + count
+        ranges.append((cursor, stop, sample))
+        cursor = stop
+    return ranges
+
+
+def _sample_with_energy(sample: dict[str, float]) -> dict[str, float]:
+    normalized = dict(sample)
+    normalized["count"] = _sample_frame_count(normalized)
+    normalized["sum_squares"] = _sample_square_total(normalized)
+    return normalized
+
+
+def _sample_peak(sample: dict[str, float]) -> float:
+    try:
+        peak = abs(float(sample.get("peak", 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+    return peak if math.isfinite(peak) else 0.0
+
+
+def _sample_frame_count(sample: dict[str, float]) -> int:
+    try:
+        count = int(sample.get("count", 1))
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return max(0, count)
+
+
+def _sample_square_total(sample: dict[str, float]) -> float:
+    try:
+        explicit = float(sample["sum_squares"])
+    except (KeyError, TypeError, ValueError):
+        explicit = math.nan
+    if math.isfinite(explicit) and explicit >= 0.0:
+        return explicit
+
+    try:
+        rms = float(sample.get("rms", 0.0))
+    except (TypeError, ValueError):
+        rms = 0.0
+    if not math.isfinite(rms):
+        rms = 0.0
+    return float(rms * rms * _sample_frame_count(sample))
+
+
+def _summarize_samples(
+    audio_path: str | Path,
+    bucket_count: int,
+    cancel_requested: Callable[[], bool] | None,
+) -> list[dict[str, float]]:
+    try:
+        _sample_rate, _frame_count, samples = _build_soundfile_summary(
             audio_path,
-            buckets,
+            bucket_count,
             cancel_requested,
         )
     except (soundfile.SoundFileError, RuntimeError):
-        sample_rate, frame_count, samples = _build_audioread_summary(
+        _sample_rate, _frame_count, samples = _build_audioread_summary(
             audio_path,
-            buckets,
+            bucket_count,
             cancel_requested,
         )
-
-    payload = {
-        "version": 1,
-        "sample_rate": sample_rate,
-        "duration": 0.0 if sample_rate == 0 else float(frame_count / sample_rate),
-        "samples": samples,
-    }
-    Path(output_path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    return samples
 
 
 def _build_soundfile_summary(
@@ -131,8 +280,13 @@ def _summarize_frame_range(
         remaining -= frames_read
 
     if frame_total == 0:
-        return {"peak": 0.0, "rms": 0.0}
-    return {"peak": peak, "rms": float(math.sqrt(square_total / frame_total))}
+        return {"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0}
+    return {
+        "peak": peak,
+        "rms": float(math.sqrt(square_total / frame_total)),
+        "count": frame_total,
+        "sum_squares": square_total,
+    }
 
 
 def _audioread_mono_chunks(reader, channel_count: int) -> Iterable[np.ndarray]:
@@ -198,8 +352,13 @@ class _BucketAccumulator:
 
     def summary(self) -> dict[str, float]:
         if self.frame_total == 0:
-            return {"peak": 0.0, "rms": 0.0}
-        return {"peak": self.peak, "rms": float(math.sqrt(self.square_total / self.frame_total))}
+            return {"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0}
+        return {
+            "peak": self.peak,
+            "rms": float(math.sqrt(self.square_total / self.frame_total)),
+            "count": self.frame_total,
+            "sum_squares": self.square_total,
+        }
 
 
 def _raise_if_cancelled(cancel_requested: Callable[[], bool] | None) -> None:

@@ -59,7 +59,13 @@ class StemArtifactWorkflowTest(unittest.TestCase):
     def test_qml_exposes_stem_workflow(self):
         from pathlib import Path
 
-        qml = (Path(__file__).resolve().parents[1] / "UI" / "Main.qml").read_text(encoding="utf-8")
+        ui_root = Path(__file__).resolve().parents[1] / "UI"
+        qml = "\n".join(
+            [
+                (ui_root / "Main.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "TrackRow.qml").read_text(encoding="utf-8"),
+            ]
+        )
         self.assertIn("appController.add_vocals_stem_track(appController.selectedTrackId)", qml)
         self.assertIn("artifactKinds", qml)
         self.assertIn("cacheRefCount", qml)
