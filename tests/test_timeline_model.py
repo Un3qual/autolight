@@ -47,6 +47,13 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("editable"): b"editable",
                     model.role_for_name("visibleWaveformSamples"): b"visibleWaveformSamples",
                     model.role_for_name("waveformLevelBucketCount"): b"waveformLevelBucketCount",
+                    model.role_for_name("parentTrackId"): b"parentTrackId",
+                    model.role_for_name("depth"): b"depth",
+                    model.role_for_name("hasChildren"): b"hasChildren",
+                    model.role_for_name("expanded"): b"expanded",
+                    model.role_for_name("childCount"): b"childCount",
+                    model.role_for_name("visibleChildStateSummary"): b"visibleChildStateSummary",
+                    model.role_for_name("treeError"): b"treeError",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -75,6 +82,100 @@ class TimelineTrackModelTest(unittest.TestCase):
             self.assertEqual(model.data(index, model.role_for_name("cacheRefCount")), 0)
             self.assertEqual(model.data(index, model.role_for_name("artifactKinds")), "")
             self.assertEqual(model.data(index, Qt.ItemDataRole.DisplayRole), "Beats")
+
+    def test_model_projects_tracks_as_expanded_tree_rows(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        drums = Track(
+            id="track_drums",
+            type=TrackType.GENERATED,
+            name="Drums",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        onsets = Track(
+            id="track_onsets",
+            type=TrackType.GENERATED,
+            name="Drum Onsets",
+            input_track_ids=[drums.id],
+            result_state=ResultState.STALE,
+        )
+        beat_grid = Track(
+            id="track_beats",
+            type=TrackType.GENERATED,
+            name="Beat Grid",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([source, drums, onsets, beat_grid])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertEqual(model.rowCount(), 4)
+        ids = [
+            model.data(model.index(row, 0), model.role_for_name("trackId"))
+            for row in range(model.rowCount())
+        ]
+        depths = [
+            model.data(model.index(row, 0), model.role_for_name("depth"))
+            for row in range(model.rowCount())
+        ]
+
+        self.assertEqual(ids, ["track_source", "track_drums", "track_onsets", "track_beats"])
+        self.assertEqual(depths, [0, 1, 2, 1])
+        self.assertEqual(model.data(model.index(0, 0), model.role_for_name("childCount")), 2)
+        self.assertTrue(model.data(model.index(0, 0), model.role_for_name("hasChildren")))
+        self.assertEqual(model.data(model.index(1, 0), model.role_for_name("parentTrackId")), "track_source")
+        self.assertEqual(model.data(model.index(2, 0), model.role_for_name("parentTrackId")), "track_drums")
+        self.assertEqual(model.data(model.index(1, 0), model.role_for_name("visibleChildStateSummary")), "stale: 1")
+
+    def test_model_collapses_tree_rows_without_destroying_project_order(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        sibling = Track(id="track_sibling", type=TrackType.SOURCE, name="Other", result_state=ResultState.COMPLETE)
+        project.tracks.extend([source, child, sibling])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+        self.assertTrue(model.set_track_expanded(source.id, False))
+
+        ids = [
+            model.data(model.index(row, 0), model.role_for_name("trackId"))
+            for row in range(model.rowCount())
+        ]
+
+        self.assertEqual(ids, ["track_source", "track_sibling"])
+        self.assertFalse(model.data(model.index(0, 0), model.role_for_name("expanded")))
+        self.assertEqual([track.id for track in project.tracks], ["track_source", "track_child", "track_sibling"])
+
+    def test_model_renders_missing_parent_as_problem_root_row(self):
+        project = new_project("Demo")
+        orphan = Track(
+            id="track_orphan",
+            type=TrackType.GENERATED,
+            name="Orphan",
+            input_track_ids=["missing_parent"],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.append(orphan)
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertEqual(model.rowCount(), 1)
+        self.assertEqual(model.data(model.index(0, 0), model.role_for_name("depth")), 0)
+        self.assertEqual(
+            model.data(model.index(0, 0), model.role_for_name("treeError")),
+            "missing parent: missing_parent",
+        )
 
     def test_model_exposes_editability_and_marker_duration(self):
         project = new_project("Demo")

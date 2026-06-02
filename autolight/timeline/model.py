@@ -29,6 +29,13 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 15: b"editable",
         Qt.ItemDataRole.UserRole + 16: b"visibleWaveformSamples",
         Qt.ItemDataRole.UserRole + 17: b"waveformLevelBucketCount",
+        Qt.ItemDataRole.UserRole + 18: b"parentTrackId",
+        Qt.ItemDataRole.UserRole + 19: b"depth",
+        Qt.ItemDataRole.UserRole + 20: b"hasChildren",
+        Qt.ItemDataRole.UserRole + 21: b"expanded",
+        Qt.ItemDataRole.UserRole + 22: b"childCount",
+        Qt.ItemDataRole.UserRole + 23: b"visibleChildStateSummary",
+        Qt.ItemDataRole.UserRole + 24: b"treeError",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -36,6 +43,12 @@ class TimelineTrackModel(QAbstractListModel):
         self._project: ProjectDocument | None = None
         self._markers_by_track: dict[str, list[Marker]] = {}
         self._selected_marker_ids: set[str] = set()
+        self._expanded_track_ids: set[str] = set()
+        self._tree_rows: list[Track] = []
+        self._tree_depths: dict[str, int] = {}
+        self._tree_parents: dict[str, str] = {}
+        self._tree_errors: dict[str, str] = {}
+        self._children_by_track: dict[str, list[Track]] = {}
         self._role_by_name = {
             role_name.decode("utf-8"): role for role, role_name in self.ROLE_NAMES.items()
         }
@@ -59,21 +72,33 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("editable"): lambda track: track.type == TrackType.EDITABLE,
             self.role_for_name("visibleWaveformSamples"): self._visible_waveform_samples_for_track,
             self.role_for_name("waveformLevelBucketCount"): self._waveform_level_bucket_count_for_track,
+            self.role_for_name("parentTrackId"): lambda track: self._tree_parents.get(track.id, ""),
+            self.role_for_name("depth"): lambda track: self._tree_depths.get(track.id, 0),
+            self.role_for_name("hasChildren"): lambda track: bool(self._children_by_track.get(track.id)),
+            self.role_for_name("expanded"): lambda track: track.id in self._expanded_track_ids,
+            self.role_for_name("childCount"): lambda track: len(self._children_by_track.get(track.id, [])),
+            self.role_for_name("visibleChildStateSummary"): self._visible_child_state_summary,
+            self.role_for_name("treeError"): lambda track: self._tree_errors.get(track.id, ""),
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
 
-    def set_project(self, project: ProjectDocument) -> None:
+    def set_project(self, project: ProjectDocument | None) -> None:
         self.beginResetModel()
         self._project = project
         self._rebuild_marker_index()
+        if project is not None:
+            parent_ids = {input_id for track in project.tracks for input_id in track.input_track_ids}
+            known_ids = {track.id for track in project.tracks}
+            self._expanded_track_ids |= parent_ids & known_ids
+        self._rebuild_tree_projection()
         self._generation += 1
         self.endResetModel()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid() or self._project is None:
             return 0
-        return len(self._project.tracks)
+        return len(self._tree_rows)
 
     def index(self, row: int, column: int, parent: QModelIndex = QModelIndex()) -> QModelIndex:
         if (
@@ -81,7 +106,7 @@ class TimelineTrackModel(QAbstractListModel):
             or parent.isValid()
             or column != 0
             or row < 0
-            or row >= len(self._project.tracks)
+            or row >= len(self._tree_rows)
         ):
             return QModelIndex()
         return self.createIndex(row, column, self._generation)
@@ -103,7 +128,7 @@ class TimelineTrackModel(QAbstractListModel):
         if self._project is None:
             return
         row = next(
-            (index for index, track in enumerate(self._project.tracks) if track.id == track_id),
+            (index for index, track in enumerate(self._tree_rows) if track.id == track_id),
             None,
         )
         if row is None:
@@ -116,6 +141,42 @@ class TimelineTrackModel(QAbstractListModel):
 
     def role_for_name(self, name: str) -> int:
         return self._role_by_name[name]
+
+    def set_track_expanded(self, track_id: str, expanded: bool) -> bool:
+        if self._project is None:
+            return False
+        known_track_ids = {track.id for track in self._project.tracks}
+        if track_id not in known_track_ids:
+            return False
+        if expanded:
+            if track_id in self._expanded_track_ids:
+                return False
+            self._expanded_track_ids.add(track_id)
+        else:
+            if track_id not in self._expanded_track_ids:
+                return False
+            self._expanded_track_ids.remove(track_id)
+        self.beginResetModel()
+        self._rebuild_tree_projection()
+        self._generation += 1
+        self.endResetModel()
+        return True
+
+    def expanded_track_ids(self) -> list[str]:
+        return sorted(self._expanded_track_ids)
+
+    def set_expanded_track_ids(self, track_ids: list[str]) -> None:
+        self._expanded_track_ids = {str(track_id) for track_id in track_ids}
+        if self._project is not None:
+            self.beginResetModel()
+            self._rebuild_tree_projection()
+            self._generation += 1
+            self.endResetModel()
+
+    def visible_track_ids(self, first_row: int, row_count: int) -> list[str]:
+        start = max(0, min(int(first_row), len(self._tree_rows)))
+        stop = min(len(self._tree_rows), start + max(0, int(row_count)))
+        return [track.id for track in self._tree_rows[start:stop]]
 
     def set_selected_marker_ids(self, marker_ids: list[str]) -> None:
         selected_ids = set(marker_ids)
@@ -137,9 +198,9 @@ class TimelineTrackModel(QAbstractListModel):
         ):
             return None
         row = index.row()
-        if row < 0 or row >= len(self._project.tracks):
+        if row < 0 or row >= len(self._tree_rows):
             return None
-        return self._project.tracks[row]
+        return self._tree_rows[row]
 
     def _marker_count_for_track(self, track: Track) -> int:
         return len(self._markers_by_track.get(track.id, []))
@@ -267,6 +328,55 @@ class TimelineTrackModel(QAbstractListModel):
             self._markers_by_track.setdefault(marker.track_id, []).append(marker)
         for markers in self._markers_by_track.values():
             markers.sort(key=lambda marker: (marker.timestamp, marker.id))
+
+    def _rebuild_tree_projection(self) -> None:
+        self._tree_rows = []
+        self._tree_depths = {}
+        self._tree_parents = {}
+        self._tree_errors = {}
+        self._children_by_track = {}
+        if self._project is None:
+            return
+        tracks_by_id = {track.id: track for track in self._project.tracks}
+        for track in self._project.tracks:
+            parent_id = track.input_track_ids[0] if track.input_track_ids else ""
+            if parent_id and parent_id in tracks_by_id:
+                self._children_by_track.setdefault(parent_id, []).append(track)
+                self._tree_parents[track.id] = parent_id
+            elif parent_id:
+                self._tree_errors[track.id] = f"missing parent: {parent_id}"
+        for track in self._project.tracks:
+            if self._tree_parents.get(track.id):
+                continue
+            self._append_tree_row(track, depth=0, active_path=set())
+
+    def _append_tree_row(self, track: Track, depth: int, active_path: set[str]) -> None:
+        self._tree_rows.append(track)
+        self._tree_depths[track.id] = depth
+        if track.id in active_path:
+            self._tree_errors[track.id] = "cycle detected"
+            return
+        if track.id not in self._expanded_track_ids:
+            return
+        next_path = set(active_path)
+        next_path.add(track.id)
+        for child in self._children_by_track.get(track.id, []):
+            self._append_tree_row(child, depth + 1, next_path)
+
+    def _visible_child_state_summary(self, track: Track) -> str:
+        counts: dict[str, int] = {}
+        pending = list(self._children_by_track.get(track.id, []))
+        seen: set[str] = set()
+        while pending:
+            child = pending.pop(0)
+            if child.id in seen:
+                continue
+            seen.add(child.id)
+            if child.result_state != ResultState.COMPLETE:
+                state = child.result_state.value
+                counts[state] = counts.get(state, 0) + 1
+            pending.extend(self._children_by_track.get(child.id, []))
+        return ", ".join(f"{state}: {counts[state]}" for state in sorted(counts))
 
     def _rebuild_marker_index_for_track(self, track_id: str) -> None:
         if self._project is None:
