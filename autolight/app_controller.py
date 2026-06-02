@@ -383,7 +383,7 @@ class AppController(QObject):
             transform_id = "stems.vocals_stand_in"
             transform_version = "1"
             params = {"label": "vocals"}
-            self._require_source_audio_path_for_track(parent)
+            self._transform_input_resolver().audio_path_for_track(parent)
             dependency_hash = track_dependency_hash(
                 track_dependency_inputs(self._project, parent),
                 transform_id,

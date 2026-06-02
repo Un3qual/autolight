@@ -6,7 +6,7 @@ from PySide6.QtCore import QCoreApplication
 
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry, TransformResult, TransformSpec
-from autolight.project.models import Track, TrackType
+from autolight.project.models import ResultState, Track, TrackType
 from autolight.timeline.transform_model import TransformSpecModel
 
 
@@ -118,7 +118,7 @@ class TransformPickerTest(unittest.TestCase):
         track = self._track_by_id(controller, track_id)
         self.assertNotIn("audio_path", track.transform_params)
 
-    def test_controller_add_transform_track_rejects_incomplete_generated_audio_parent(self):
+    def test_controller_add_transform_track_rejects_generated_marker_audio_parent(self):
         from autolight.app_controller import AppController
 
         def noop(context, params):
@@ -148,13 +148,15 @@ class TransformPickerTest(unittest.TestCase):
             "1",
             '{"duration": 3.0, "interval": 1.0}',
         )
+        generated = self._track_by_id(controller, generated_id)
+        generated.result_state = ResultState.COMPLETE
 
         track_id = controller.add_transform_track(generated_id, "test.audio_path", "1", "{}")
 
         self.assertEqual(track_id, "")
-        self.assertIn("parent track is not complete", controller.lastError)
+        self.assertIn("parent track has no valid audio artifact", controller.lastError)
 
-    def test_controller_add_transform_track_rejects_incomplete_editable_audio_parent(self):
+    def test_controller_add_transform_track_routes_complete_editable_audio_parent_to_source(self):
         from autolight.app_controller import AppController
 
         def noop(context, params):
@@ -184,13 +186,14 @@ class TransformPickerTest(unittest.TestCase):
             type=TrackType.EDITABLE,
             name="Editable Multi Parent",
             input_track_ids=[no_audio.id, source_id],
+            result_state=ResultState.COMPLETE,
         )
         controller._project.tracks.extend([no_audio, multi_parent])
 
         track_id = controller.add_transform_track(multi_parent.id, "test.audio_path", "1", "{}")
 
-        self.assertEqual(track_id, "")
-        self.assertIn("parent track is not complete", controller.lastError)
+        track = self._track_by_id(controller, track_id)
+        self.assertNotIn("audio_path", track.transform_params)
 
     def test_controller_add_transform_track_rejects_audio_transform_without_source_audio(self):
         from autolight.app_controller import AppController
@@ -354,7 +357,7 @@ class TransformPickerTest(unittest.TestCase):
         track_id = controller.add_vocals_stem_track(no_audio.id)
 
         self.assertEqual(track_id, "")
-        self.assertIn("source audio track", controller.lastError)
+        self.assertIn("parent track is not complete", controller.lastError)
 
     def test_qml_uses_transform_model_and_generic_add_action(self):
         ui_root = Path(__file__).resolve().parents[1] / "UI"

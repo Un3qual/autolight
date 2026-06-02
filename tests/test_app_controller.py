@@ -635,6 +635,108 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(child_id, "")
         self.assertIn("parent track is not complete", controller.lastError)
 
+    def test_audio_transform_routes_complete_manual_track_to_source_audio(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            controller.select_track(source_id)
+            manual_id = controller.add_manual_cue_track("Manual Cues")
+
+            child_id = controller.add_transform_track(manual_id, "waveform.summary", "1", "{}")
+            child = self._track_by_id(controller, child_id)
+            params = controller._runtime_transform_params_for_track(child)
+
+        self.assertEqual(params["audio_path"], str(source_audio))
+        self.assertEqual(child.input_track_ids, [manual_id])
+
+    def test_audio_transform_rejects_complete_generated_marker_parent_without_audio_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            markers_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            markers = self._track_by_id(controller, markers_id)
+            markers.result_state = ResultState.COMPLETE
+
+            child_id = controller.add_transform_track(markers.id, "waveform.summary", "1", "{}")
+
+        self.assertEqual(child_id, "")
+        self.assertIn("parent track has no valid audio artifact", controller.lastError)
+
+    def test_vocals_stem_track_rejects_generated_marker_parent_without_audio_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            markers_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            markers = self._track_by_id(controller, markers_id)
+            markers.result_state = ResultState.COMPLETE
+
+            vocals_id = controller.add_vocals_stem_track(markers.id)
+
+        self.assertEqual(vocals_id, "")
+        self.assertIn("parent track has no valid audio artifact", controller.lastError)
+
+    def test_vocals_stem_track_accepts_generated_audio_artifact_parent(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            drum_audio = Path(tmp) / "drums.wav"
+            write_wav(source_audio)
+            write_wav(drum_audio)
+            source_id = controller.import_audio(str(source_audio))
+            drums = add_generated_track(
+                controller._project,
+                source_id,
+                "Drums",
+                "audio.drums_stand_in",
+                {},
+                "1",
+                "artifact.audio.v1",
+                "drums-dep",
+            )
+            drums.result_state = ResultState.COMPLETE
+            cache_entry = CacheEntry(
+                id="cache_drums",
+                dependency_hash="drums-dep",
+                artifact_kind="audio",
+                path="audio/cache_drums.wav",
+                created_at="",
+                transform_version="1",
+            )
+            controller._project.cache_entries.append(cache_entry)
+            drums.cache_refs = [cache_entry.id]
+            cached_path = controller._job_queue.cache_store.artifact_path(cache_entry)
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            cached_path.write_bytes(drum_audio.read_bytes())
+
+            vocals_id = controller.add_vocals_stem_track(drums.id)
+            vocals = self._track_by_id(controller, vocals_id)
+            params = controller._runtime_transform_params_for_track(vocals)
+
+        self.assertNotEqual(vocals_id, "")
+        self.assertEqual(vocals.transform_params, {"label": "vocals"})
+        self.assertEqual(params["audio_path"], str(cached_path))
+
+    def test_audio_transform_rejects_online_source_with_missing_audio_file(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            source_audio.unlink()
+
+            child_id = controller.add_transform_track(source_id, "waveform.summary", "1", "{}")
+
+        self.assertEqual(child_id, "")
+        self.assertIn("source audio path is missing", controller.lastError)
+
     def test_play_selected_track_copies_playback_last_error_when_load_source_fails(self):
         controller = self._controller()
 
