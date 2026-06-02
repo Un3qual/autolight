@@ -20,7 +20,11 @@ Rectangle {
     signal toggleMarkerSelectionRequested(string markerId, bool extendSelection)
 
     function validatedFieldNumber(text) {
-        var value = Number(text)
+        var normalized = String(text).trim()
+        if (normalized.length === 0) {
+            return NaN
+        }
+        var value = Number(normalized)
         return isFinite(value) && value >= 0 ? value : NaN
     }
 

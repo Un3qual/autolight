@@ -86,7 +86,7 @@ def _derive_waveform_level(
 ) -> list[dict[str, float]]:
     source_count = len(source_samples)
     if bucket_count >= source_count:
-        return [dict(sample) for sample in source_samples]
+        return [_sample_with_energy(sample) for sample in source_samples]
 
     samples = []
     for bucket_index in range(bucket_count):
@@ -94,14 +94,49 @@ def _derive_waveform_level(
         stop = math.floor((bucket_index + 1) * source_count / bucket_count)
         segment = source_samples[start:max(start + 1, stop)]
         peak = max((abs(float(sample.get("peak", 0.0))) for sample in segment), default=0.0)
-        rms_square_total = sum(float(sample.get("rms", 0.0)) ** 2 for sample in segment)
+        frame_total = sum(_sample_frame_count(sample) for sample in segment)
+        square_total = sum(_sample_square_total(sample) for sample in segment)
         samples.append(
             {
                 "peak": peak,
-                "rms": float(math.sqrt(rms_square_total / max(1, len(segment)))),
+                "rms": float(math.sqrt(square_total / max(1, frame_total))),
+                "count": frame_total,
+                "sum_squares": square_total,
             }
         )
     return samples
+
+
+def _sample_with_energy(sample: dict[str, float]) -> dict[str, float]:
+    normalized = dict(sample)
+    normalized["count"] = _sample_frame_count(normalized)
+    normalized["sum_squares"] = _sample_square_total(normalized)
+    return normalized
+
+
+def _sample_frame_count(sample: dict[str, float]) -> int:
+    try:
+        count = int(sample.get("count", 1))
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return max(0, count)
+
+
+def _sample_square_total(sample: dict[str, float]) -> float:
+    try:
+        explicit = float(sample["sum_squares"])
+    except (KeyError, TypeError, ValueError):
+        explicit = math.nan
+    if math.isfinite(explicit) and explicit >= 0.0:
+        return explicit
+
+    try:
+        rms = float(sample.get("rms", 0.0))
+    except (TypeError, ValueError):
+        rms = 0.0
+    if not math.isfinite(rms):
+        rms = 0.0
+    return float(rms * rms * _sample_frame_count(sample))
 
 
 def _summarize_samples(
@@ -210,8 +245,13 @@ def _summarize_frame_range(
         remaining -= frames_read
 
     if frame_total == 0:
-        return {"peak": 0.0, "rms": 0.0}
-    return {"peak": peak, "rms": float(math.sqrt(square_total / frame_total))}
+        return {"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0}
+    return {
+        "peak": peak,
+        "rms": float(math.sqrt(square_total / frame_total)),
+        "count": frame_total,
+        "sum_squares": square_total,
+    }
 
 
 def _audioread_mono_chunks(reader, channel_count: int) -> Iterable[np.ndarray]:
@@ -277,8 +317,13 @@ class _BucketAccumulator:
 
     def summary(self) -> dict[str, float]:
         if self.frame_total == 0:
-            return {"peak": 0.0, "rms": 0.0}
-        return {"peak": self.peak, "rms": float(math.sqrt(self.square_total / self.frame_total))}
+            return {"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0}
+        return {
+            "peak": self.peak,
+            "rms": float(math.sqrt(self.square_total / self.frame_total)),
+            "count": self.frame_total,
+            "sum_squares": self.square_total,
+        }
 
 
 def _raise_if_cancelled(cancel_requested: Callable[[], bool] | None) -> None:

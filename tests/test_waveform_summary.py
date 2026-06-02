@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 import wave
@@ -79,6 +80,19 @@ class WaveformSummaryTest(unittest.TestCase):
                 build_waveform_summary(audio_path, output_path, buckets=2)
 
         self.assertEqual(summarize_samples.call_count, 1)
+
+    def test_waveform_lod_derives_weighted_rms_from_frame_counts(self):
+        samples = [
+            {"peak": 0.1, "rms": 0.1, "count": 1, "sum_squares": 0.01},
+            {"peak": 0.8, "rms": 0.8, "count": 9, "sum_squares": 5.76},
+        ]
+
+        [derived] = waveform_module._derive_waveform_level(samples, 1)
+
+        self.assertEqual(derived["count"], 10)
+        self.assertEqual(derived["peak"], 0.8)
+        self.assertAlmostEqual(derived["rms"], math.sqrt(5.77 / 10))
+        self.assertAlmostEqual(derived["sum_squares"], 5.77)
 
     def test_build_waveform_summary_zero_frame_audio_has_consistent_empty_levels(self):
         with tempfile.TemporaryDirectory() as tmp:

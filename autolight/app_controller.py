@@ -885,6 +885,8 @@ class AppController(QObject):
     def undo(self) -> bool:
         try:
             if not self._edit_history.undo(self._project):
+                self._notify_history_changed()
+                self._sync_dirty_from_history()
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
@@ -902,6 +904,8 @@ class AppController(QObject):
     def redo(self) -> bool:
         try:
             if not self._edit_history.redo(self._project):
+                self._notify_history_changed()
+                self._sync_dirty_from_history()
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)

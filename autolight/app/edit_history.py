@@ -224,33 +224,34 @@ class EditHistory:
         self._redo_stack.clear()
 
     def undo(self, project: ProjectDocument) -> bool:
-        skipped_obsolete = False
         while self._undo_stack:
             command = self._undo_stack.pop()
             try:
                 command.undo(project)
             except ObsoleteEditCommand:
                 self._clean_undo_depth = None
-                skipped_obsolete = True
                 continue
             except Exception:
                 self._undo_stack.append(command)
                 raise
             self._redo_stack.append(command)
             return True
-        return skipped_obsolete
+        return False
 
     def redo(self, project: ProjectDocument) -> bool:
-        if not self._redo_stack:
-            return False
-        command = self._redo_stack.pop()
-        try:
-            command.redo(project)
-        except Exception:
-            self._redo_stack.append(command)
-            raise
-        self._undo_stack.append(command)
-        return True
+        while self._redo_stack:
+            command = self._redo_stack.pop()
+            try:
+                command.redo(project)
+            except ObsoleteEditCommand:
+                self._clean_undo_depth = None
+                continue
+            except Exception:
+                self._redo_stack.append(command)
+                raise
+            self._undo_stack.append(command)
+            return True
+        return False
 
     def clear(self) -> None:
         self._undo_stack.clear()

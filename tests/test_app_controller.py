@@ -1961,6 +1961,32 @@ class AppControllerTest(unittest.TestCase):
         self.assertIsNotNone(self._optional_track_by_id(controller, manual_id))
         self.assertIsNotNone(self._optional_track_by_id(controller, imported_id))
 
+    def test_obsolete_manual_track_undo_reports_no_reverted_edit(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        controller.load_demo_project()
+        source = self._track_by_type(controller, TrackType.SOURCE)
+        controller.select_track(source.id)
+        manual_id = controller.add_manual_cue_track("Manual Cues")
+        dependent = add_generated_track(
+            controller._project,
+            manual_id,
+            "Generated From Manual",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+
+        self.assertFalse(controller.undo())
+
+        self.assertIsNotNone(self._optional_track_by_id(controller, manual_id))
+        self.assertIsNotNone(self._optional_track_by_id(controller, dependent.id))
+        self.assertFalse(controller.canUndo)
+        self.assertFalse(controller.canRedo)
+
     def test_controller_exposes_default_qml_slot_overloads_for_task5_slots(self):
         controller = self._controller()
 

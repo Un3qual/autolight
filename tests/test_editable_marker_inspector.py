@@ -454,7 +454,39 @@ class EditableMarkerInspectorTest(unittest.TestCase):
             "dep",
         )
 
+        self.assertFalse(history.undo(project))
+
+        self.assertIn(manual.id, [track.id for track in project.tracks])
+        self.assertIn(dependent.id, [track.id for track in project.tracks])
+        self.assertFalse(history.can_undo)
+        self.assertFalse(history.can_redo)
+
+    def test_edit_history_discards_track_deletion_redo_when_dependents_exist(self):
+        project = new_project("Demo")
+        source = self._source_track(project)
+        manual = create_manual_editable_track(project, source.id, "Manual Cues")
+        command = TrackSnapshotCommand(
+            track_id=manual.id,
+            before=manual,
+            after=None,
+            index=project.tracks.index(manual),
+        )
+        command.redo(project)
+        history = EditHistory()
+        history.push(command)
         self.assertTrue(history.undo(project))
+        dependent = add_generated_track(
+            project,
+            manual.id,
+            "Generated From Manual",
+            "markers.fixed_interval",
+            {},
+            "1",
+            "markers.v1",
+            "dep",
+        )
+
+        self.assertFalse(history.redo(project))
 
         self.assertIn(manual.id, [track.id for track in project.tracks])
         self.assertIn(dependent.id, [track.id for track in project.tracks])
@@ -1256,6 +1288,8 @@ class EditableMarkerInspectorTest(unittest.TestCase):
         self.assertIn("appController.delete_selected_markers()", qml)
         self.assertIn("appController.selectedTrackIsEditable", qml)
         self.assertIn("DoubleValidator { bottom: 0.0 }", qml)
+        self.assertIn("String(text).trim()", qml)
+        self.assertIn("normalized.length === 0", qml)
         self.assertIn("validNonNegativeField(markerTimestampField.text)", qml)
         self.assertIn("validNonNegativeField(markerDurationField.text)", qml)
         self.assertIn(
