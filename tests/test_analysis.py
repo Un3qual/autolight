@@ -188,6 +188,27 @@ class AnalysisRegistryTest(unittest.TestCase):
 
         self.assertEqual(progress_values[-1], 1.0)
 
+    def test_drums_stand_in_writes_audio_artifact(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("audio.drums_stand_in", version="1")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
+            artifact_dir = Path(tmp) / "artifacts"
+            result = transform.run(
+                TransformContext(
+                    artifact_dir=artifact_dir,
+                    cancel_requested=lambda: False,
+                    progress=lambda value: None,
+                ),
+                {"audio_path": str(source)},
+            )
+
+            self.assertEqual(set(result.artifacts), {"audio"})
+            self.assertEqual(Path(result.artifacts["audio"]).read_bytes(), b"test audio bytes")
+
     def test_vocal_stand_in_label_cannot_escape_artifact_dir(self):
         registry = TransformRegistry()
         register_builtin_transforms(registry)

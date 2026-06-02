@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import time
 from pathlib import Path
 
@@ -40,6 +41,17 @@ def register_builtin_transforms(registry: TransformRegistry) -> None:
             output_schema="artifact.stem.v1",
             estimated_cost="heavy",
             run=_vocals_stand_in,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="audio.drums_stand_in",
+            version="1",
+            name="Drums Stem Stand-In",
+            input_schema="audio.v1",
+            output_schema="artifact.audio.v1",
+            estimated_cost="medium",
+            run=_drums_stand_in,
         )
     )
     registry.register(
@@ -130,6 +142,16 @@ def _vocals_stand_in(context: TransformContext, params: dict) -> TransformResult
     artifact.write_text(json.dumps({"stem": label, "samples": []}, sort_keys=True), encoding="utf-8")
     context.progress(1.0)
     return TransformResult(artifacts={"stem": str(artifact)}, metadata={"stem": label})
+
+
+def _drums_stand_in(context: TransformContext, params: dict) -> TransformResult:
+    source = Path(str(params["audio_path"]))
+    context.artifact_dir.mkdir(parents=True, exist_ok=True)
+    _raise_if_cancelled(context)
+    output = Path(context.artifact_dir) / "drums.wav"
+    shutil.copyfile(source, output)
+    context.progress(1.0)
+    return TransformResult(artifacts={"audio": str(output)}, metadata={"stem": "drums"})
 
 
 def _timing_onsets(context: TransformContext, params: dict) -> TransformResult:

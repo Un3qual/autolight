@@ -568,6 +568,73 @@ class AppControllerTest(unittest.TestCase):
         self.assertAlmostEqual(loaded_duration, 1.5, places=2)
         controller.playback.play.assert_called_once()
 
+    def test_audio_transform_routes_to_parent_audio_artifact(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            drum_audio = Path(tmp) / "drums.wav"
+            write_wav(source_audio)
+            write_wav(drum_audio)
+            source_id = controller.import_audio(str(source_audio))
+            drums = add_generated_track(
+                controller._project,
+                source_id,
+                "Drums",
+                "audio.drums_stand_in",
+                {},
+                "1",
+                "artifact.audio.v1",
+                "drums-dep",
+            )
+            drums.result_state = ResultState.COMPLETE
+            cache_entry = CacheEntry(
+                id="cache_drums",
+                dependency_hash="drums-dep",
+                artifact_kind="audio",
+                path="audio/cache_drums.wav",
+                created_at="",
+                transform_version="1",
+            )
+            controller._project.cache_entries.append(cache_entry)
+            drums.cache_refs = [cache_entry.id]
+            cached_path = controller._job_queue.cache_store.artifact_path(cache_entry)
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            cached_path.write_bytes(drum_audio.read_bytes())
+
+            child_id = controller.add_transform_track(drums.id, "waveform.summary", "1", "{}")
+            child = next(track for track in controller._project.tracks if track.id == child_id)
+            params = controller._runtime_transform_params_for_track(child)
+
+        self.assertEqual(params["audio_path"], str(cached_path))
+        self.assertEqual(child.input_track_ids, [drums.id])
+
+    def test_audio_transform_rejects_stale_parent_artifact(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            drums = add_generated_track(
+                controller._project,
+                source_id,
+                "Drums",
+                "audio.drums_stand_in",
+                {},
+                "1",
+                "artifact.audio.v1",
+                "drums-dep",
+            )
+            drums.result_state = ResultState.STALE
+
+            child_id = controller.add_transform_track(drums.id, "waveform.summary", "1", "{}")
+
+        self.assertEqual(child_id, "")
+        self.assertIn("parent track is not complete", controller.lastError)
+
     def test_play_selected_track_copies_playback_last_error_when_load_source_fails(self):
         controller = self._controller()
 

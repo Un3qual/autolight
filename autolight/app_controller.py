@@ -17,6 +17,7 @@ from autolight.app import (
     WaveformLodStore,
 )
 from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand, TrackSnapshotCommand
+from autolight.app.transform_inputs import TransformInputResolver
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
@@ -1243,9 +1244,12 @@ class AppController(QObject):
     def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
         enriched = dict(params)
         if spec.input_schema == "audio.v1":
-            self._require_source_audio_path_for_track(parent)
+            self._transform_input_resolver().audio_path_for_track(parent)
             enriched.pop("audio_path", None)
         return enriched
+
+    def _transform_input_resolver(self) -> TransformInputResolver:
+        return TransformInputResolver(self._project, self._job_queue.cache_store)
 
     def _require_source_audio_path_for_track(self, track) -> str:
         audio_path = self._source_audio_path_for_track(track)
@@ -1627,7 +1631,10 @@ class AppController(QObject):
         spec = self._registry.get(track.transform_id, version=track.transform_version)
         if spec.input_schema == "audio.v1":
             params.pop("audio_path", None)
-            params["audio_path"] = self._require_source_audio_path_for_track(track)
+            parent = find_track(self._project, track.input_track_ids[0]) if track.input_track_ids else track
+            if parent is None:
+                raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+            params["audio_path"] = self._transform_input_resolver().audio_path_for_track(parent)
         return params
 
     def _dependency_transform_params_for_track(self, track) -> dict:
