@@ -27,9 +27,9 @@ class MusicAnalysisResult:
 class MusicAnalysisEngine:
     def analyze_rhythm(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
-        y, sr = _load_audio(audio_path)
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        y, sr = _load_audio(audio_path)
         tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length, units="frames")
         beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length)
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
@@ -66,42 +66,44 @@ class MusicAnalysisEngine:
 
     def analyze_energy(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
-        y, sr = _load_audio(audio_path)
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
+        max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        y, sr = _load_audio(audio_path)
         rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
         times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
         intensity = _normalize(rms + _resize(onset_env, len(rms)))
         frames = _decimated_frames(times, intensity, max_frames, "intensity")
-        markers = _energy_markers(times, intensity)
+        markers = _energy_markers(times, intensity, max_markers)
         payload = {
             "version": 1,
             "kind": "energy",
             "duration": _duration_seconds(y, sr),
             "frames": frames,
-            "settings": {"hop_length": hop_length, "max_frames": max_frames},
+            "settings": {"hop_length": hop_length, "max_frames": max_frames, "max_markers": max_markers},
         }
         return MusicAnalysisResult(kind="energy", payload=payload, markers=markers, frames=frames)
 
     def analyze_harmony(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
-        y, sr = _load_audio(audio_path)
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
+        max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        y, sr = _load_audio(audio_path)
         try:
             chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
         except ParameterError:
             chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop_length)
         times = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length)
         frames = _chroma_frames(times, chroma, max_frames)
-        markers = _harmonic_change_markers(frames)
+        markers = _harmonic_change_markers(frames, max_markers)
         payload = {
             "version": 1,
             "kind": "harmonic-color",
             "duration": _duration_seconds(y, sr),
             "frames": frames,
-            "settings": {"hop_length": hop_length, "max_frames": max_frames},
+            "settings": {"hop_length": hop_length, "max_frames": max_frames, "max_markers": max_markers},
         }
         return MusicAnalysisResult(kind="harmonic-color", payload=payload, markers=markers, frames=frames)
 
@@ -173,7 +175,7 @@ def _decimated_frames(times: np.ndarray, values: np.ndarray, max_frames: int, va
     ][:max_frames]
 
 
-def _energy_markers(times: np.ndarray, intensity: np.ndarray) -> list[dict[str, Any]]:
+def _energy_markers(times: np.ndarray, intensity: np.ndarray, max_markers: int) -> list[dict[str, Any]]:
     if len(intensity) == 0:
         return []
     threshold = max(0.65, float(np.mean(intensity) + np.std(intensity)))
@@ -190,7 +192,7 @@ def _energy_markers(times: np.ndarray, intensity: np.ndarray) -> list[dict[str, 
                     "metadata": {"intensity": round(value, 6), "source": "rms_onset_intensity"},
                 }
             )
-    return markers[:256]
+    return markers[:max_markers]
 
 
 def _chroma_frames(times: np.ndarray, chroma: np.ndarray, max_frames: int) -> list[dict[str, Any]]:
@@ -218,7 +220,7 @@ def _color_for_pitch_class(pitch_class: int) -> str:
     return f"hsl({hue}, 72%, 58%)"
 
 
-def _harmonic_change_markers(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _harmonic_change_markers(frames: list[dict[str, Any]], max_markers: int) -> list[dict[str, Any]]:
     markers = []
     previous = None
     for frame in frames:
@@ -234,4 +236,4 @@ def _harmonic_change_markers(frames: list[dict[str, Any]]) -> list[dict[str, Any
                 }
             )
         previous = current
-    return markers[:256]
+    return markers[:max_markers]

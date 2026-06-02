@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import wave
@@ -31,6 +32,15 @@ class MusicAnalysisEngineTest(unittest.TestCase):
         self.assertTrue(all(0.0 <= frame["intensity"] <= 1.0 for frame in result.frames))
         self.assertTrue(any(marker["category"] == "energy_peak" for marker in result.markers))
 
+    def test_energy_profile_honors_max_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path)
+            result = MusicAnalysisEngine().analyze_energy(audio_path, {"max_frames": 32, "max_markers": 1})
+
+        self.assertLessEqual(len(result.markers), 1)
+        self.assertEqual(result.payload["settings"]["max_markers"], 1)
+
     def test_harmony_profile_returns_chroma_color_frames(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "impulses.wav"
@@ -43,6 +53,15 @@ class MusicAnalysisEngineTest(unittest.TestCase):
             self.assertEqual(len(result.frames[0]["chroma"]), 12)
             self.assertIn("color", result.frames[0])
 
+    def test_harmony_profile_honors_max_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path)
+            result = MusicAnalysisEngine().analyze_harmony(audio_path, {"max_frames": 16, "max_markers": 1})
+
+        self.assertLessEqual(len(result.markers), 1)
+        self.assertEqual(result.payload["settings"]["max_markers"], 1)
+
     def test_beat_grid_returns_artifact_payload_and_marker_dicts(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "impulses.wav"
@@ -53,3 +72,28 @@ class MusicAnalysisEngineTest(unittest.TestCase):
         self.assertIn("version", result.payload)
         self.assertLessEqual(len(result.markers), 64)
         self.assertTrue(all("timestamp" in marker for marker in result.markers))
+
+    def test_invalid_numeric_settings_fail_before_audio_loading(self):
+        missing_audio = Path("does-not-exist.wav")
+        engine = MusicAnalysisEngine()
+
+        with self.assertRaisesRegex(ValueError, "hop_length"):
+            engine.analyze_rhythm(missing_audio, {"hop_length": 0})
+        with self.assertRaisesRegex(ValueError, "max_frames"):
+            engine.analyze_energy(missing_audio, {"max_frames": 0})
+        with self.assertRaisesRegex(ValueError, "max_markers"):
+            engine.analyze_harmony(missing_audio, {"max_markers": 0})
+
+    def test_analysis_results_are_strict_json_serializable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path, seconds=4.0)
+            results = [
+                MusicAnalysisEngine().analyze_energy(audio_path, {"max_frames": 32, "max_markers": 4}),
+                MusicAnalysisEngine().analyze_harmony(audio_path, {"max_frames": 16, "max_markers": 4}),
+                MusicAnalysisEngine().analyze_rhythm(audio_path, {"max_markers": 64}),
+            ]
+
+        for result in results:
+            json.dumps(result.payload, allow_nan=False)
+            json.dumps(result.markers, allow_nan=False)
