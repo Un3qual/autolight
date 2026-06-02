@@ -2116,6 +2116,40 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(controller._visible_track_ids, [source.id, sibling.id])
 
+    def test_controller_persists_timeline_tree_expansion_state(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            child = add_generated_track(
+                controller._project,
+                source_id,
+                "Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "dep",
+            )
+            controller.trackModel.set_project(controller._project)
+            self.assertTrue(controller.set_track_expanded(source_id, False))
+            project_path = Path(tmp) / "tree.autolight"
+            controller.save_project(str(project_path))
+
+            reopened = self._controller()
+            reopened.open_project(str(project_path))
+            reopened.trackModel.set_project(reopened._project)
+
+        self.assertEqual(
+            reopened._project.ui_state["expanded_track_ids"],
+            [],
+        )
+        self.assertEqual(reopened.trackModel.rowCount(), 1)
+        self.assertEqual(child.input_track_ids, [source_id])
+
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
         FakeEngine.root_objects = [object()]
@@ -2313,6 +2347,20 @@ class AppControllerTest(unittest.TestCase):
             qml,
         )
 
+    def test_qml_exposes_timeline_tree_controls(self):
+        qml = self._qml_text(
+            "UI/components/TimelineView.qml",
+            "UI/components/TrackRow.qml",
+        )
+
+        self.assertIn("required property int depth", qml)
+        self.assertIn("required property bool hasChildren", qml)
+        self.assertIn("required property bool expanded", qml)
+        self.assertIn("required property string visibleChildStateSummary", qml)
+        self.assertIn("appController.set_track_expanded(root.trackId, !root.expanded)", qml)
+        self.assertIn("leftPadding: 10 + root.depth * 18", qml)
+        self.assertIn('text: root.expanded ? "▾" : "▸"', qml)
+
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
         qml = self._qml_text(
             "UI/Main.qml",
@@ -2324,8 +2372,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
         self.assertIn('resultState === "stale"', qml)
         self.assertIn('resultState === "failed"', qml)
-        self.assertIn("text: root.error", qml)
-        self.assertIn("visible: root.error.length > 0", qml)
+        self.assertIn("text: root.treeError.length > 0 ? root.treeError : root.error", qml)
+        self.assertIn("visible: root.error.length > 0 || root.treeError.length > 0", qml)
 
     @staticmethod
     def _track_role_values(controller: AppController, row: int):

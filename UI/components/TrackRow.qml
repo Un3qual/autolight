@@ -17,6 +17,11 @@ Row {
     required property var markerSpans
     required property var visibleWaveformSamples
     required property real waveformDurationSeconds
+    required property int depth
+    required property bool hasChildren
+    required property bool expanded
+    required property string visibleChildStateSummary
+    required property string treeError
     property var appController
     property real timelineLeftPadding: 24
     property real timelineLabelWidth: 280
@@ -43,21 +48,50 @@ Row {
         color: root.index % 2 === 0 ? root.panelBackground : root.laneBackground
         border.color: root.appController.selectedTrackId === root.trackId ? root.focusAccent : root.borderSubtle
 
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onClicked: root.trackSelected(root.trackId)
+        }
+
         Column {
             anchors.fill: parent
-            anchors.margins: 10
+            property int leftPadding: 10 + root.depth * 18
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.left: parent.left
+            anchors.leftMargin: leftPadding
+            anchors.rightMargin: 10
+            anchors.topMargin: 10
+            anchors.bottomMargin: 10
             spacing: 4
 
-            Text {
-                text: root.name
-                color: root.textPrimary
-                font.pixelSize: 14
-                elide: Text.ElideRight
+            Row {
                 width: parent.width
+                spacing: 6
+
+                Button {
+                    width: 24
+                    height: 22
+                    visible: root.hasChildren
+                    text: root.expanded ? "▾" : "▸"
+                    onClicked: root.appController.set_track_expanded(root.trackId, !root.expanded)
+                }
+
+                Text {
+                    text: root.name
+                    color: root.textPrimary
+                    font.pixelSize: 14
+                    elide: Text.ElideRight
+                    width: parent.width - (root.hasChildren ? 30 : 0)
+                }
             }
 
             Text {
-                text: root.trackType + " - " + root.resultState + " - " + root.markerCount + " markers"
+                text: root.visibleChildStateSummary.length > 0
+                    ? root.trackType + " - " + root.resultState + " - " + root.markerCount + " markers - children " + root.visibleChildStateSummary
+                    : root.trackType + " - " + root.resultState + " - " + root.markerCount + " markers"
                 color: root.resultState === "failed" || root.resultState === "stale" ? root.statusErrorColor : root.textMuted
                 font.pixelSize: 12
                 elide: Text.ElideRight
@@ -74,8 +108,8 @@ Row {
             }
 
             Text {
-                text: root.error
-                visible: root.error.length > 0
+                text: root.treeError.length > 0 ? root.treeError : root.error
+                visible: root.error.length > 0 || root.treeError.length > 0
                 color: "#fca5a5"
                 font.pixelSize: 11
                 elide: Text.ElideRight
@@ -89,12 +123,6 @@ Row {
                 value: root.jobProgress
                 visible: root.activeJobId.length > 0
             }
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            onClicked: root.trackSelected(root.trackId)
         }
     }
 

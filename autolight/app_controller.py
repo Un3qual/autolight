@@ -100,7 +100,7 @@ class AppController(QObject):
         self._timeline_visible_seconds = 8.0
         self._visible_track_ids: list[str] | None = None
         self._track_model = TimelineTrackModel(parent=self)
-        self._track_model.set_project(self._project)
+        self._set_track_model_project()
         self._registry = TransformRegistry()
         register_builtin_transforms(self._registry)
         self._transform_model = TransformSpecModel(self._registry, parent=self)
@@ -323,7 +323,7 @@ class AppController(QObject):
         )
         waveform.result_state = ResultState.COMPLETE
         self._attach_demo_waveform(waveform)
-        self._track_model.set_project(self._project)
+        self._set_track_model_project()
         self._refresh_visible_waveforms()
         self._set_selected_track_id(source.id)
         self._notify_timeline_duration_changed()
@@ -839,6 +839,16 @@ class AppController(QObject):
     def set_timeline_visible_track_range(self, first_row: int, row_count: int) -> None:
         self._visible_track_ids = self._track_model.visible_track_ids(first_row, row_count)
 
+    @Slot(str, bool, result=bool)
+    def set_track_expanded(self, track_id: str, expanded: bool) -> bool:
+        changed = self._track_model.set_track_expanded(track_id, expanded)
+        if changed:
+            if not isinstance(self._project.ui_state, dict):
+                self._project.ui_state = {}
+            self._project.ui_state["expanded_track_ids"] = self._track_model.expanded_track_ids()
+            self._mark_non_history_dirty()
+        return changed
+
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
         try:
@@ -1057,7 +1067,7 @@ class AppController(QObject):
         self._session.project = project
         self._visible_track_ids = None
         self._load_all_waveform_samples()
-        self._track_model.set_project(self._project)
+        self._set_track_model_project()
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
         self._timeline_scroll_seconds = 0.0
         self._refresh_visible_waveforms()
@@ -1073,6 +1083,15 @@ class AppController(QObject):
         self._edit_history.clear()
         self._non_history_dirty = False
         self._notify_history_changed()
+
+    def _set_track_model_project(self) -> None:
+        self._track_model.set_project(self._project)
+        ui_state = self._project.ui_state
+        if not isinstance(ui_state, dict) or "expanded_track_ids" not in ui_state:
+            return
+        expanded_ids = ui_state.get("expanded_track_ids", [])
+        if isinstance(expanded_ids, list):
+            self._track_model.set_expanded_track_ids([str(track_id) for track_id in expanded_ids])
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
