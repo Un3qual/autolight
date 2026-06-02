@@ -837,10 +837,7 @@ class AppController(QObject):
 
     @Slot(int, int)
     def set_timeline_visible_track_range(self, first_row: int, row_count: int) -> None:
-        start = max(0, min(int(first_row), len(self._project.tracks)))
-        count = max(0, int(row_count))
-        stop = min(len(self._project.tracks), start + count)
-        self._visible_track_ids = [track.id for track in self._project.tracks[start:stop]]
+        self._visible_track_ids = self._track_model.visible_track_ids(first_row, row_count)
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:

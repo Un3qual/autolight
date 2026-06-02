@@ -180,6 +180,40 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(model.data(child_index, model.role_for_name("trackId")), child.id)
         self.assertEqual(model.data(child_index, model.role_for_name("markerCount")), 1)
 
+    def test_refresh_track_emits_summary_change_for_visible_ancestor_of_collapsed_child(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([source, child])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+        self.assertTrue(model.set_track_expanded(source.id, False))
+        emissions = []
+        model.dataChanged.connect(
+            lambda top_left, bottom_right, roles: emissions.append(
+                (top_left.row(), bottom_right.row(), roles)
+            )
+        )
+
+        child.result_state = ResultState.STALE
+        model.refresh_track(child.id)
+
+        summary_role = model.role_for_name("visibleChildStateSummary")
+        self.assertIn((0, 0), [emission[0:2] for emission in emissions])
+        ancestor_emission = next(emission for emission in emissions if emission[0:2] == (0, 0))
+        self.assertIn(summary_role, ancestor_emission[2])
+        self.assertEqual(
+            model.data(model.index(0, 0), summary_role),
+            "stale: 1",
+        )
+
     def test_set_project_preserves_collapsed_expansion_state(self):
         project = new_project("Demo")
         source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
@@ -613,10 +647,9 @@ class TimelineTrackModelTest(unittest.TestCase):
 
             model.refresh_track(generated.id)
 
-            self.assertEqual(len(emissions), 1)
-            self.assertEqual(emissions[0][0:2], (1, 1))
-            self.assertIn(model.role_for_name("resultState"), emissions[0][2])
-            self.assertIn(model.role_for_name("markerSpans"), emissions[0][2])
+            track_emission = next(emission for emission in emissions if emission[0:2] == (1, 1))
+            self.assertIn(model.role_for_name("resultState"), track_emission[2])
+            self.assertIn(model.role_for_name("markerSpans"), track_emission[2])
 
     def test_role_names_returns_copy(self):
         model = TimelineTrackModel()

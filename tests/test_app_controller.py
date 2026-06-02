@@ -23,7 +23,7 @@ from autolight.app import (
 )
 from autolight.app_controller import AppController
 from autolight.cache.keys import track_dependency_hash
-from autolight.project.models import CacheEntry, JobRun, ResultState, TrackType
+from autolight.project.models import CacheEntry, JobRun, ResultState, Track, TrackType
 from autolight.project.store import track_dependency_inputs
 from tests.helpers import write_wav
 
@@ -2086,6 +2086,35 @@ class AppControllerTest(unittest.TestCase):
         controller.set_timeline_visible_track_range(timing_row, 1)
         self.assertEqual(controller.snap_timeline_time(0.53, False), 0.5)
         self.assertIn(("int", "int"), self._slot_parameter_types(controller, "set_timeline_visible_track_range"))
+
+    def test_controller_visible_track_range_uses_tree_projection_rows(self):
+        controller = self._controller()
+        source = Track(
+            id="track_source",
+            type=TrackType.SOURCE,
+            name="Song",
+            result_state=ResultState.COMPLETE,
+        )
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        sibling = Track(
+            id="track_sibling",
+            type=TrackType.SOURCE,
+            name="Other",
+            result_state=ResultState.COMPLETE,
+        )
+        controller._project.tracks.extend([source, child, sibling])
+        controller.trackModel.set_project(controller._project)
+        self.assertTrue(controller.trackModel.set_track_expanded(source.id, False))
+
+        controller.set_timeline_visible_track_range(0, 2)
+
+        self.assertEqual(controller._visible_track_ids, [source.id, sibling.id])
 
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []

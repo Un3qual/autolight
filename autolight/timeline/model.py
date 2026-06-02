@@ -138,6 +138,7 @@ class TimelineTrackModel(QAbstractListModel):
             (index for index, track in enumerate(self._tree_rows) if track.id == track_id),
             None,
         )
+        self._emit_visible_ancestor_summary_changes(track_id)
         if row is None:
             return
         model_index = self.index(row, 0)
@@ -419,6 +420,24 @@ class TimelineTrackModel(QAbstractListModel):
                 return False
             current_track_id = parent_id
         return False
+
+    def _emit_visible_ancestor_summary_changes(self, track_id: str) -> None:
+        summary_role = self.role_for_name("visibleChildStateSummary")
+        visible_rows_by_track_id = {
+            track.id: row for row, track in enumerate(self._tree_rows)
+        }
+        seen: set[str] = set()
+        parent_id = self._tree_parents.get(track_id, "")
+        while parent_id:
+            if parent_id in seen:
+                return
+            seen.add(parent_id)
+            row = visible_rows_by_track_id.get(parent_id)
+            if row is not None:
+                model_index = self.index(row, 0)
+                if model_index.isValid():
+                    self.dataChanged.emit(model_index, model_index, [summary_role])
+            parent_id = self._tree_parents.get(parent_id, "")
 
     def _prune_expanded_track_ids(self) -> None:
         if self._project is None:
