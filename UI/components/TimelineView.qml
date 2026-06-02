@@ -48,6 +48,8 @@ ListView {
         panelBackground: timelineRows.panelBackground
         laneBackground: timelineRows.laneBackground
         laneBackgroundAlt: timelineRows.laneBackgroundAlt
+        visibleEnergySamples: model.visibleEnergySamples
+        visibleHarmonicColorSamples: model.visibleHarmonicColorSamples
         borderSubtle: timelineRows.borderSubtle
         textPrimary: timelineRows.textPrimary
         textMuted: timelineRows.textMuted

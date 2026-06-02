@@ -16,6 +16,8 @@ Row {
     required property string activeJobId
     required property var markerSpans
     required property var visibleWaveformSamples
+    required property var visibleEnergySamples
+    required property var visibleHarmonicColorSamples
     required property real waveformDurationSeconds
     required property int depth
     required property bool hasChildren
@@ -136,6 +138,8 @@ Row {
         trackId: root.trackId
         markerSpans: root.markerSpans
         visibleWaveformSamples: root.visibleWaveformSamples
+        visibleEnergySamples: root.visibleEnergySamples
+        visibleHarmonicColorSamples: root.visibleHarmonicColorSamples
         waveformDurationSeconds: root.waveformDurationSeconds
         editable: root.trackType === "editable"
         timelineLeftPadding: root.timelineLeftPadding

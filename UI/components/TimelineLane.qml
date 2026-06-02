@@ -7,6 +7,8 @@ Rectangle {
     property string trackId: ""
     property var markerSpans: []
     property var visibleWaveformSamples: []
+    property var visibleEnergySamples: []
+    property var visibleHarmonicColorSamples: []
     property real waveformDurationSeconds: 0
     property bool editable: false
     property real timelineLeftPadding: 24
@@ -45,6 +47,24 @@ Rectangle {
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
         leftPadding: root.timelineLeftPadding
         visible: root.visibleWaveformSamples.length > 0
+    }
+
+    AnalysisStrip {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 18
+        samples: root.visibleEnergySamples
+        stripKind: "energy"
+    }
+
+    AnalysisStrip {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 2
+        samples: root.visibleHarmonicColorSamples
+        stripKind: "harmonic-color"
     }
 
     Repeater {

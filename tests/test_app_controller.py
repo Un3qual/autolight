@@ -1196,6 +1196,23 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("property var waveformSamples", lane_qml)
         self.assertNotIn("waveformSamples:", track_row_qml)
 
+    def test_qml_renders_energy_and_harmonic_analysis_strips(self):
+        qml = self._qml_text(
+            "UI/components/TimelineView.qml",
+            "UI/components/TrackRow.qml",
+            "UI/components/TimelineLane.qml",
+            "UI/components/AnalysisStrip.qml",
+        )
+
+        self.assertIn("required property var visibleEnergySamples", qml)
+        self.assertIn("required property var visibleHarmonicColorSamples", qml)
+        self.assertIn("AnalysisStrip", qml)
+        self.assertIn('stripKind: "energy"', qml)
+        self.assertIn('stripKind: "harmonic-color"', qml)
+        self.assertIn("sample.intensity", qml)
+        self.assertIn("sample.color", qml)
+        self.assertIn("Canvas", qml)
+
     def test_qml_scrubber_avoids_live_heavy_seek_binding(self):
         playback_qml = self._qml_text("UI/components/PlaybackBar.qml")
 
