@@ -18,12 +18,14 @@ class AnalysisLodStore:
             frames = []
         start = max(0.0, _finite_float(scroll_seconds))
         stop = start + max(0.0, _finite_float(visible_seconds))
-        visible = [
-            dict(frame)
-            for frame in frames
-            if isinstance(frame, dict)
-            and start <= _finite_float(frame.get("time", 0.0)) <= stop
-        ]
+        visible = []
+        for frame in frames:
+            if not isinstance(frame, dict):
+                continue
+            frame_time = _optional_finite_float(frame.get("time"))
+            if frame_time is None or not start <= frame_time <= stop:
+                continue
+            visible.append(dict(frame))
         if len(visible) > max_frames:
             stride = max(1, math.ceil(len(visible) / max_frames))
             visible = visible[::stride][:max_frames]
@@ -40,3 +42,11 @@ def _finite_float(value) -> float:
     except (TypeError, ValueError, OverflowError):
         return 0.0
     return result if math.isfinite(result) else 0.0
+
+
+def _optional_finite_float(value) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None

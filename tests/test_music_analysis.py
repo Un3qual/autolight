@@ -39,6 +39,29 @@ class AnalysisLodStoreTest(unittest.TestCase):
         self.assertEqual([frame["time"] for frame in visible["frames"]], [2.0, 3.0, 4.0, 5.0])
         self.assertEqual(visible["kind"], "energy")
 
+    def test_visible_frames_excludes_malformed_frame_times(self):
+        payload = {
+            "version": 1,
+            "kind": "energy",
+            "duration": 2.0,
+            "frames": [
+                {"id": "missing"},
+                {"id": "malformed", "time": "not-a-time"},
+                {"id": "nan", "time": float("nan")},
+                {"id": "infinite", "time": float("inf")},
+                {"id": "valid-zero", "time": 0.0},
+                {"id": "valid-coerced", "time": "1.0"},
+            ],
+        }
+
+        visible = AnalysisLodStore().visible_frames(
+            payload,
+            scroll_seconds=0.0,
+            visible_seconds=2.0,
+        )
+
+        self.assertEqual([frame["id"] for frame in visible["frames"]], ["valid-zero", "valid-coerced"])
+
 
 class MusicAnalysisEngineTest(unittest.TestCase):
     def test_energy_profile_returns_bounded_normalized_frames(self):
