@@ -6,6 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
+from autolight.analysis.music import MusicAnalysisEngine
 from autolight.analysis.registry import (
     TransformCancelled,
     TransformContext,
@@ -85,6 +86,39 @@ def register_builtin_transforms(registry: TransformRegistry) -> None:
             output_schema="artifact.waveform.v1",
             estimated_cost="medium",
             run=_waveform_summary,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="music.beat_grid",
+            version="1",
+            name="Beat Grid",
+            input_schema="audio.v1",
+            output_schema="artifact.beat-grid.v1",
+            estimated_cost="medium",
+            run=_music_beat_grid,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="music.energy_profile",
+            version="1",
+            name="Energy Profile",
+            input_schema="audio.v1",
+            output_schema="artifact.energy.v1",
+            estimated_cost="medium",
+            run=_music_energy_profile,
+        )
+    )
+    registry.register(
+        TransformSpec(
+            id="music.harmonic_color",
+            version="1",
+            name="Harmonic Color",
+            input_schema="audio.v1",
+            output_schema="artifact.harmonic-color.v1",
+            estimated_cost="medium",
+            run=_music_harmonic_color,
         )
     )
 
@@ -190,6 +224,36 @@ def _waveform_summary(context: TransformContext, params: dict) -> TransformResul
     return TransformResult(
         artifacts={"waveform": str(output_path)},
         metadata={"bucket_count": buckets},
+    )
+
+
+def _music_beat_grid(context: TransformContext, params: dict) -> TransformResult:
+    return _run_music_analysis(context, params, "beat-grid", MusicAnalysisEngine().analyze_rhythm)
+
+
+def _music_energy_profile(context: TransformContext, params: dict) -> TransformResult:
+    return _run_music_analysis(context, params, "energy", MusicAnalysisEngine().analyze_energy)
+
+
+def _music_harmonic_color(context: TransformContext, params: dict) -> TransformResult:
+    return _run_music_analysis(context, params, "harmonic-color", MusicAnalysisEngine().analyze_harmony)
+
+
+def _run_music_analysis(context: TransformContext, params: dict, artifact_kind: str, analyzer) -> TransformResult:
+    _raise_if_cancelled(context)
+    context.progress(0.05)
+    audio_path = Path(str(params["audio_path"]))
+    settings = {key: value for key, value in params.items() if key != "audio_path"}
+    result = analyzer(audio_path, settings)
+    _raise_if_cancelled(context)
+    context.artifact_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = Path(context.artifact_dir) / f"{artifact_kind}.json"
+    artifact_path.write_text(json.dumps(result.payload, sort_keys=True), encoding="utf-8")
+    context.progress(1.0)
+    return TransformResult(
+        markers=result.markers,
+        artifacts={artifact_kind: str(artifact_path)},
+        metadata={"kind": artifact_kind},
     )
 
 
