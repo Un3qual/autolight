@@ -1,0 +1,55 @@
+import tempfile
+import unittest
+import wave
+from pathlib import Path
+
+from autolight.analysis.music import MusicAnalysisEngine
+
+
+def write_impulse_wav(path: Path, *, sample_rate: int = 8000, seconds: float = 2.0) -> None:
+    frame_count = int(sample_rate * seconds)
+    samples = []
+    for index in range(frame_count):
+        value = 20000 if index % (sample_rate // 2) == 0 else 0
+        samples.append(value.to_bytes(2, "little", signed=True))
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(b"".join(samples))
+
+
+class MusicAnalysisEngineTest(unittest.TestCase):
+    def test_energy_profile_returns_bounded_normalized_frames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path)
+            result = MusicAnalysisEngine().analyze_energy(audio_path, {"max_frames": 32})
+
+        self.assertEqual(result.kind, "energy")
+        self.assertLessEqual(len(result.frames), 32)
+        self.assertTrue(all(0.0 <= frame["intensity"] <= 1.0 for frame in result.frames))
+        self.assertTrue(any(marker["category"] == "energy_peak" for marker in result.markers))
+
+    def test_harmony_profile_returns_chroma_color_frames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path)
+            result = MusicAnalysisEngine().analyze_harmony(audio_path, {"max_frames": 16})
+
+        self.assertEqual(result.kind, "harmonic-color")
+        self.assertLessEqual(len(result.frames), 16)
+        if result.frames:
+            self.assertEqual(len(result.frames[0]["chroma"]), 12)
+            self.assertIn("color", result.frames[0])
+
+    def test_beat_grid_returns_artifact_payload_and_marker_dicts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "impulses.wav"
+            write_impulse_wav(audio_path, seconds=4.0)
+            result = MusicAnalysisEngine().analyze_rhythm(audio_path, {"max_markers": 64})
+
+        self.assertEqual(result.kind, "beat-grid")
+        self.assertIn("version", result.payload)
+        self.assertLessEqual(len(result.markers), 64)
+        self.assertTrue(all("timestamp" in marker for marker in result.markers))
