@@ -16,6 +16,7 @@ from autolight.app import (
     TimelineViewport,
     WaveformLodStore,
 )
+from autolight.app.analysis_lod import AnalysisLodStore
 from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand, TrackSnapshotCommand
 from autolight.app.transform_inputs import TransformInputResolver
 from autolight.analysis.builtin import register_builtin_transforms
@@ -85,6 +86,7 @@ class AppController(QObject):
         self._edit_history = EditHistory()
         self._viewport = TimelineViewport()
         self._waveform_lod = WaveformLodStore()
+        self._analysis_lod = AnalysisLodStore()
         self._project_path = ""
         self._last_error = ""
         self._selected_track_id = ""
@@ -324,6 +326,7 @@ class AppController(QObject):
         )
         waveform.result_state = ResultState.COMPLETE
         self._attach_demo_waveform(waveform)
+        self._load_all_analysis_artifacts()
         self._set_track_model_project()
         self._refresh_visible_waveforms()
         self._set_selected_track_id(source.id)
@@ -885,6 +888,7 @@ class AppController(QObject):
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
             self._load_all_waveform_samples()
             self._refresh_visible_waveforms()
+            self._load_all_analysis_artifacts()
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
@@ -1071,6 +1075,7 @@ class AppController(QObject):
         self._set_track_model_project()
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
         self._timeline_scroll_seconds = 0.0
+        self._load_all_analysis_artifacts()
         self._refresh_visible_waveforms()
         self._set_selected_track_id("")
         self.projectNameChanged.emit()
@@ -1080,6 +1085,7 @@ class AppController(QObject):
         self.timelineScrollSecondsChanged.emit()
         if restore_ui_state:
             self._restore_timeline_ui_state()
+            self._load_all_analysis_artifacts()
             self._refresh_visible_waveforms()
         self._edit_history.clear()
         self._non_history_dirty = False
@@ -1234,6 +1240,7 @@ class AppController(QObject):
     def _handle_track_changed(self, track_id: str) -> None:
         self._load_waveform_samples(track_id)
         self._refresh_visible_waveforms(track_ids={track_id})
+        self._load_analysis_artifacts(track_id)
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         self._notify_timeline_duration_changed()
@@ -1422,6 +1429,36 @@ class AppController(QObject):
         if seconds > self._timeline_scroll_seconds + visible_seconds:
             return seconds - visible_seconds
         return self._timeline_scroll_seconds
+
+    def _load_all_analysis_artifacts(self) -> None:
+        for track in self._project.tracks:
+            self._load_analysis_artifacts(track.id)
+
+    def _load_analysis_artifacts(self, track_id: str) -> None:
+        track = find_track(self._project, track_id)
+        if track is None:
+            return
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        for cache_ref in track.cache_refs:
+            entry = entries.get(cache_ref)
+            if entry is None or entry.validation_status != "valid":
+                continue
+            if entry.artifact_kind not in {"energy", "harmonic-color"}:
+                continue
+            path = self._job_queue.cache_store.artifact_path(entry)
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            visible = self._analysis_lod.visible_frames(
+                payload,
+                scroll_seconds=self._timeline_scroll_seconds,
+                visible_seconds=self.timelineVisibleSeconds,
+            )
+            if entry.artifact_kind == "energy":
+                track.provenance["visible_energy"] = visible
+            elif entry.artifact_kind == "harmonic-color":
+                track.provenance["visible_harmonic_color"] = visible
 
     def _refresh_visible_waveforms(self, track_ids: set[str] | None = None) -> None:
         for track in self._project.tracks:

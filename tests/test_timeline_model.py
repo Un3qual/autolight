@@ -54,6 +54,8 @@ class TimelineTrackModelTest(unittest.TestCase):
                     model.role_for_name("childCount"): b"childCount",
                     model.role_for_name("visibleChildStateSummary"): b"visibleChildStateSummary",
                     model.role_for_name("treeError"): b"treeError",
+                    model.role_for_name("visibleEnergySamples"): b"visibleEnergySamples",
+                    model.role_for_name("visibleHarmonicColorSamples"): b"visibleHarmonicColorSamples",
                 },
             )
             self.assertEqual(model.rowCount(), 2)
@@ -436,6 +438,53 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(
             provenance_samples,
             [{"time": 0.0, "peak": 0.2, "rms": 0.1}],
+        )
+
+    def test_model_exposes_visible_analysis_samples_for_complete_valid_artifacts(self):
+        project = new_project("Demo")
+        energy = Track(
+            id="track_energy",
+            type=TrackType.GENERATED,
+            name="Energy",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_energy"],
+            provenance={
+                "visible_energy": {
+                    "kind": "energy",
+                    "frames": [{"time": 0.0, "intensity": 0.5}],
+                }
+            },
+        )
+        harmonic = Track(
+            id="track_harmony",
+            type=TrackType.GENERATED,
+            name="Harmony",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_harmony"],
+            provenance={
+                "visible_harmonic_color": {
+                    "kind": "harmonic-color",
+                    "frames": [{"time": 0.0, "color": "hsl(0, 72%, 58%)"}],
+                }
+            },
+        )
+        project.tracks.extend([energy, harmonic])
+        project.cache_entries.extend(
+            [
+                CacheEntry("cache_energy", "dep", "energy", "energy.json", "", "1"),
+                CacheEntry("cache_harmony", "dep", "harmonic-color", "harmony.json", "", "1"),
+            ]
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertEqual(
+            model.data(model.index(0, 0), model.role_for_name("visibleEnergySamples"))[0]["intensity"],
+            0.5,
+        )
+        self.assertEqual(
+            model.data(model.index(1, 0), model.role_for_name("visibleHarmonicColorSamples"))[0]["color"],
+            "hsl(0, 72%, 58%)",
         )
 
     def test_waveform_level_bucket_count_returns_zero_for_malformed_values(self):

@@ -36,6 +36,8 @@ class TimelineTrackModel(QAbstractListModel):
         Qt.ItemDataRole.UserRole + 22: b"childCount",
         Qt.ItemDataRole.UserRole + 23: b"visibleChildStateSummary",
         Qt.ItemDataRole.UserRole + 24: b"treeError",
+        Qt.ItemDataRole.UserRole + 25: b"visibleEnergySamples",
+        Qt.ItemDataRole.UserRole + 26: b"visibleHarmonicColorSamples",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -80,6 +82,16 @@ class TimelineTrackModel(QAbstractListModel):
             self.role_for_name("childCount"): lambda track: len(self._children_by_track.get(track.id, [])),
             self.role_for_name("visibleChildStateSummary"): self._visible_child_state_summary,
             self.role_for_name("treeError"): lambda track: self._tree_errors.get(track.id, ""),
+            self.role_for_name("visibleEnergySamples"): lambda track: self._visible_analysis_frames(
+                track,
+                "energy",
+                "visible_energy",
+            ),
+            self.role_for_name("visibleHarmonicColorSamples"): lambda track: self._visible_analysis_frames(
+                track,
+                "harmonic-color",
+                "visible_harmonic_color",
+            ),
         }
         self._generation = 0
         self.trackChangedRequested.connect(self.refresh_track)
@@ -298,6 +310,28 @@ class TimelineTrackModel(QAbstractListModel):
             and entry.artifact_kind == "waveform"
             and entry.validation_status == "valid"
             for cache_ref in cache_refs
+        )
+
+    def _visible_analysis_frames(self, track: Track, artifact_kind: str, provenance_key: str) -> list:
+        if not self._has_complete_valid_artifact(track, artifact_kind):
+            return []
+        visible = track.provenance.get(provenance_key, {})
+        if not isinstance(visible, dict):
+            return []
+        frames = visible.get("frames", [])
+        if not isinstance(frames, list):
+            return []
+        return [dict(frame) for frame in frames if isinstance(frame, dict)]
+
+    def _has_complete_valid_artifact(self, track: Track, artifact_kind: str) -> bool:
+        if self._project is None or track.result_state != ResultState.COMPLETE:
+            return False
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        return any(
+            (entry := entries.get(cache_ref)) is not None
+            and entry.artifact_kind == artifact_kind
+            and entry.validation_status == "valid"
+            for cache_ref in track.cache_refs
         )
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:

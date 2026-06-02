@@ -4,6 +4,7 @@ import unittest
 import wave
 from pathlib import Path
 
+from autolight.app.analysis_lod import AnalysisLodStore
 from autolight.analysis.music import MusicAnalysisEngine
 
 
@@ -18,6 +19,25 @@ def write_impulse_wav(path: Path, *, sample_rate: int = 8000, seconds: float = 2
         handle.setsampwidth(2)
         handle.setframerate(sample_rate)
         handle.writeframes(b"".join(samples))
+
+
+class AnalysisLodStoreTest(unittest.TestCase):
+    def test_visible_frames_returns_bounded_time_window(self):
+        payload = {
+            "version": 1,
+            "kind": "energy",
+            "duration": 10.0,
+            "frames": [{"time": float(index), "intensity": index / 10.0} for index in range(10)],
+        }
+        visible = AnalysisLodStore().visible_frames(
+            payload,
+            scroll_seconds=2.0,
+            visible_seconds=3.0,
+            max_frames=4,
+        )
+
+        self.assertEqual([frame["time"] for frame in visible["frames"]], [2.0, 3.0, 4.0, 5.0])
+        self.assertEqual(visible["kind"], "energy")
 
 
 class MusicAnalysisEngineTest(unittest.TestCase):
