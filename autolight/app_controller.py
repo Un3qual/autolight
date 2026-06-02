@@ -1470,10 +1470,10 @@ class AppController(QObject):
                 or entry.validation_status != "valid"
             ):
                 continue
-            path = self._job_queue.cache_store.artifact_path(entry)
             try:
+                path = self._job_queue.cache_store.artifact_path(entry)
                 payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError, TypeError):
                 continue
             if not isinstance(payload, dict):
                 continue

@@ -329,6 +329,49 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("visible_energy", energy.provenance)
         self.assertNotIn("analysis_energy_payload", energy.provenance)
 
+    def test_controller_clears_visible_analysis_artifacts_when_payload_is_invalid_utf8(self):
+        controller = self._controller()
+        energy = Track(
+            id="track_energy",
+            type=TrackType.GENERATED,
+            name="Energy",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_energy"],
+            provenance={
+                "analysis_energy_payload": {
+                    "artifact_kind": "energy",
+                    "cache_ref": "old_cache_energy",
+                    "payload_digest": "old-digest",
+                    "payload": {"kind": "energy", "frames": []},
+                },
+                "visible_energy": {
+                    "artifact_kind": "energy",
+                    "cache_ref": "old_cache_energy",
+                    "kind": "energy",
+                    "frames": [{"time": 0.0, "intensity": 0.5}],
+                },
+            },
+        )
+        controller._project.tracks.append(energy)
+        entry = CacheEntry(
+            id="cache_energy",
+            dependency_hash="energy-test",
+            artifact_kind="energy",
+            path="energy/cache_energy_utf8.bin",
+            created_at="",
+            transform_version="1",
+        )
+        cached_path = controller._job_queue.cache_store.artifact_path(entry)
+        cached_path.parent.mkdir(parents=True, exist_ok=True)
+        cached_path.write_bytes(b"\xff\xfe{")
+        energy.cache_refs = [entry.id]
+        controller._project.cache_entries.append(entry)
+
+        controller._load_analysis_artifacts(energy.id)
+
+        self.assertNotIn("visible_energy", energy.provenance)
+        self.assertNotIn("analysis_energy_payload", energy.provenance)
+
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()
 
