@@ -118,7 +118,7 @@ class TransformPickerTest(unittest.TestCase):
         track = self._track_by_id(controller, track_id)
         self.assertNotIn("audio_path", track.transform_params)
 
-    def test_controller_add_transform_track_resolves_audio_path_from_parent_chain(self):
+    def test_controller_add_transform_track_rejects_incomplete_generated_audio_parent(self):
         from autolight.app_controller import AppController
 
         def noop(context, params):
@@ -151,10 +151,10 @@ class TransformPickerTest(unittest.TestCase):
 
         track_id = controller.add_transform_track(generated_id, "test.audio_path", "1", "{}")
 
-        track = self._track_by_id(controller, track_id)
-        self.assertNotIn("audio_path", track.transform_params)
+        self.assertEqual(track_id, "")
+        self.assertIn("parent track is not complete", controller.lastError)
 
-    def test_controller_add_transform_track_searches_all_parent_branches_for_audio(self):
+    def test_controller_add_transform_track_rejects_incomplete_editable_audio_parent(self):
         from autolight.app_controller import AppController
 
         def noop(context, params):
@@ -189,8 +189,8 @@ class TransformPickerTest(unittest.TestCase):
 
         track_id = controller.add_transform_track(multi_parent.id, "test.audio_path", "1", "{}")
 
-        track = self._track_by_id(controller, track_id)
-        self.assertNotIn("audio_path", track.transform_params)
+        self.assertEqual(track_id, "")
+        self.assertIn("parent track is not complete", controller.lastError)
 
     def test_controller_add_transform_track_rejects_audio_transform_without_source_audio(self):
         from autolight.app_controller import AppController
@@ -218,7 +218,7 @@ class TransformPickerTest(unittest.TestCase):
         track_id = controller.add_transform_track(no_audio.id, "test.audio_path", "1", "{}")
 
         self.assertEqual(track_id, "")
-        self.assertIn("source audio track", controller.lastError)
+        self.assertIn("parent track is not complete", controller.lastError)
 
     def test_controller_add_transform_track_rejects_supplied_audio_path_without_source_audio(self):
         from autolight.app_controller import AppController
@@ -251,7 +251,7 @@ class TransformPickerTest(unittest.TestCase):
         )
 
         self.assertEqual(track_id, "")
-        self.assertIn("source audio track", controller.lastError)
+        self.assertIn("parent track is not complete", controller.lastError)
 
     def test_controller_resolves_audio_path_at_submission_time(self):
         from autolight.app_controller import AppController
