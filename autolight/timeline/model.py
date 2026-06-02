@@ -44,6 +44,7 @@ class TimelineTrackModel(QAbstractListModel):
         self._markers_by_track: dict[str, list[Marker]] = {}
         self._selected_marker_ids: set[str] = set()
         self._expanded_track_ids: set[str] = set()
+        self._has_explicit_expansion_state = False
         self._tree_rows: list[Track] = []
         self._tree_depths: dict[str, int] = {}
         self._tree_parents: dict[str, str] = {}
@@ -87,7 +88,8 @@ class TimelineTrackModel(QAbstractListModel):
         self.beginResetModel()
         self._project = project
         self._rebuild_marker_index()
-        if project is not None:
+        self._prune_expanded_track_ids()
+        if project is not None and not self._has_explicit_expansion_state:
             parent_ids = {input_id for track in project.tracks for input_id in track.input_track_ids}
             known_ids = {track.id for track in project.tracks}
             self._expanded_track_ids |= parent_ids & known_ids
@@ -127,14 +129,17 @@ class TimelineTrackModel(QAbstractListModel):
     def refresh_track(self, track_id: str) -> None:
         if self._project is None:
             return
+        known_track_ids = {track.id for track in self._project.tracks}
+        if track_id not in known_track_ids:
+            self._markers_by_track.pop(track_id, None)
+            return
+        self._rebuild_marker_index_for_track(track_id)
         row = next(
             (index for index, track in enumerate(self._tree_rows) if track.id == track_id),
             None,
         )
         if row is None:
-            self._markers_by_track.pop(track_id, None)
             return
-        self._rebuild_marker_index_for_track(track_id)
         model_index = self.index(row, 0)
         if model_index.isValid():
             self.dataChanged.emit(model_index, model_index, list(self.ROLE_NAMES))
@@ -156,6 +161,7 @@ class TimelineTrackModel(QAbstractListModel):
             if track_id not in self._expanded_track_ids:
                 return False
             self._expanded_track_ids.remove(track_id)
+        self._has_explicit_expansion_state = True
         self.beginResetModel()
         self._rebuild_tree_projection()
         self._generation += 1
@@ -163,10 +169,13 @@ class TimelineTrackModel(QAbstractListModel):
         return True
 
     def expanded_track_ids(self) -> list[str]:
+        self._prune_expanded_track_ids()
         return sorted(self._expanded_track_ids)
 
     def set_expanded_track_ids(self, track_ids: list[str]) -> None:
+        self._has_explicit_expansion_state = True
         self._expanded_track_ids = {str(track_id) for track_id in track_ids}
+        self._prune_expanded_track_ids()
         if self._project is not None:
             self.beginResetModel()
             self._rebuild_tree_projection()
@@ -345,23 +354,40 @@ class TimelineTrackModel(QAbstractListModel):
                 self._tree_parents[track.id] = parent_id
             elif parent_id:
                 self._tree_errors[track.id] = f"missing parent: {parent_id}"
+        projected_ids: set[str] = set()
         for track in self._project.tracks:
             if self._tree_parents.get(track.id):
                 continue
-            self._append_tree_row(track, depth=0, active_path=set())
+            self._append_tree_row(track, depth=0, active_path=set(), projected_ids=projected_ids)
+        for track in self._project.tracks:
+            if track.id in projected_ids:
+                continue
+            if not self._track_has_parent_cycle(track.id, tracks_by_id):
+                continue
+            self._tree_errors[track.id] = "cycle detected"
+            self._append_tree_row(track, depth=0, active_path=set(), projected_ids=projected_ids)
 
-    def _append_tree_row(self, track: Track, depth: int, active_path: set[str]) -> None:
-        self._tree_rows.append(track)
-        self._tree_depths[track.id] = depth
+    def _append_tree_row(
+        self,
+        track: Track,
+        depth: int,
+        active_path: set[str],
+        projected_ids: set[str],
+    ) -> None:
         if track.id in active_path:
             self._tree_errors[track.id] = "cycle detected"
             return
+        if track.id in projected_ids:
+            return
+        projected_ids.add(track.id)
+        self._tree_rows.append(track)
+        self._tree_depths[track.id] = depth
         if track.id not in self._expanded_track_ids:
             return
         next_path = set(active_path)
         next_path.add(track.id)
         for child in self._children_by_track.get(track.id, []):
-            self._append_tree_row(child, depth + 1, next_path)
+            self._append_tree_row(child, depth + 1, next_path, projected_ids)
 
     def _visible_child_state_summary(self, track: Track) -> str:
         counts: dict[str, int] = {}
@@ -377,6 +403,28 @@ class TimelineTrackModel(QAbstractListModel):
                 counts[state] = counts.get(state, 0) + 1
             pending.extend(self._children_by_track.get(child.id, []))
         return ", ".join(f"{state}: {counts[state]}" for state in sorted(counts))
+
+    def _track_has_parent_cycle(self, track_id: str, tracks_by_id: dict[str, Track]) -> bool:
+        seen: set[str] = set()
+        current_track_id = track_id
+        while current_track_id:
+            if current_track_id in seen:
+                return True
+            seen.add(current_track_id)
+            track = tracks_by_id.get(current_track_id)
+            if track is None:
+                return False
+            parent_id = track.input_track_ids[0] if track.input_track_ids else ""
+            if parent_id not in tracks_by_id:
+                return False
+            current_track_id = parent_id
+        return False
+
+    def _prune_expanded_track_ids(self) -> None:
+        if self._project is None:
+            return
+        known_track_ids = {track.id for track in self._project.tracks}
+        self._expanded_track_ids &= known_track_ids
 
     def _rebuild_marker_index_for_track(self, track_id: str) -> None:
         if self._project is None:

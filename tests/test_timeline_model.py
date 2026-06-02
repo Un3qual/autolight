@@ -156,6 +156,52 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertFalse(model.data(model.index(0, 0), model.role_for_name("expanded")))
         self.assertEqual([track.id for track in project.tracks], ["track_source", "track_child", "track_sibling"])
 
+    def test_refresh_track_preserves_marker_cache_for_collapsed_child(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([source, child])
+        project.markers.append(Marker(id="marker_child", track_id=child.id, timestamp=1.0))
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+        self.assertTrue(model.set_track_expanded(source.id, False))
+
+        model.refresh_track(child.id)
+        self.assertTrue(model.set_track_expanded(source.id, True))
+
+        child_index = model.index(1, 0)
+        self.assertEqual(model.data(child_index, model.role_for_name("trackId")), child.id)
+        self.assertEqual(model.data(child_index, model.role_for_name("markerCount")), 1)
+
+    def test_set_project_preserves_collapsed_expansion_state(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([source, child])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+        self.assertTrue(model.set_track_expanded(source.id, False))
+
+        model.set_project(project)
+
+        self.assertEqual(model.rowCount(), 1)
+        self.assertEqual(model.data(model.index(0, 0), model.role_for_name("trackId")), source.id)
+        self.assertFalse(model.data(model.index(0, 0), model.role_for_name("expanded")))
+
     def test_model_renders_missing_parent_as_problem_root_row(self):
         project = new_project("Demo")
         orphan = Track(
@@ -176,6 +222,34 @@ class TimelineTrackModelTest(unittest.TestCase):
             model.data(model.index(0, 0), model.role_for_name("treeError")),
             "missing parent: missing_parent",
         )
+
+    def test_model_surfaces_cycle_as_problem_root_row(self):
+        project = new_project("Demo")
+        track_a = Track(
+            id="track_a",
+            type=TrackType.GENERATED,
+            name="A",
+            input_track_ids=["track_b"],
+            result_state=ResultState.COMPLETE,
+        )
+        track_b = Track(
+            id="track_b",
+            type=TrackType.GENERATED,
+            name="B",
+            input_track_ids=["track_a"],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([track_a, track_b])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertGreater(model.rowCount(), 0)
+        errors = [
+            model.data(model.index(row, 0), model.role_for_name("treeError"))
+            for row in range(model.rowCount())
+        ]
+        self.assertIn("cycle detected", errors)
 
     def test_model_exposes_editability_and_marker_duration(self):
         project = new_project("Demo")
