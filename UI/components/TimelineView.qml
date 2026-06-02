@@ -21,9 +21,23 @@ ListView {
     signal trackSelected(string trackId)
     signal seekRequested(real x)
 
+    function updateVisibleTrackRange() {
+        if (!timelineRows.appController) {
+            return
+        }
+        var rowHeight = Math.max(1, timelineRows.timelineRowHeight)
+        var firstRow = Math.max(0, Math.floor(timelineRows.contentY / rowHeight))
+        var rowCount = Math.max(0, Math.ceil(timelineRows.height / rowHeight) + 1)
+        timelineRows.appController.set_timeline_visible_track_range(firstRow, rowCount)
+    }
+
     model: timelineRows.appController.trackModel
     clip: true
     onWidthChanged: timelineRows.layoutWidthChanged()
+    onHeightChanged: timelineRows.updateVisibleTrackRange()
+    onContentYChanged: timelineRows.updateVisibleTrackRange()
+    onCountChanged: timelineRows.updateVisibleTrackRange()
+    Component.onCompleted: timelineRows.updateVisibleTrackRange()
 
     delegate: TrackRow {
         width: timelineRows.width

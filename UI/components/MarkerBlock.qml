@@ -83,12 +83,12 @@ Rectangle {
 
     Rectangle {
         id: rightResizeHandle
-        width: 8
+        width: Math.min(8, Math.max(0, root.width / 3))
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         color: "transparent"
-        visible: root.editable
+        visible: root.editable && root.duration > 0 && root.width > 16
 
         MouseArea {
             anchors.fill: parent
@@ -108,6 +108,8 @@ Rectangle {
             onReleased: function(mouse) {
                 var widthDelta = parentX(mouse) - startParentX
                 if (Math.abs(widthDelta) < root.dragThresholdPixels) {
+                    var additive = (mouse.modifiers & Qt.ShiftModifier) !== 0
+                    root.selected(root.markerId, additive)
                     return
                 }
                 var nextDuration = Math.max(0, startDuration + widthDelta / Math.max(1, root.pixelsPerSecond))

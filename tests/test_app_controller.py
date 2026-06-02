@@ -724,9 +724,12 @@ class AppControllerTest(unittest.TestCase):
         lane_qml = self._qml_text("UI/components/TimelineLane.qml")
         marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
         toolbar_qml = self._qml_text("UI/components/ProjectToolbar.qml")
+        timeline_qml = self._qml_text("UI/components/TimelineView.qml")
 
         self.assertIn("add_manual_cue_track", toolbar_qml)
         self.assertIn("snap_timeline_time", lane_qml)
+        self.assertIn("set_timeline_visible_track_range", timeline_qml)
+        self.assertIn("updateVisibleTrackRange()", timeline_qml)
         self.assertIn("move_selected_markers", marker_qml)
         self.assertIn("resize_marker", marker_qml)
         self.assertIn("AltModifier", marker_qml)
@@ -747,6 +750,18 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("mouse.x - startX", marker_qml)
         self.assertNotIn("property real startWidth", marker_qml)
         self.assertNotIn("startWidth + widthDelta", marker_qml)
+
+    def test_qml_marker_resize_handle_preserves_min_width_marker_selection(self):
+        marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
+
+        self.assertIn("width: Math.min(8, Math.max(0, root.width / 3))", marker_qml)
+        self.assertIn("visible: root.editable && root.duration > 0 && root.width > 16", marker_qml)
+        self.assertIn("root.selected(root.markerId, additive)", marker_qml)
+        self.assertLess(
+            marker_qml.index("root.selected(root.markerId, additive)"),
+            marker_qml.index("var nextDuration = Math.max"),
+        )
+        self.assertNotIn("visible: root.editable\n", marker_qml)
 
     def test_qml_marker_move_skips_click_release_below_drag_threshold(self):
         marker_qml = self._qml_text("UI/components/MarkerBlock.qml")
@@ -2057,6 +2072,21 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(timing.id)
         self.assertEqual(controller.snap_timeline_time(1.03, False), 1.0)
 
+    def test_controller_snap_time_uses_only_visible_timing_tracks(self):
+        controller = self._controller()
+        controller.load_demo_project()
+        timing = self._track_by_name(controller, "Beat Markers")
+        editable = self._track_by_type(controller, TrackType.EDITABLE)
+        timing_row = controller._project.tracks.index(timing)
+        editable_row = controller._project.tracks.index(editable)
+
+        controller.set_timeline_visible_track_range(editable_row, 1)
+        self.assertEqual(controller.snap_timeline_time(0.53, False), 0.53)
+
+        controller.set_timeline_visible_track_range(timing_row, 1)
+        self.assertEqual(controller.snap_timeline_time(0.53, False), 0.5)
+        self.assertIn(("int", "int"), self._slot_parameter_types(controller, "set_timeline_visible_track_range"))
+
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
         FakeEngine.root_objects = [object()]
@@ -2133,7 +2163,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertNotIn("root.timelinePixelsPerSecond", qml)
         self.assertNotIn("spacing: 48", qml)
         self.assertNotIn("model: markerCount", qml)
-        self.assertNotIn("onContentYChanged", qml)
+        self.assertIn("onContentYChanged: timelineRows.updateVisibleTrackRange()", qml)
         self.assertNotIn("contentY =", qml)
 
     def test_qml_marker_color_options_are_bound_from_controller(self):

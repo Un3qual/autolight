@@ -88,14 +88,26 @@ def _derive_waveform_level(
     if bucket_count >= source_count:
         return [_sample_with_energy(sample) for sample in source_samples]
 
+    source_ranges = _sample_frame_ranges(source_samples)
+    total_frames = source_ranges[-1][1] if source_ranges else 0
+    if total_frames <= 0:
+        return [{"peak": 0.0, "rms": 0.0, "count": 0, "sum_squares": 0.0} for _ in range(bucket_count)]
+
     samples = []
     for bucket_index in range(bucket_count):
-        start = math.floor(bucket_index * source_count / bucket_count)
-        stop = math.floor((bucket_index + 1) * source_count / bucket_count)
-        segment = source_samples[start:max(start + 1, stop)]
-        peak = max((abs(float(sample.get("peak", 0.0))) for sample in segment), default=0.0)
-        frame_total = sum(_sample_frame_count(sample) for sample in segment)
-        square_total = sum(_sample_square_total(sample) for sample in segment)
+        start = math.floor(bucket_index * total_frames / bucket_count)
+        stop = math.floor((bucket_index + 1) * total_frames / bucket_count)
+        peak = 0.0
+        frame_total = 0
+        square_total = 0.0
+        for sample_start, sample_stop, sample in source_ranges:
+            overlap = min(stop, sample_stop) - max(start, sample_start)
+            if overlap <= 0:
+                continue
+            source_frames = max(1, sample_stop - sample_start)
+            peak = max(peak, _sample_peak(sample))
+            frame_total += overlap
+            square_total += _sample_square_total(sample) / source_frames * overlap
         samples.append(
             {
                 "peak": peak,
@@ -107,11 +119,34 @@ def _derive_waveform_level(
     return samples
 
 
+def _sample_frame_ranges(
+    source_samples: list[dict[str, float]],
+) -> list[tuple[int, int, dict[str, float]]]:
+    ranges = []
+    cursor = 0
+    for sample in source_samples:
+        count = _sample_frame_count(sample)
+        if count <= 0:
+            continue
+        stop = cursor + count
+        ranges.append((cursor, stop, sample))
+        cursor = stop
+    return ranges
+
+
 def _sample_with_energy(sample: dict[str, float]) -> dict[str, float]:
     normalized = dict(sample)
     normalized["count"] = _sample_frame_count(normalized)
     normalized["sum_squares"] = _sample_square_total(normalized)
     return normalized
+
+
+def _sample_peak(sample: dict[str, float]) -> float:
+    try:
+        peak = abs(float(sample.get("peak", 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+    return peak if math.isfinite(peak) else 0.0
 
 
 def _sample_frame_count(sample: dict[str, float]) -> int:

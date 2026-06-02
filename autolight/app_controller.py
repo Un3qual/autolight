@@ -98,6 +98,7 @@ class AppController(QObject):
         self._timeline_pixels_per_second = TIMELINE_DEFAULT_PIXELS_PER_SECOND
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
+        self._visible_track_ids: list[str] | None = None
         self._track_model = TimelineTrackModel(parent=self)
         self._track_model.set_project(self._project)
         self._registry = TransformRegistry()
@@ -830,9 +831,16 @@ class AppController(QObject):
             self._project,
             requested_seconds=seconds,
             pixels_per_second=self._timeline_pixels_per_second,
-            visible_track_ids=[track.id for track in self._project.tracks],
+            visible_track_ids=self._snap_visible_track_ids(),
             bypass=bypass_snap,
         )
+
+    @Slot(int, int)
+    def set_timeline_visible_track_range(self, first_row: int, row_count: int) -> None:
+        start = max(0, min(int(first_row), len(self._project.tracks)))
+        count = max(0, int(row_count))
+        stop = min(len(self._project.tracks), start + count)
+        self._visible_track_ids = [track.id for track in self._project.tracks[start:stop]]
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
@@ -1050,6 +1058,7 @@ class AppController(QObject):
         self._playback.unload()
         self._project = project
         self._session.project = project
+        self._visible_track_ids = None
         self._load_all_waveform_samples()
         self._track_model.set_project(self._project)
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
@@ -1100,6 +1109,12 @@ class AppController(QObject):
         self.selectedMarkerIdsChanged.emit()
         if emit_marker_summary:
             self.selectedTrackMarkersChanged.emit()
+
+    def _snap_visible_track_ids(self) -> list[str]:
+        if self._visible_track_ids is None:
+            return [track.id for track in self._project.tracks]
+        current_track_ids = {track.id for track in self._project.tracks}
+        return [track_id for track_id in self._visible_track_ids if track_id in current_track_ids]
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:

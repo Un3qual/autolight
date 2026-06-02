@@ -94,6 +94,24 @@ class WaveformSummaryTest(unittest.TestCase):
         self.assertAlmostEqual(derived["rms"], math.sqrt(5.77 / 10))
         self.assertAlmostEqual(derived["sum_squares"], 5.77)
 
+    def test_waveform_lod_derives_coarse_buckets_by_frame_coverage(self):
+        samples = [
+            {"peak": 0.1, "rms": 0.1, "count": 10, "sum_squares": 0.1},
+            {"peak": 0.9, "rms": 0.6, "count": 90, "sum_squares": 32.4},
+            {"peak": 0.2, "rms": 0.2, "count": 10, "sum_squares": 0.4},
+        ]
+
+        first, second = waveform_module._derive_waveform_level(samples, 2)
+
+        self.assertEqual(first["count"], 55)
+        self.assertEqual(second["count"], 55)
+        self.assertEqual(first["peak"], 0.9)
+        self.assertEqual(second["peak"], 0.9)
+        self.assertAlmostEqual(first["sum_squares"], 16.3)
+        self.assertAlmostEqual(second["sum_squares"], 16.6)
+        self.assertAlmostEqual(first["rms"], math.sqrt(16.3 / 55))
+        self.assertAlmostEqual(second["rms"], math.sqrt(16.6 / 55))
+
     def test_build_waveform_summary_zero_frame_audio_has_consistent_empty_levels(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "empty.wav"
