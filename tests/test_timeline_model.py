@@ -450,6 +450,8 @@ class TimelineTrackModelTest(unittest.TestCase):
             cache_refs=["cache_energy"],
             provenance={
                 "visible_energy": {
+                    "artifact_kind": "energy",
+                    "cache_ref": "cache_energy",
                     "kind": "energy",
                     "frames": [{"time": 0.0, "intensity": 0.5}],
                 }
@@ -463,6 +465,8 @@ class TimelineTrackModelTest(unittest.TestCase):
             cache_refs=["cache_harmony"],
             provenance={
                 "visible_harmonic_color": {
+                    "artifact_kind": "harmonic-color",
+                    "cache_ref": "cache_harmony",
                     "kind": "harmonic-color",
                     "frames": [{"time": 0.0, "color": "hsl(0, 72%, 58%)"}],
                 }
@@ -485,6 +489,35 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(
             model.data(model.index(1, 0), model.role_for_name("visibleHarmonicColorSamples"))[0]["color"],
             "hsl(0, 72%, 58%)",
+        )
+
+    def test_visible_analysis_roles_hide_mismatched_artifact_metadata(self):
+        project = new_project("Demo")
+        energy = Track(
+            id="track_energy",
+            type=TrackType.GENERATED,
+            name="Energy",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_energy_current"],
+            provenance={
+                "visible_energy": {
+                    "artifact_kind": "energy",
+                    "cache_ref": "cache_energy_old",
+                    "kind": "energy",
+                    "frames": [{"time": 0.0, "intensity": 0.5}],
+                }
+            },
+        )
+        project.tracks.append(energy)
+        project.cache_entries.append(
+            CacheEntry("cache_energy_current", "dep", "energy", "energy.json", "", "1")
+        )
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertEqual(
+            model.data(model.index(0, 0), model.role_for_name("visibleEnergySamples")),
+            [],
         )
 
     def test_waveform_level_bucket_count_returns_zero_for_malformed_values(self):

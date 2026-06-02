@@ -24,7 +24,7 @@ from autolight.app import (
 from autolight.app_controller import AppController
 from autolight.cache.keys import track_dependency_hash
 from autolight.project.models import CacheEntry, JobRun, ResultState, Track, TrackType
-from autolight.project.store import track_dependency_inputs
+from autolight.project.store import add_generated_track, track_dependency_inputs
 from tests.helpers import write_wav
 
 
@@ -229,6 +229,105 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertTrue(controller.redo())
         self.assertAlmostEqual(first_visible_time(), scrolled_time)
+
+    def test_controller_refreshes_visible_analysis_artifacts_for_timeline_viewport_changes(self):
+        controller = self._controller()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            controller._project.audio_assets[0].duration = 10.0
+            energy = add_generated_track(
+                controller._project,
+                parent_track_id=source_id,
+                name="Energy",
+                transform_id="music.energy_profile",
+                transform_params={},
+                transform_version="1",
+                output_schema="artifact.energy.v1",
+                dependency_hash="energy-test",
+            )
+
+        energy.result_state = ResultState.COMPLETE
+        payload = {
+            "version": 1,
+            "kind": "energy",
+            "duration": 10.0,
+            "frames": [
+                {"time": 0.0, "intensity": 0.1},
+                {"time": 1.0, "intensity": 0.2},
+                {"time": 6.0, "intensity": 0.6},
+                {"time": 7.0, "intensity": 0.7},
+            ],
+        }
+        entry = controller._job_queue.cache_store.write_bytes(
+            "energy",
+            "energy-test",
+            json.dumps(payload).encode("utf-8"),
+            "1",
+        )
+        controller._project.cache_entries.append(entry)
+        energy.cache_refs = [entry.id]
+        controller.trackModel.set_project(controller._project)
+        controller._load_analysis_artifacts(energy.id)
+
+        self.assertEqual(
+            [frame["time"] for frame in energy.provenance["visible_energy"]["frames"]],
+            [0.0, 1.0, 6.0, 7.0],
+        )
+
+        controller.set_timeline_visible_seconds(2.0)
+
+        self.assertEqual(
+            [frame["time"] for frame in energy.provenance["visible_energy"]["frames"]],
+            [0.0, 1.0],
+        )
+
+        controller.set_timeline_scroll_seconds(6.0)
+
+        visible = energy.provenance["visible_energy"]
+        self.assertEqual([frame["time"] for frame in visible["frames"]], [6.0, 7.0])
+        self.assertEqual(visible["artifact_kind"], "energy")
+        self.assertEqual(visible["cache_ref"], entry.id)
+        self.assertEqual(visible["payload_digest"], entry.payload_digest)
+
+    def test_controller_clears_visible_analysis_artifacts_when_payload_cannot_be_loaded(self):
+        controller = self._controller()
+        energy = Track(
+            id="track_energy",
+            type=TrackType.GENERATED,
+            name="Energy",
+            result_state=ResultState.COMPLETE,
+            cache_refs=["cache_energy"],
+            provenance={
+                "visible_energy": {
+                    "artifact_kind": "energy",
+                    "cache_ref": "old_cache_energy",
+                    "kind": "energy",
+                    "frames": [{"time": 0.0, "intensity": 0.5}],
+                }
+            },
+        )
+        controller._project.tracks.append(energy)
+        entry = CacheEntry(
+            id="cache_energy",
+            dependency_hash="energy-test",
+            artifact_kind="energy",
+            path="energy/cache_energy.bin",
+            created_at="",
+            transform_version="1",
+        )
+        cached_path = controller._job_queue.cache_store.artifact_path(entry)
+        cached_path.parent.mkdir(parents=True, exist_ok=True)
+        cached_path.write_text("{", encoding="utf-8")
+        energy.cache_refs = [entry.id]
+        controller._project.cache_entries.append(entry)
+
+        controller._load_analysis_artifacts(energy.id)
+
+        self.assertNotIn("visible_energy", energy.provenance)
+        self.assertNotIn("analysis_energy_payload", energy.provenance)
 
     def test_controller_loads_demo_project_into_timeline_model(self):
         controller = self._controller()

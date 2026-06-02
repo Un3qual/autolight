@@ -313,26 +313,44 @@ class TimelineTrackModel(QAbstractListModel):
         )
 
     def _visible_analysis_frames(self, track: Track, artifact_kind: str, provenance_key: str) -> list:
-        if not self._has_complete_valid_artifact(track, artifact_kind):
-            return []
         visible = track.provenance.get(provenance_key, {})
-        if not isinstance(visible, dict):
+        if not self._visible_analysis_matches_current_artifact(track, artifact_kind, visible):
             return []
         frames = visible.get("frames", [])
         if not isinstance(frames, list):
             return []
         return [dict(frame) for frame in frames if isinstance(frame, dict)]
 
-    def _has_complete_valid_artifact(self, track: Track, artifact_kind: str) -> bool:
-        if self._project is None or track.result_state != ResultState.COMPLETE:
+    def _visible_analysis_matches_current_artifact(
+        self,
+        track: Track,
+        artifact_kind: str,
+        visible,
+    ) -> bool:
+        if not isinstance(visible, dict):
             return False
+        if visible.get("artifact_kind") != artifact_kind or visible.get("kind") != artifact_kind:
+            return False
+        return self._matching_valid_artifact_entry(track, artifact_kind, visible) is not None
+
+    def _matching_valid_artifact_entry(self, track: Track, artifact_kind: str, visible: dict):
+        if self._project is None or track.result_state != ResultState.COMPLETE:
+            return None
+        cache_ref = visible.get("cache_ref")
+        if not isinstance(cache_ref, str) or cache_ref not in track.cache_refs:
+            return None
         entries = {entry.id: entry for entry in self._project.cache_entries}
-        return any(
-            (entry := entries.get(cache_ref)) is not None
-            and entry.artifact_kind == artifact_kind
-            and entry.validation_status == "valid"
-            for cache_ref in track.cache_refs
-        )
+        entry = entries.get(cache_ref)
+        if (
+            entry is None
+            or entry.artifact_kind != artifact_kind
+            or entry.validation_status != "valid"
+        ):
+            return None
+        visible_digest = visible.get("payload_digest", "")
+        if visible_digest and entry.payload_digest and visible_digest != entry.payload_digest:
+            return None
+        return entry
 
     def _markers_for_track(self, track_id: str) -> list[Marker]:
         return self._markers_by_track.get(track_id, [])
