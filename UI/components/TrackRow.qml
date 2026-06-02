@@ -108,7 +108,9 @@ Row {
             }
 
             Text {
-                text: root.treeError.length > 0 ? root.treeError : root.error
+                text: root.treeError.length > 0 && root.error.length > 0
+                    ? root.treeError + " - " + root.error
+                    : root.treeError.length > 0 ? root.treeError : root.error
                 visible: root.error.length > 0 || root.treeError.length > 0
                 color: "#fca5a5"
                 font.pixelSize: 11

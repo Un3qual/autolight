@@ -1085,13 +1085,22 @@ class AppController(QObject):
         self._notify_history_changed()
 
     def _set_track_model_project(self) -> None:
-        self._track_model.set_project(self._project)
         ui_state = self._project.ui_state
-        if not isinstance(ui_state, dict) or "expanded_track_ids" not in ui_state:
+        expanded_ids = (
+            ui_state.get("expanded_track_ids")
+            if isinstance(ui_state, dict)
+            else None
+        )
+        if not isinstance(expanded_ids, list):
+            self._reset_track_model_expansion_defaults()
+            self._track_model.set_project(self._project)
             return
-        expanded_ids = ui_state.get("expanded_track_ids", [])
-        if isinstance(expanded_ids, list):
-            self._track_model.set_expanded_track_ids([str(track_id) for track_id in expanded_ids])
+        self._track_model.set_project(self._project)
+        self._track_model.set_expanded_track_ids([str(track_id) for track_id in expanded_ids])
+
+    def _reset_track_model_expansion_defaults(self) -> None:
+        self._track_model._expanded_track_ids = set()
+        self._track_model._has_explicit_expansion_state = False
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:

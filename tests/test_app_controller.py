@@ -2150,6 +2150,57 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(reopened.trackModel.rowCount(), 1)
         self.assertEqual(child.input_track_ids, [source_id])
 
+    def test_controller_resets_timeline_tree_expansion_defaults_without_saved_state(self):
+        from autolight.project.store import add_generated_track
+
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            opened_audio_path = root / "opened.wav"
+            write_wav(opened_audio_path)
+            opened_project_path = root / "opened.autolight"
+            saved = self._controller()
+            opened_source_id = saved.import_audio(str(opened_audio_path))
+            opened_child = add_generated_track(
+                saved._project,
+                opened_source_id,
+                "Opened Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "opened-dep",
+            )
+            saved.trackModel.set_project(saved._project)
+            self.assertEqual(saved.trackModel.rowCount(), 2)
+            saved.save_project(str(opened_project_path))
+            self._write_saved_ui_state(opened_project_path, {})
+
+            current_audio_path = root / "current.wav"
+            write_wav(current_audio_path)
+            current_source_id = controller.import_audio(str(current_audio_path))
+            add_generated_track(
+                controller._project,
+                current_source_id,
+                "Current Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "current-dep",
+            )
+            controller.trackModel.set_project(controller._project)
+            self.assertTrue(controller.set_track_expanded(current_source_id, False))
+            self.assertEqual(controller.trackModel.rowCount(), 1)
+
+            self.assertTrue(controller.open_project(str(opened_project_path)))
+
+        model = controller.trackModel
+        self.assertNotIn("expanded_track_ids", controller._project.ui_state)
+        self.assertEqual(model.rowCount(), 2)
+        self.assertTrue(model.data(model.index(0, 0), model.role_for_name("expanded")))
+        self.assertEqual(opened_child.input_track_ids, [opened_source_id])
+
     def test_smoke_loads_qml_before_returning(self):
         FakeEngine.instances = []
         FakeEngine.root_objects = [object()]
@@ -2360,6 +2411,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.set_track_expanded(root.trackId, !root.expanded)", qml)
         self.assertIn("leftPadding: 10 + root.depth * 18", qml)
         self.assertIn('text: root.expanded ? "▾" : "▸"', qml)
+        self.assertIn('root.treeError + " - " + root.error', qml)
 
     def test_qml_exposes_cache_refresh_and_rerun_recovery(self):
         qml = self._qml_text(
@@ -2372,7 +2424,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("appController.rerun_track(appController.selectedTrackId)", qml)
         self.assertIn('resultState === "stale"', qml)
         self.assertIn('resultState === "failed"', qml)
-        self.assertIn("text: root.treeError.length > 0 ? root.treeError : root.error", qml)
+        self.assertIn("text: root.treeError.length > 0 && root.error.length > 0", qml)
         self.assertIn("visible: root.error.length > 0 || root.treeError.length > 0", qml)
 
     @staticmethod
