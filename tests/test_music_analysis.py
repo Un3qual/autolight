@@ -211,13 +211,13 @@ class MusicAnalysisEngineTest(unittest.TestCase):
             patch("autolight.analysis.music._load_audio", return_value=(np.ones(4096), 8000)),
             patch("autolight.analysis.music.librosa.feature.rms", side_effect=fake_rms),
             patch("autolight.analysis.music.librosa.onset.onset_strength") as onset_strength,
+            self.assertRaises(MusicAnalysisCancelled),
         ):
-            with self.assertRaises(MusicAnalysisCancelled):
-                MusicAnalysisEngine.analyze_energy(
-                    Path("song.wav"),
-                    {"max_frames": 8},
-                    cancel_requested=lambda: cancelled["value"],
-                )
+            MusicAnalysisEngine.analyze_energy(
+                Path("song.wav"),
+                {"max_frames": 8},
+                cancel_requested=lambda: cancelled["value"],
+            )
 
         onset_strength.assert_not_called()
 
