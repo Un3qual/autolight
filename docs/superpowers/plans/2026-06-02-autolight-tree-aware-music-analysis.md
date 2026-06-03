@@ -34,7 +34,7 @@
 - Modify: `autolight/timeline/model.py`
 - Modify: `tests/test_timeline_model.py`
 
-- [ ] **Step 1: Add failing timeline tree tests**
+- [x] **Step 1: Add failing timeline tree tests**
 
 Add these tests to `TimelineTrackModelTest` in `tests/test_timeline_model.py`:
 
@@ -134,7 +134,7 @@ Add these tests to `TimelineTrackModelTest` in `tests/test_timeline_model.py`:
         )
 ```
 
-- [ ] **Step 2: Run tree model tests and verify failure**
+- [x] **Step 2: Run tree model tests and verify failure**
 
 Run:
 
@@ -144,7 +144,7 @@ uv run python -m unittest tests.test_timeline_model.TimelineTrackModelTest -v
 
 Expected: fail because roles such as `depth`, `parentTrackId`, `expanded`, `childCount`, `visibleChildStateSummary`, `treeError`, and `set_track_expanded()` do not exist yet.
 
-- [ ] **Step 3: Implement flattened expanded tree projection**
+- [x] **Step 3: Implement flattened expanded tree projection**
 
 In `autolight/timeline/model.py`, add roles after `waveformLevelBucketCount`:
 
@@ -281,7 +281,7 @@ In `set_project()`, initialize expansion for known parent tracks:
             self._expanded_track_ids |= parent_ids & known_ids
 ```
 
-- [ ] **Step 4: Run tree model tests**
+- [x] **Step 4: Run tree model tests**
 
 Run:
 
@@ -291,7 +291,7 @@ uv run python -m unittest tests.test_timeline_model.TimelineTrackModelTest -v
 
 Expected: all `TimelineTrackModelTest` tests pass.
 
-- [ ] **Step 5: Commit tree projection roles**
+- [x] **Step 5: Commit tree projection roles**
 
 ```bash
 git add autolight/timeline/model.py tests/test_timeline_model.py
@@ -308,7 +308,7 @@ Expected: commit succeeds.
 - Modify: `UI/components/TrackRow.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing controller and QML wiring tests**
+- [x] **Step 1: Add failing controller and QML wiring tests**
 
 Add these tests to `AppControllerTest` in `tests/test_app_controller.py`:
 
@@ -362,7 +362,7 @@ Add these tests to `AppControllerTest` in `tests/test_app_controller.py`:
         self.assertIn("text: root.expanded ? \"▾\" : \"▸\"", qml)
 ```
 
-- [ ] **Step 2: Run controller QML tests and verify failure**
+- [x] **Step 2: Run controller QML tests and verify failure**
 
 Run:
 
@@ -372,7 +372,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_contr
 
 Expected: fail because `AppController.set_track_expanded` and QML tree bindings do not exist.
 
-- [ ] **Step 3: Add controller tree state slots**
+- [x] **Step 3: Add controller tree state slots**
 
 In `autolight/app_controller.py`, update `set_timeline_visible_track_range()`:
 
@@ -414,7 +414,7 @@ Use a helper to avoid repetition:
 
 Replace direct `self._track_model.set_project(self._project)` calls in controller project-replacement paths with `_set_track_model_project()`. Leave focused `refresh_track()` calls unchanged.
 
-- [ ] **Step 4: Add QML tree row controls**
+- [x] **Step 4: Add QML tree row controls**
 
 In `UI/components/TimelineView.qml`, pass the new required roles to `TrackRow`:
 
@@ -487,7 +487,7 @@ Update the status/error text to include child summaries and tree errors:
                 visible: root.error.length > 0 || root.treeError.length > 0
 ```
 
-- [ ] **Step 5: Run controller and QML tests**
+- [x] **Step 5: Run controller and QML tests**
 
 Run:
 
@@ -497,7 +497,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_contr
 
 Expected: both tests pass.
 
-- [ ] **Step 6: Run smoke check**
+- [x] **Step 6: Run smoke check**
 
 Run:
 
@@ -507,7 +507,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: exits 0.
 
-- [ ] **Step 7: Commit tree UI**
+- [x] **Step 7: Commit tree UI**
 
 ```bash
 git add autolight/app_controller.py UI/components/TimelineView.qml UI/components/TrackRow.qml tests/test_app_controller.py
@@ -525,7 +525,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_app_controller.py`
 - Modify: `tests/test_analysis.py`
 
-- [ ] **Step 1: Add failing input routing and stand-in audio artifact tests**
+- [x] **Step 1: Add failing input routing and stand-in audio artifact tests**
 
 Add this test to `AnalysisRegistryTest` in `tests/test_analysis.py`:
 
@@ -623,7 +623,7 @@ Add these tests to `AppControllerTest` in `tests/test_app_controller.py`:
         self.assertIn("parent track is not complete", controller.lastError)
 ```
 
-- [ ] **Step 2: Run routing tests and verify failure**
+- [x] **Step 2: Run routing tests and verify failure**
 
 Run:
 
@@ -633,7 +633,7 @@ uv run python -m unittest tests.test_analysis.AnalysisRegistryTest.test_drums_st
 
 Expected: fail because `audio.drums_stand_in` and parent artifact routing do not exist.
 
-- [ ] **Step 3: Add transform input resolver**
+- [x] **Step 3: Add transform input resolver**
 
 Create `autolight/app/transform_inputs.py`:
 
@@ -685,7 +685,7 @@ class TransformInputResolver:
         raise ValueError(f"parent track has no valid audio artifact: {track.name}")
 ```
 
-- [ ] **Step 4: Add stand-in audio artifact transform**
+- [x] **Step 4: Add stand-in audio artifact transform**
 
 In `autolight/analysis/builtin.py`, import `shutil` and register:
 
@@ -717,7 +717,7 @@ def _drums_stand_in(context: TransformContext, params: dict) -> TransformResult:
 
 ```
 
-- [ ] **Step 5: Wire resolver into controller transform defaults and runtime params**
+- [x] **Step 5: Wire resolver into controller transform defaults and runtime params**
 
 In `autolight/app_controller.py`, import:
 
@@ -753,7 +753,7 @@ Replace `_runtime_transform_params_for_track()` audio path handling:
 
 Keep `_dependency_transform_params_for_track()` removing `audio_path` so cached identity remains path-independent and parent dependency hash still carries the actual parent input identity.
 
-- [ ] **Step 6: Run routing tests**
+- [x] **Step 6: Run routing tests**
 
 Run:
 
@@ -763,7 +763,7 @@ uv run python -m unittest tests.test_analysis.AnalysisRegistryTest.test_drums_st
 
 Expected: all three tests pass.
 
-- [ ] **Step 7: Commit input routing**
+- [x] **Step 7: Commit input routing**
 
 ```bash
 git add autolight/app/transform_inputs.py autolight/app_controller.py autolight/analysis/builtin.py tests/test_app_controller.py tests/test_analysis.py
@@ -779,7 +779,7 @@ Expected: commit succeeds.
 - Modify: `autolight/analysis/__init__.py`
 - Create: `tests/test_music_analysis.py`
 
-- [ ] **Step 1: Add failing engine tests**
+- [x] **Step 1: Add failing engine tests**
 
 Create `tests/test_music_analysis.py`:
 
@@ -841,7 +841,7 @@ class MusicAnalysisEngineTest(unittest.TestCase):
         self.assertTrue(all("timestamp" in marker for marker in result.markers))
 ```
 
-- [ ] **Step 2: Run engine tests and verify failure**
+- [x] **Step 2: Run engine tests and verify failure**
 
 Run:
 
@@ -851,7 +851,7 @@ uv run python -m unittest tests.test_music_analysis -v
 
 Expected: fail because `autolight.analysis.music` does not exist.
 
-- [ ] **Step 3: Implement music analysis engine**
+- [x] **Step 3: Implement music analysis engine**
 
 Create `autolight/analysis/music.py`:
 
@@ -1100,7 +1100,7 @@ from autolight.analysis.music import MusicAnalysisEngine, MusicAnalysisResult
 
 and add both names to `__all__`.
 
-- [ ] **Step 4: Run engine tests**
+- [x] **Step 4: Run engine tests**
 
 Run:
 
@@ -1110,7 +1110,7 @@ uv run python -m unittest tests.test_music_analysis -v
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit music analysis engine**
+- [x] **Step 5: Commit music analysis engine**
 
 ```bash
 git add autolight/analysis/music.py autolight/analysis/__init__.py tests/test_music_analysis.py
@@ -1125,7 +1125,7 @@ Expected: commit succeeds.
 - Modify: `autolight/analysis/builtin.py`
 - Modify: `tests/test_analysis.py`
 
-- [ ] **Step 1: Add failing transform registration and artifact tests**
+- [x] **Step 1: Add failing transform registration and artifact tests**
 
 Add this helper to `tests/test_analysis.py`:
 
@@ -1202,7 +1202,7 @@ Add these tests to `AnalysisRegistryTest`:
                 )
 ```
 
-- [ ] **Step 2: Run transform tests and verify failure**
+- [x] **Step 2: Run transform tests and verify failure**
 
 Run:
 
@@ -1212,7 +1212,7 @@ uv run python -m unittest tests.test_analysis.AnalysisRegistryTest.test_builtin_
 
 Expected: fail because music transforms are not registered yet.
 
-- [ ] **Step 3: Implement music transform runners**
+- [x] **Step 3: Implement music transform runners**
 
 In `autolight/analysis/builtin.py`, import:
 
@@ -1291,7 +1291,7 @@ def _run_music_analysis(context: TransformContext, params: dict, artifact_kind: 
     )
 ```
 
-- [ ] **Step 4: Run transform tests**
+- [x] **Step 4: Run transform tests**
 
 Run:
 
@@ -1301,7 +1301,7 @@ uv run python -m unittest tests.test_analysis tests.test_music_analysis -v
 
 Expected: all analysis and music analysis tests pass.
 
-- [ ] **Step 5: Commit music transforms**
+- [x] **Step 5: Commit music transforms**
 
 ```bash
 git add autolight/analysis/builtin.py tests/test_analysis.py
@@ -1319,7 +1319,7 @@ Expected: commit succeeds.
 - Modify: `tests/test_music_analysis.py`
 - Modify: `tests/test_timeline_model.py`
 
-- [ ] **Step 1: Add failing artifact slice and model role tests**
+- [x] **Step 1: Add failing artifact slice and model role tests**
 
 Add to `tests/test_music_analysis.py`:
 
@@ -1397,7 +1397,7 @@ Add to `TimelineTrackModelTest`:
         )
 ```
 
-- [ ] **Step 2: Run artifact role tests and verify failure**
+- [x] **Step 2: Run artifact role tests and verify failure**
 
 Run:
 
@@ -1407,7 +1407,7 @@ uv run python -m unittest tests.test_music_analysis.AnalysisLodStoreTest tests.t
 
 Expected: fail because `AnalysisLodStore` and analysis roles do not exist.
 
-- [ ] **Step 3: Implement analysis LOD store**
+- [x] **Step 3: Implement analysis LOD store**
 
 Create `autolight/app/analysis_lod.py`:
 
@@ -1456,7 +1456,7 @@ def _finite_float(value) -> float:
     return result if math.isfinite(result) else 0.0
 ```
 
-- [ ] **Step 4: Add timeline model analysis roles**
+- [x] **Step 4: Add timeline model analysis roles**
 
 In `autolight/timeline/model.py`, add roles:
 
@@ -1498,7 +1498,7 @@ Add methods:
         )
 ```
 
-- [ ] **Step 5: Load visible analysis artifacts in controller**
+- [x] **Step 5: Load visible analysis artifacts in controller**
 
 In `autolight/app_controller.py`, import:
 
@@ -1548,7 +1548,7 @@ Add methods:
 
 Call `_load_all_analysis_artifacts()` after project load/demo load and after cache refresh. Call `_load_analysis_artifacts(track_id)` in `_handle_track_changed()` before emitting `trackChangedRequested`.
 
-- [ ] **Step 6: Run artifact role tests**
+- [x] **Step 6: Run artifact role tests**
 
 Run:
 
@@ -1558,7 +1558,7 @@ uv run python -m unittest tests.test_music_analysis.AnalysisLodStoreTest tests.t
 
 Expected: both tests pass.
 
-- [ ] **Step 7: Commit analysis artifact roles**
+- [x] **Step 7: Commit analysis artifact roles**
 
 ```bash
 git add autolight/app/analysis_lod.py autolight/app_controller.py autolight/timeline/model.py tests/test_music_analysis.py tests/test_timeline_model.py
@@ -1576,7 +1576,7 @@ Expected: commit succeeds.
 - Modify: `UI/components/TimelineView.qml`
 - Modify: `tests/test_app_controller.py`
 
-- [ ] **Step 1: Add failing QML analysis strip test**
+- [x] **Step 1: Add failing QML analysis strip test**
 
 Add to `AppControllerTest`:
 
@@ -1599,7 +1599,7 @@ Add to `AppControllerTest`:
         self.assertIn("Canvas", qml)
 ```
 
-- [ ] **Step 2: Run QML test and verify failure**
+- [x] **Step 2: Run QML test and verify failure**
 
 Run:
 
@@ -1609,7 +1609,7 @@ uv run python -m unittest tests.test_app_controller.AppControllerTest.test_qml_r
 
 Expected: fail because `AnalysisStrip.qml` and QML bindings do not exist.
 
-- [ ] **Step 3: Add analysis strip component**
+- [x] **Step 3: Add analysis strip component**
 
 Create `UI/components/AnalysisStrip.qml`:
 
@@ -1655,7 +1655,7 @@ Canvas {
 }
 ```
 
-- [ ] **Step 4: Wire strips through timeline QML**
+- [x] **Step 4: Wire strips through timeline QML**
 
 In `TrackRow.qml`, add required properties:
 
@@ -1707,7 +1707,7 @@ Add strips above marker blocks:
     }
 ```
 
-- [ ] **Step 5: Run QML and smoke tests**
+- [x] **Step 5: Run QML and smoke tests**
 
 Run:
 
@@ -1718,7 +1718,7 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: test passes and smoke exits 0.
 
-- [ ] **Step 6: Commit analysis strips**
+- [x] **Step 6: Commit analysis strips**
 
 ```bash
 git add UI/components/AnalysisStrip.qml UI/components/TimelineLane.qml UI/components/TrackRow.qml UI/components/TimelineView.qml tests/test_app_controller.py
@@ -1734,7 +1734,7 @@ Expected: commit succeeds.
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-06-02-autolight-tree-aware-music-analysis.md`
 
-- [ ] **Step 1: Add demo project child tracks**
+- [x] **Step 1: Add demo project child tracks**
 
 In `AppController.load_demo_project()`, after the source track is created, add tree-aware demo tracks:
 
@@ -1765,7 +1765,7 @@ In `AppController.load_demo_project()`, after the source track is created, add t
 
 If demo creation already creates related tracks, preserve them and add these as additional nested examples.
 
-- [ ] **Step 2: Update README current scope and workflow**
+- [x] **Step 2: Update README current scope and workflow**
 
 Add bullets under `## Current Scope` in `README.md`:
 
@@ -1786,7 +1786,7 @@ Add workflow steps after generated-track creation:
 
 Renumber subsequent workflow steps.
 
-- [ ] **Step 3: Run focused verification**
+- [x] **Step 3: Run focused verification**
 
 Run:
 
@@ -1799,7 +1799,7 @@ git diff --check
 
 Expected: all tests pass, smoke exits 0, and `git diff --check` exits 0.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 
@@ -1810,11 +1810,11 @@ QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
 
 Expected: full unit suite passes and smoke exits 0.
 
-- [ ] **Step 5: Mark this implementation plan complete**
+- [x] **Step 5: Mark this implementation plan complete**
 
 After all previous steps pass, update every completed checkbox in `docs/superpowers/plans/2026-06-02-autolight-tree-aware-music-analysis.md` from `[ ]` to `[x]`.
 
-- [ ] **Step 6: Commit documentation and plan closure**
+- [x] **Step 6: Commit documentation and plan closure**
 
 ```bash
 git add autolight/app_controller.py README.md docs/superpowers/plans/2026-06-02-autolight-tree-aware-music-analysis.md

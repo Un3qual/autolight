@@ -377,7 +377,7 @@ class AppControllerTest(unittest.TestCase):
 
         controller.load_demo_project()
 
-        self.assertEqual(controller.trackModel.rowCount(), 4)
+        self.assertEqual(controller.trackModel.rowCount(), 6)
         self.assertEqual(controller.projectName, "Autolight Demo")
 
     def test_controller_emits_project_name_changed_when_demo_loads(self):
@@ -431,8 +431,21 @@ class AppControllerTest(unittest.TestCase):
                     "resultState": "complete",
                     "markerCount": 0,
                 },
+                {
+                    "name": "Drums Stem",
+                    "trackType": "generated",
+                    "resultState": "pending",
+                    "markerCount": 0,
+                },
+                {
+                    "name": "Drum Energy",
+                    "trackType": "generated",
+                    "resultState": "pending",
+                    "markerCount": 0,
+                },
             ],
         )
+        self.assertIn("Editable Cues", [track.name for track in controller._project.tracks])
 
     def test_demo_source_track_keeps_waveform_out_of_source_cache_refs(self):
         controller = self._controller()
@@ -2265,7 +2278,7 @@ class AppControllerTest(unittest.TestCase):
         editable_id = controller.create_editable_track_from_track(generated_id)
 
         self.assertNotEqual(editable_id, "")
-        self.assertEqual(controller.trackModel.rowCount(), 5)
+        self.assertEqual(controller.trackModel.rowCount(), 7)
         self.assertEqual(controller.selectedTrackId, editable_id)
         editable = self._track_by_id(controller, editable_id)
         self.assertEqual(editable.input_track_ids, [generated_id])

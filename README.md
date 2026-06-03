@@ -30,6 +30,10 @@ uv run python -m unittest discover -s tests -v
 - Persist project tracks, markers, provenance, job summaries, and cache references as JSON.
 - Restore saved timeline zoom, horizontal scroll, and selected track when reopening a project.
 - Render project tracks and marker counts in a QML timeline shell.
+- Display generated and editable tracks as a nested transform tree.
+- Route child audio analysis transforms through parent audio artifacts when available.
+- Generate beat-grid, energy-profile, and harmonic-color analysis tracks with dense cache artifacts.
+- Render energy and harmonic/color analysis strips in the timeline.
 - Move, resize, select, and delete editable cue markers directly on the timeline.
 - Undo and redo manual track and marker edits during the current app session.
 - Snap editable marker movement to visible generated timing markers, with a modifier-key bypass for free placement.
@@ -43,13 +47,16 @@ uv run python -m unittest discover -s tests -v
 4. Use the timeline zoom and horizontal navigation controls to inspect markers at the needed time scale.
 5. With the source track selected, choose `Add Markers` or `Add Transform` to create generated marker tracks.
 6. Run generated tracks by selecting them and choosing `Run`.
-7. After completion, choose `Derive Editable` to create editable cue markers from a generated track.
-8. Choose `Manual Track` to create an empty editable cue track for direct authoring.
-9. Click cues to select them, shift-click to multi-select, drag selected cues to move them, and drag cue edges to resize duration cues.
-10. Use `Undo` and `Redo` to recover from marker and manual-track edits during the current session.
-11. Use generated timing tracks as snap guides while editing; hold the snap-bypass modifier for free placement.
-12. Use `Save` or `Save As` to write a `.autolight` project file.
-13. Use `Open` to reload a saved project.
+7. Add `Drums Stem Stand-In` under a source track when you want a nested audio-artifact branch.
+8. Add beat-grid, energy-profile, or harmonic-color transforms under a source or compatible audio-artifact track.
+9. Expand or collapse parent tracks to inspect nested analysis outputs.
+10. After completion, choose `Derive Editable` to create editable cue markers from a generated track.
+11. Choose `Manual Track` to create an empty editable cue track for direct authoring.
+12. Click cues to select them, shift-click to multi-select, drag selected cues to move them, and drag cue edges to resize duration cues.
+13. Use `Undo` and `Redo` to recover from marker and manual-track edits during the current session.
+14. Use generated timing tracks as snap guides while editing; hold the snap-bypass modifier for free placement.
+15. Use `Save` or `Save As` to write a `.autolight` project file.
+16. Use `Open` to reload a saved project.
 
 Timeline zoom, horizontal scroll, and the selected track are stored in the `.autolight` project when you save.
 

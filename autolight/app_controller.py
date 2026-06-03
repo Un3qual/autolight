@@ -330,6 +330,28 @@ class AppController(QObject):
         )
         waveform.result_state = ResultState.COMPLETE
         self._attach_demo_waveform(waveform)
+        drums = add_generated_track(
+            self._project,
+            parent_track_id=source.id,
+            name="Drums Stem",
+            transform_id="audio.drums_stand_in",
+            transform_params={},
+            transform_version="1",
+            output_schema="artifact.audio.v1",
+            dependency_hash="demo-drums",
+        )
+        drums.result_state = ResultState.PENDING
+        add_generated_track(
+            self._project,
+            parent_track_id=drums.id,
+            name="Drum Energy",
+            transform_id="music.energy_profile",
+            transform_params={},
+            transform_version="1",
+            output_schema="artifact.energy.v1",
+            dependency_hash="demo-drum-energy",
+        )
+        self._project.ui_state["expanded_track_ids"] = [source.id, beats.id, drums.id]
         self._load_all_analysis_artifacts()
         self._set_track_model_project()
         self._refresh_visible_viewport_artifacts()
