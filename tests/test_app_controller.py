@@ -377,7 +377,7 @@ class AppControllerTest(unittest.TestCase):
 
         controller.load_demo_project()
 
-        self.assertEqual(controller.trackModel.rowCount(), 6)
+        self.assertEqual(controller.trackModel.rowCount(), 5)
         self.assertEqual(controller.projectName, "Autolight Demo")
 
     def test_controller_emits_project_name_changed_when_demo_loads(self):
@@ -418,12 +418,6 @@ class AppControllerTest(unittest.TestCase):
                     "trackType": "generated",
                     "resultState": "complete",
                     "markerCount": 3,
-                },
-                {
-                    "name": "Editable Cues",
-                    "trackType": "editable",
-                    "resultState": "complete",
-                    "markerCount": 2,
                 },
                 {
                     "name": "Waveform Summary",
@@ -960,7 +954,7 @@ class AppControllerTest(unittest.TestCase):
     def test_timeline_zoom_and_scroll_ignore_non_finite_values(self):
         controller = self._controller()
         controller.load_demo_project()
-        controller.select_track(self._track_id(controller, 2))
+        controller.select_track(self._track_by_name(controller, "Editable Cues").id)
         controller.add_marker_to_selected_track(20.0, "Look")
         controller.set_timeline_zoom(120.0)
         controller.set_timeline_scroll_seconds(4.0)
@@ -976,7 +970,7 @@ class AppControllerTest(unittest.TestCase):
     def test_timeline_visible_seconds_controls_scroll_clamp(self):
         controller = self._controller()
         controller.load_demo_project()
-        controller.select_track(self._track_id(controller, 2))
+        controller.select_track(self._track_by_name(controller, "Editable Cues").id)
         controller.add_marker_to_selected_track(20.0, "Look")
         visible_changes = []
         scroll_changes = []
@@ -1000,7 +994,7 @@ class AppControllerTest(unittest.TestCase):
         controller = self._controller()
         controller.load_demo_project()
         source_id = self._track_id(controller, 0)
-        editable_id = self._track_id(controller, 2)
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         controller.select_track(source_id)
         self.assertTrue(controller.play_selected_track())
         controller.select_track(editable_id)
@@ -1563,7 +1557,7 @@ class AppControllerTest(unittest.TestCase):
     def test_open_project_clears_marker_selection_when_restoring_same_track(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable_id = self._track_id(controller, 2)
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         controller.select_track(editable_id)
         marker_id = self._selected_track_markers(controller)[0]["id"]
         controller.toggle_marker_selection(marker_id, False)
@@ -1583,14 +1577,17 @@ class AppControllerTest(unittest.TestCase):
     def test_marker_span_selection_follows_controller_selection_state(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable_id = self._track_id(controller, 2)
+        beat_id = self._track_by_name(controller, "Beat Markers").id
+        self.assertTrue(controller.set_track_expanded(beat_id, True))
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         controller.select_track(editable_id)
         marker_id = controller.add_marker_to_selected_track(1.25, "Hit")
         controller.clear_marker_selection()
 
         def marker_span_selected() -> bool:
             model = controller.trackModel
-            spans = model.data(model.index(2, 0), model.role_for_name("markerSpans"))
+            row = self._track_model_row_by_id(controller, editable_id)
+            spans = model.data(model.index(row, 0), model.role_for_name("markerSpans"))
             for span in spans:
                 if span["id"] == marker_id:
                     return span["selected"]
@@ -1884,7 +1881,7 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(self._track_id(controller, 1))
         self.assertTrue(controller.selectedTrackCanRerun)
 
-        controller.select_track(self._track_id(controller, 2))
+        controller.select_track(self._track_by_name(controller, "Editable Cues").id)
         self.assertFalse(controller.selectedTrackCanRerun)
 
     def test_selected_track_is_editable_only_for_editable_tracks(self):
@@ -1896,7 +1893,7 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(self._track_id(controller, 1))
         self.assertFalse(controller.selectedTrackIsEditable)
 
-        controller.select_track(self._track_id(controller, 2))
+        controller.select_track(self._track_by_name(controller, "Editable Cues").id)
         self.assertTrue(controller.selectedTrackIsEditable)
 
     def test_selected_track_has_running_job_follows_job_state(self):
@@ -2078,7 +2075,7 @@ class AppControllerTest(unittest.TestCase):
     def test_rerun_track_does_not_clear_stale_state_when_submit_fails(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable_id = self._track_id(controller, 2)
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         editable = self._track_by_id(controller, editable_id)
         editable.result_state = ResultState.STALE
         editable.error = "source track changed"
@@ -2156,7 +2153,7 @@ class AppControllerTest(unittest.TestCase):
 
         controller = self._controller()
         controller.load_demo_project()
-        editable = self._track_by_id(controller, self._track_id(controller, 2))
+        editable = self._track_by_name(controller, "Editable Cues")
         child = add_generated_track(
             controller._project,
             editable.id,
@@ -2185,7 +2182,7 @@ class AppControllerTest(unittest.TestCase):
     def test_add_marker_emits_timeline_duration_and_reclamps_scroll(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable_id = self._track_id(controller, 2)
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         controller.select_track(editable_id)
         controller._timeline_scroll_seconds = 50.0
         duration_changes = []
@@ -2205,7 +2202,7 @@ class AppControllerTest(unittest.TestCase):
     def test_delete_marker_emits_timeline_duration_and_reclamps_scroll(self):
         controller = self._controller()
         controller.load_demo_project()
-        editable_id = self._track_id(controller, 2)
+        editable_id = self._track_by_name(controller, "Editable Cues").id
         controller.select_track(editable_id)
         marker_id = controller.add_marker_to_selected_track(20.0, "Look")
         controller.set_timeline_scroll_seconds(12.0)
@@ -2278,7 +2275,7 @@ class AppControllerTest(unittest.TestCase):
         editable_id = controller.create_editable_track_from_track(generated_id)
 
         self.assertNotEqual(editable_id, "")
-        self.assertEqual(controller.trackModel.rowCount(), 7)
+        self.assertEqual(controller.trackModel.rowCount(), 5)
         self.assertEqual(controller.selectedTrackId, editable_id)
         editable = self._track_by_id(controller, editable_id)
         self.assertEqual(editable.input_track_ids, [generated_id])
@@ -2792,6 +2789,14 @@ class AppControllerTest(unittest.TestCase):
     def _track_id(controller: AppController, row: int) -> str:
         model = controller.trackModel
         return model.data(model.index(row, 0), model.role_for_name("trackId"))
+
+    def _track_model_row_by_id(self, controller: AppController, track_id: str) -> int:
+        model = controller.trackModel
+        track_id_role = model.role_for_name("trackId")
+        for row in range(model.rowCount()):
+            if model.data(model.index(row, 0), track_id_role) == track_id:
+                return row
+        self.fail(f"visible track row not found: {track_id}")
 
     def _track_by_id(self, controller: AppController, track_id: str):
         for track in controller._project.tracks:

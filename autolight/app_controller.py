@@ -351,7 +351,7 @@ class AppController(QObject):
             output_schema="artifact.energy.v1",
             dependency_hash="demo-drum-energy",
         )
-        self._project.ui_state["expanded_track_ids"] = [source.id, beats.id, drums.id]
+        self._project.ui_state["expanded_track_ids"] = [source.id, drums.id]
         self._load_all_analysis_artifacts()
         self._set_track_model_project()
         self._refresh_visible_viewport_artifacts()
