@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import deque
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
 
@@ -184,6 +185,10 @@ class TimelineTrackModel(QAbstractListModel):
     def expanded_track_ids(self) -> list[str]:
         self._prune_expanded_track_ids()
         return sorted(self._expanded_track_ids)
+
+    def reset_expansion_defaults(self) -> None:
+        self._expanded_track_ids = set()
+        self._has_explicit_expansion_state = False
 
     def set_expanded_track_ids(self, track_ids: list[str]) -> None:
         self._has_explicit_expansion_state = True
@@ -444,10 +449,10 @@ class TimelineTrackModel(QAbstractListModel):
 
     def _visible_child_state_summary(self, track: Track) -> str:
         counts: dict[str, int] = {}
-        pending = list(self._children_by_track.get(track.id, []))
+        pending = deque(self._children_by_track.get(track.id, []))
         seen: set[str] = set()
         while pending:
-            child = pending.pop(0)
+            child = pending.popleft()
             if child.id in seen:
                 continue
             seen.add(child.id)
@@ -457,7 +462,8 @@ class TimelineTrackModel(QAbstractListModel):
             pending.extend(self._children_by_track.get(child.id, []))
         return ", ".join(f"{state}: {counts[state]}" for state in sorted(counts))
 
-    def _track_has_parent_cycle(self, track_id: str, tracks_by_id: dict[str, Track]) -> bool:
+    @staticmethod
+    def _track_has_parent_cycle(track_id: str, tracks_by_id: dict[str, Track]) -> bool:
         seen: set[str] = set()
         current_track_id = track_id
         while current_track_id:

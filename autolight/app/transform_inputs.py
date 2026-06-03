@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 from autolight.cache.store import CacheStore
 from autolight.project.models import ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import find_track
+
+
+GENERATED_AUDIO_OUTPUT_SCHEMAS = {"artifact.audio.v1", "artifact.stem.v1"}
 
 
 @dataclass(slots=True)
@@ -42,8 +46,12 @@ class TransformInputResolver:
         first_source_error: ValueError | None = None
         for candidate in self._source_lineage_tracks(track):
             try:
+                if candidate.type == TrackType.GENERATED:
+                    return str(self._valid_audio_artifact_path(candidate))
                 return self._source_audio_path(candidate)
             except ValueError as error:
+                if candidate.type == TrackType.GENERATED and candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS:
+                    raise
                 if first_source_error is None:
                     first_source_error = error
 
@@ -53,18 +61,17 @@ class TransformInputResolver:
 
     def _source_lineage_tracks(self, track: Track):
         visited: set[str] = set()
-        pending = list(self._lineage_parent_ids(track))
+        pending = deque(self._lineage_parent_ids(track))
         while pending:
-            track_id = pending.pop(0)
+            track_id = pending.popleft()
             if track_id in visited:
                 continue
             visited.add(track_id)
             parent = find_track(self.project, track_id)
             if parent is None:
                 continue
-            if parent.type == TrackType.SOURCE:
+            if parent.type in {TrackType.GENERATED, TrackType.SOURCE}:
                 yield parent
-                continue
             pending.extend(self._lineage_parent_ids(parent))
 
     @staticmethod

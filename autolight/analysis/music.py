@@ -25,7 +25,8 @@ class MusicAnalysisResult:
 
 
 class MusicAnalysisEngine:
-    def analyze_rhythm(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    @staticmethod
+    def analyze_rhythm(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
@@ -33,22 +34,20 @@ class MusicAnalysisEngine:
         tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length, units="frames")
         beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length)
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        normalized_onset_env = _normalize(onset_env)
         tempo_value = _first_float(tempo)
         markers = []
         for index, timestamp in enumerate(beat_times[:max_markers]):
-            beat_strength = _frame_value(onset_env, int(beat_frames[index]) if index < len(beat_frames) else 0)
-            category = "downbeat" if index % 4 == 0 else "beat"
+            beat_strength = _frame_value(normalized_onset_env, int(beat_frames[index]))
             markers.append(
                 {
                     "timestamp": round(float(timestamp), 6),
-                    "label": "Downbeat" if category == "downbeat" else "Beat",
-                    "category": category,
+                    "label": "Beat",
+                    "category": "beat",
                     "confidence": beat_strength,
                     "metadata": {
                         "beat_index": index,
-                        "bar_index": index // 4,
                         "tempo": tempo_value,
-                        "meter": 4,
                         "beat_strength": beat_strength,
                         "source": "librosa.beat_track",
                     },
@@ -64,7 +63,8 @@ class MusicAnalysisEngine:
         }
         return MusicAnalysisResult(kind="beat-grid", payload=payload, markers=markers)
 
-    def analyze_energy(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    @staticmethod
+    def analyze_energy(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
@@ -85,7 +85,8 @@ class MusicAnalysisEngine:
         }
         return MusicAnalysisResult(kind="energy", payload=payload, markers=markers, frames=frames)
 
-    def analyze_harmony(self, audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    @staticmethod
+    def analyze_harmony(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
@@ -141,7 +142,7 @@ def _duration_seconds(y: np.ndarray, sr: int) -> float:
 def _frame_value(values: np.ndarray, index: int) -> float:
     if len(values) == 0:
         return 0.0
-    return float(max(0.0, min(1.0, _normalize(values)[max(0, min(index, len(values) - 1))])))
+    return float(max(0.0, min(1.0, values[max(0, min(index, len(values) - 1))])))
 
 
 def _resize(values: np.ndarray, size: int) -> np.ndarray:
@@ -203,12 +204,13 @@ def _chroma_frames(times: np.ndarray, chroma: np.ndarray, max_frames: int) -> li
     for frame_index in range(0, chroma.shape[1], stride):
         vector = np.asarray(chroma[:, frame_index], dtype=float)
         normalized = _normalize(vector)
-        dominant = int(np.argmax(normalized)) if normalized.size else 0
+        chroma_energy = float(np.nansum(np.clip(vector, 0.0, None)))
+        dominant = int(np.argmax(normalized)) if normalized.size and chroma_energy > 1e-6 else -1
         frames.append(
             {
                 "time": round(float(times[frame_index]), 6),
                 "chroma": [round(float(value), 6) for value in normalized[:12]],
-                "color": _color_for_pitch_class(dominant),
+                "color": "#00000000" if dominant < 0 else _color_for_pitch_class(dominant),
                 "dominant_pitch_class": dominant,
             }
         )
@@ -225,6 +227,8 @@ def _harmonic_change_markers(frames: list[dict[str, Any]], max_markers: int) -> 
     previous = None
     for frame in frames:
         current = frame.get("dominant_pitch_class")
+        if not isinstance(current, int) or current < 0:
+            continue
         if previous is not None and current != previous:
             markers.append(
                 {

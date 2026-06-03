@@ -23,7 +23,7 @@ from autolight.app import (
 )
 from autolight.app_controller import AppController
 from autolight.cache.keys import track_dependency_hash
-from autolight.project.models import CacheEntry, JobRun, ResultState, Track, TrackType
+from autolight.project.models import CacheEntry, JobRun, Marker, ResultState, Track, TrackType
 from autolight.project.store import add_generated_track, track_dependency_inputs
 from tests.helpers import write_wav
 
@@ -167,8 +167,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertTrue(controller.isDirty)
 
     def test_undo_redo_recomputes_visible_waveform_for_current_scroll(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
@@ -718,8 +716,6 @@ class AppControllerTest(unittest.TestCase):
         controller.playback.play.assert_called_once()
 
     def test_audio_transform_routes_to_parent_audio_artifact(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             source_audio = Path(tmp) / "song.wav"
@@ -753,15 +749,67 @@ class AppControllerTest(unittest.TestCase):
             cached_path.write_bytes(drum_audio.read_bytes())
 
             child_id = controller.add_transform_track(drums.id, "waveform.summary", "1", "{}")
-            child = next(track for track in controller._project.tracks if track.id == child_id)
+            child = self._track_by_id(controller, child_id)
             params = controller._runtime_transform_params_for_track(child)
 
         self.assertEqual(params["audio_path"], str(cached_path))
         self.assertEqual(child.input_track_ids, [drums.id])
 
-    def test_audio_transform_rejects_stale_parent_artifact(self):
-        from autolight.project.store import add_generated_track
+    def test_audio_transform_routes_editable_descendant_to_generated_audio_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            drum_audio = Path(tmp) / "drums.wav"
+            write_wav(source_audio)
+            write_wav(drum_audio)
+            source_id = controller.import_audio(str(source_audio))
+            drums = add_generated_track(
+                controller._project,
+                source_id,
+                "Drums",
+                "audio.drums_stand_in",
+                {},
+                "1",
+                "artifact.audio.v1",
+                "drums-dep",
+            )
+            drums.result_state = ResultState.COMPLETE
+            cache_entry = CacheEntry(
+                id="cache_drums",
+                dependency_hash="drums-dep",
+                artifact_kind="audio",
+                path="audio/cache_drums.wav",
+                created_at="",
+                transform_version="1",
+            )
+            controller._project.cache_entries.append(cache_entry)
+            drums.cache_refs = [cache_entry.id]
+            cached_path = controller._job_queue.cache_store.artifact_path(cache_entry)
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            cached_path.write_bytes(drum_audio.read_bytes())
+            onsets = add_generated_track(
+                controller._project,
+                drums.id,
+                "Drum Onsets",
+                "timing.onsets",
+                {},
+                "1",
+                "markers.v1",
+                "onsets-dep",
+            )
+            onsets.result_state = ResultState.COMPLETE
+            controller._project.markers.append(Marker(id="marker_onset", track_id=onsets.id, timestamp=0.5))
+            controller.trackModel.set_project(controller._project)
+            editable_id = controller.create_editable_track_from_track(onsets.id)
 
+            child_id = controller.add_transform_track(editable_id, "waveform.summary", "1", "{}")
+            child = self._track_by_id(controller, child_id)
+            params = controller._runtime_transform_params_for_track(child)
+
+        self.assertEqual(params["audio_path"], str(cached_path))
+        self.assertEqual(child.input_track_ids, [editable_id])
+
+    def test_audio_transform_rejects_stale_parent_artifact(self):
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             source_audio = Path(tmp) / "song.wav"
@@ -831,8 +879,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("parent track has no valid audio artifact", controller.lastError)
 
     def test_vocals_stem_track_accepts_generated_audio_artifact_parent(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             source_audio = Path(tmp) / "song.wav"
@@ -1223,6 +1269,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("sample.intensity", qml)
         self.assertIn("sample.color", qml)
         self.assertIn("Canvas", qml)
+        self.assertNotIn("width: parent ? parent.width : 0", qml)
 
     def test_qml_scrubber_avoids_live_heavy_seek_binding(self):
         playback_qml = self._qml_text("UI/components/PlaybackBar.qml")
@@ -1884,6 +1931,32 @@ class AppControllerTest(unittest.TestCase):
         controller.select_track(self._track_by_name(controller, "Editable Cues").id)
         self.assertFalse(controller.selectedTrackCanRerun)
 
+    def test_selected_track_can_rerun_rejects_audio_transform_without_audio_input_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "song.wav"
+            write_wav(audio_path)
+            source_id = controller.import_audio(str(audio_path))
+            markers_id = controller.add_fixed_interval_track(source_id, 2.0, 0.5)
+            markers = self._track_by_id(controller, markers_id)
+            markers.result_state = ResultState.COMPLETE
+            waveform = add_generated_track(
+                controller._project,
+                markers.id,
+                "Waveform",
+                "waveform.summary",
+                {},
+                "1",
+                "artifact.waveform.v1",
+                "waveform-dep",
+            )
+            waveform.result_state = ResultState.STALE
+            controller.trackModel.set_project(controller._project)
+
+            controller.select_track(waveform.id)
+
+        self.assertFalse(controller.selectedTrackCanRerun)
+
     def test_selected_track_is_editable_only_for_editable_tracks(self):
         controller = self._controller()
         controller.load_demo_project()
@@ -1900,7 +1973,6 @@ class AppControllerTest(unittest.TestCase):
         from threading import Event
 
         from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
-        from autolight.project.store import add_generated_track
 
         started = Event()
         release = Event()
@@ -1988,7 +2060,6 @@ class AppControllerTest(unittest.TestCase):
         from threading import Event
 
         from autolight.analysis.registry import TransformCancelled, TransformResult, TransformSpec
-        from autolight.project.store import add_generated_track
 
         started = Event()
         release = Event()
@@ -2088,8 +2159,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("no transform", controller.lastError)
 
     def test_rerun_track_recomputes_dependency_hash_from_parent_cache_refs(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         controller.load_demo_project()
         parent = self._track_by_id(controller, self._track_id(controller, 1))
@@ -2119,8 +2188,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(child.dependency_hash, expected_hash)
 
     def test_run_track_recomputes_dependency_hash_from_parent_cache_refs(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         controller.load_demo_project()
         parent = self._track_by_id(controller, self._track_id(controller, 1))
@@ -2149,8 +2216,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(child.dependency_hash, expected_hash)
 
     def test_rerun_track_recomputes_dependency_hash_from_editable_markers(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         controller.load_demo_project()
         editable = self._track_by_name(controller, "Editable Cues")
@@ -2319,8 +2384,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertIsNotNone(self._optional_track_by_id(controller, imported_id))
 
     def test_obsolete_manual_track_undo_reports_no_reverted_edit(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         controller.load_demo_project()
         source = self._track_by_type(controller, TrackType.SOURCE)
@@ -2458,9 +2521,60 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(controller._visible_track_ids, [source.id, sibling.id])
 
-    def test_controller_persists_timeline_tree_expansion_state(self):
-        from autolight.project.store import add_generated_track
+    def test_controller_refreshes_visible_track_range_after_tree_expansion_changes(self):
+        controller = self._controller()
+        source = Track(
+            id="track_source",
+            type=TrackType.SOURCE,
+            name="Song",
+            result_state=ResultState.COMPLETE,
+        )
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        sibling = Track(
+            id="track_sibling",
+            type=TrackType.SOURCE,
+            name="Other",
+            result_state=ResultState.COMPLETE,
+        )
+        controller._project.tracks.extend([source, child, sibling])
+        controller.trackModel.set_project(controller._project)
+        controller.set_timeline_visible_track_range(0, 2)
+        self.assertEqual(controller._visible_track_ids, [source.id, child.id])
 
+        self.assertTrue(controller.set_track_expanded(source.id, False))
+
+        self.assertEqual(controller._visible_track_ids, [source.id, sibling.id])
+
+    def test_controller_moves_hidden_selection_to_collapsed_parent(self):
+        controller = self._controller()
+        source = Track(
+            id="track_source",
+            type=TrackType.SOURCE,
+            name="Song",
+            result_state=ResultState.COMPLETE,
+        )
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id],
+            result_state=ResultState.COMPLETE,
+        )
+        controller._project.tracks.extend([source, child])
+        controller.trackModel.set_project(controller._project)
+        controller.select_track(child.id)
+
+        self.assertTrue(controller.set_track_expanded(source.id, False))
+
+        self.assertEqual(controller.selectedTrackId, source.id)
+
+    def test_controller_persists_timeline_tree_expansion_state(self):
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "song.wav"
@@ -2493,8 +2607,6 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(child.input_track_ids, [source_id])
 
     def test_controller_resets_timeline_tree_expansion_defaults_without_saved_state(self):
-        from autolight.project.store import add_generated_track
-
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

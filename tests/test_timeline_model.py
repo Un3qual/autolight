@@ -208,8 +208,9 @@ class TimelineTrackModelTest(unittest.TestCase):
         model.refresh_track(child.id)
 
         summary_role = model.role_for_name("visibleChildStateSummary")
-        self.assertIn((0, 0), [emission[0:2] for emission in emissions])
-        ancestor_emission = next(emission for emission in emissions if emission[0:2] == (0, 0))
+        ancestor_emissions = [emission for emission in emissions if emission[0:2] == (0, 0)]
+        self.assertTrue(ancestor_emissions)
+        ancestor_emission = ancestor_emissions[0]
         self.assertIn(summary_role, ancestor_emission[2])
         self.assertEqual(
             model.data(model.index(0, 0), summary_role),
@@ -729,7 +730,9 @@ class TimelineTrackModelTest(unittest.TestCase):
 
             model.refresh_track(generated.id)
 
-            track_emission = next(emission for emission in emissions if emission[0:2] == (1, 1))
+            track_emissions = [emission for emission in emissions if emission[0:2] == (1, 1)]
+            self.assertTrue(track_emissions)
+            track_emission = track_emissions[0]
             self.assertIn(model.role_for_name("resultState"), track_emission[2])
             self.assertIn(model.role_for_name("markerSpans"), track_emission[2])
 

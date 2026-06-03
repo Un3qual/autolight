@@ -4,8 +4,10 @@ import unittest
 import wave
 from pathlib import Path
 
+import numpy as np
+
 from autolight.app.analysis_lod import AnalysisLodStore
-from autolight.analysis.music import MusicAnalysisEngine
+from autolight.analysis.music import MusicAnalysisEngine, _chroma_frames, _harmonic_change_markers
 
 
 def write_impulse_wav(path: Path, *, sample_rate: int = 8000, seconds: float = 2.0) -> None:
@@ -62,6 +64,36 @@ class AnalysisLodStoreTest(unittest.TestCase):
 
         self.assertEqual([frame["id"] for frame in visible["frames"]], ["valid-zero", "valid-coerced"])
 
+    def test_visible_harmonic_frames_preserve_left_edge_color_context(self):
+        payload = {
+            "version": 1,
+            "kind": "harmonic-color",
+            "duration": 10.0,
+            "frames": [
+                {"time": 2.0, "color": "#f00"},
+                {"time": 3.0, "color": "#0f0"},
+                {"time": 4.0, "color": "#00f"},
+            ],
+        }
+
+        visible = AnalysisLodStore().visible_frames(
+            payload,
+            scroll_seconds=2.3,
+            visible_seconds=1.5,
+        )
+
+        self.assertEqual([frame["time"] for frame in visible["frames"]], [2.3, 3.0])
+        self.assertEqual(visible["frames"][0]["color"], "#f00")
+
+    def test_visible_frames_coerces_missing_kind_to_empty_string(self):
+        visible = AnalysisLodStore().visible_frames(
+            {"kind": None, "frames": []},
+            scroll_seconds=0.0,
+            visible_seconds=1.0,
+        )
+
+        self.assertEqual(visible["kind"], "")
+
 
 class MusicAnalysisEngineTest(unittest.TestCase):
     def test_energy_profile_returns_bounded_normalized_frames(self):
@@ -115,6 +147,21 @@ class MusicAnalysisEngineTest(unittest.TestCase):
         self.assertIn("version", result.payload)
         self.assertLessEqual(len(result.markers), 64)
         self.assertTrue(all("timestamp" in marker for marker in result.markers))
+        self.assertTrue(all(marker["category"] == "beat" for marker in result.markers))
+        self.assertTrue(all("meter" not in marker["metadata"] for marker in result.markers))
+
+    def test_harmonic_change_markers_ignore_silent_chroma_frames(self):
+        times = np.asarray([0.0, 1.0, 2.0, 3.0])
+        chroma = np.zeros((12, 4))
+        chroma[0, 0] = 1.0
+        chroma[0, 2] = 1.0
+        chroma[7, 3] = 1.0
+
+        frames = _chroma_frames(times, chroma, max_frames=16)
+        markers = _harmonic_change_markers(frames, max_markers=16)
+
+        self.assertEqual(frames[1]["dominant_pitch_class"], -1)
+        self.assertEqual([marker["timestamp"] for marker in markers], [3.0])
 
     def test_invalid_numeric_settings_fail_before_audio_loading(self):
         missing_audio = Path("does-not-exist.wav")
@@ -138,5 +185,6 @@ class MusicAnalysisEngineTest(unittest.TestCase):
             ]
 
         for result in results:
+            self.assertIsInstance(result.payload, dict)
             json.dumps(result.payload, allow_nan=False)
             json.dumps(result.markers, allow_nan=False)

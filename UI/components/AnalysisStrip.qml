@@ -9,7 +9,6 @@ Canvas {
     property real pixelsPerSecond: 96
     property real leftPadding: 24
     property color energyColor: "#facc15"
-    width: parent ? parent.width : 0
     height: 16
     visible: root.sampleCount() > 0
 

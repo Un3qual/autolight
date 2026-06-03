@@ -106,6 +106,7 @@ class AppController(QObject):
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
         self._visible_track_ids: list[str] | None = None
+        self._visible_track_range: tuple[int, int] | None = None
         self._track_model = TimelineTrackModel(parent=self)
         self._set_track_model_project()
         self._registry = TransformRegistry()
@@ -196,7 +197,7 @@ class AppController(QObject):
     @Property(bool, notify=selectedTrackCanRerunChanged)
     def selectedTrackCanRerun(self) -> bool:
         track = find_track(self._project, self._selected_track_id)
-        return track is not None and bool(track.transform_id) and self._track_inputs_are_complete(track)
+        return self._track_can_rerun(track)
 
     @Property(bool, notify=selectedTrackIdChanged)
     def selectedTrackIsEditable(self) -> bool:
@@ -867,12 +868,20 @@ class AppController(QObject):
 
     @Slot(int, int)
     def set_timeline_visible_track_range(self, first_row: int, row_count: int) -> None:
-        self._visible_track_ids = self._track_model.visible_track_ids(first_row, row_count)
+        self._visible_track_range = (first_row, row_count)
+        self._refresh_snap_visible_track_ids()
 
     @Slot(str, bool, result=bool)
     def set_track_expanded(self, track_id: str, expanded: bool) -> bool:
         changed = self._track_model.set_track_expanded(track_id, expanded)
         if changed:
+            self._refresh_snap_visible_track_ids()
+            if (
+                not expanded
+                and self._selected_track_id
+                and self._selected_track_id not in self._visible_track_id_set()
+            ):
+                self._set_selected_track_id(track_id)
             if not isinstance(self._project.ui_state, dict):
                 self._project.ui_state = {}
             self._project.ui_state["expanded_track_ids"] = self._track_model.expanded_track_ids()
@@ -1097,6 +1106,7 @@ class AppController(QObject):
         self._project = project
         self._session.project = project
         self._visible_track_ids = None
+        self._visible_track_range = None
         self._load_all_waveform_samples()
         self._set_track_model_project()
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
@@ -1132,8 +1142,7 @@ class AppController(QObject):
         self._track_model.set_expanded_track_ids([str(track_id) for track_id in expanded_ids])
 
     def _reset_track_model_expansion_defaults(self) -> None:
-        self._track_model._expanded_track_ids = set()
-        self._track_model._has_explicit_expansion_state = False
+        self._track_model.reset_expansion_defaults()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
@@ -1173,6 +1182,17 @@ class AppController(QObject):
             return [track.id for track in self._project.tracks]
         current_track_ids = {track.id for track in self._project.tracks}
         return [track_id for track_id in self._visible_track_ids if track_id in current_track_ids]
+
+    def _refresh_snap_visible_track_ids(self) -> None:
+        if self._visible_track_range is None:
+            self._visible_track_ids = None
+            return
+        first_row, row_count = self._visible_track_range
+        self._visible_track_ids = self._track_model.visible_track_ids(first_row, row_count)
+
+    def _visible_track_id_set(self) -> set[str]:
+        row_count = self._track_model.rowCount()
+        return set(self._track_model.visible_track_ids(0, row_count))
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -1782,11 +1802,28 @@ class AppController(QObject):
         spec = self._registry.get(track.transform_id, version=track.transform_version)
         if spec.input_schema == "audio.v1":
             params.pop("audio_path", None)
-            parent = find_track(self._project, track.input_track_ids[0]) if track.input_track_ids else track
-            if parent is None:
-                raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+            parent = self._audio_input_parent_for_track(track)
             params["audio_path"] = self._transform_input_resolver().audio_path_for_track(parent)
         return params
+
+    def _track_can_rerun(self, track) -> bool:
+        if track is None or not track.transform_id or not self._track_inputs_are_complete(track):
+            return False
+        try:
+            spec = self._registry.get(track.transform_id, version=track.transform_version)
+            if spec.input_schema == "audio.v1":
+                self._transform_input_resolver().audio_path_for_track(self._audio_input_parent_for_track(track))
+        except Exception:
+            return False
+        return True
+
+    def _audio_input_parent_for_track(self, track):
+        if not track.input_track_ids:
+            return track
+        parent = find_track(self._project, track.input_track_ids[0])
+        if parent is None:
+            raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+        return parent
 
     def _dependency_transform_params_for_track(self, track) -> dict:
         params = dict(track.transform_params)

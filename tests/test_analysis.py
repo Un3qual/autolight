@@ -83,16 +83,15 @@ class AnalysisRegistryTest(unittest.TestCase):
         register_builtin_transforms(registry)
         transform = registry.get("music.energy_profile", version="1")
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(TransformCancelled):
-                transform.run(
-                    TransformContext(
-                        artifact_dir=Path(tmp) / "artifacts",
-                        cancel_requested=lambda: True,
-                        progress=lambda value: None,
-                    ),
-                    {"audio_path": str(Path(tmp) / "missing.wav")},
-                )
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(TransformCancelled):
+            transform.run(
+                TransformContext(
+                    artifact_dir=Path(tmp) / "artifacts",
+                    cancel_requested=lambda: True,
+                    progress=lambda value: None,
+                ),
+                {"audio_path": str(Path(tmp) / "missing.wav")},
+            )
 
     def test_registry_get_supports_version_lookup(self):
         registry = TransformRegistry()
