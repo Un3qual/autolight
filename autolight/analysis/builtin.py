@@ -171,6 +171,13 @@ def _vocals_stand_in(context: TransformContext, params: dict) -> TransformResult
     if context.cancel_requested():
         raise TransformCancelled("cancelled")
 
+    audio_path = params.get("audio_path")
+    if audio_path:
+        artifact = Path(context.artifact_dir) / "stem.wav"
+        shutil.copyfile(Path(str(audio_path)), artifact)
+        context.progress(1.0)
+        return TransformResult(artifacts={"stem": str(artifact)}, metadata={"stem": label})
+
     artifact = Path(context.artifact_dir) / "stem.json"
     artifact.resolve().relative_to(Path(context.artifact_dir).resolve())
     artifact.write_text(json.dumps({"stem": label, "samples": []}, sort_keys=True), encoding="utf-8")
@@ -228,15 +235,15 @@ def _waveform_summary(context: TransformContext, params: dict) -> TransformResul
 
 
 def _music_beat_grid(context: TransformContext, params: dict) -> TransformResult:
-    return _run_music_analysis(context, params, "beat-grid", MusicAnalysisEngine().analyze_rhythm)
+    return _run_music_analysis(context, params, "beat-grid", MusicAnalysisEngine.analyze_rhythm)
 
 
 def _music_energy_profile(context: TransformContext, params: dict) -> TransformResult:
-    return _run_music_analysis(context, params, "energy", MusicAnalysisEngine().analyze_energy)
+    return _run_music_analysis(context, params, "energy", MusicAnalysisEngine.analyze_energy)
 
 
 def _music_harmonic_color(context: TransformContext, params: dict) -> TransformResult:
-    return _run_music_analysis(context, params, "harmonic-color", MusicAnalysisEngine().analyze_harmony)
+    return _run_music_analysis(context, params, "harmonic-color", MusicAnalysisEngine.analyze_harmony)
 
 
 def _run_music_analysis(context: TransformContext, params: dict, artifact_kind: str, analyzer) -> TransformResult:

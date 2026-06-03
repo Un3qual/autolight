@@ -47,10 +47,19 @@ class TransformInputResolver:
         for candidate in self._source_lineage_tracks(track):
             try:
                 if candidate.type == TrackType.GENERATED:
+                    if (
+                        candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS
+                        and candidate.result_state != ResultState.COMPLETE
+                    ):
+                        continue
                     return str(self._valid_audio_artifact_path(candidate))
                 return self._source_audio_path(candidate)
             except ValueError as error:
-                if candidate.type == TrackType.GENERATED and candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS:
+                if (
+                    candidate.type == TrackType.GENERATED
+                    and candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS
+                    and candidate.result_state == ResultState.COMPLETE
+                ):
                     raise
                 if first_source_error is None:
                     first_source_error = error
@@ -86,7 +95,11 @@ class TransformInputResolver:
         entries = {entry.id: entry for entry in self.project.cache_entries}
         for cache_ref in track.cache_refs:
             entry = entries.get(cache_ref)
-            if entry is None or entry.artifact_kind != "audio" or entry.validation_status != "valid":
+            if (
+                entry is None
+                or entry.artifact_kind not in {"audio", "stem"}
+                or entry.validation_status != "valid"
+            ):
                 continue
             path = self.cache_store.artifact_path(entry)
             if path.is_file():

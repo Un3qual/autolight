@@ -755,6 +755,46 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(params["audio_path"], str(cached_path))
         self.assertEqual(child.input_track_ids, [drums.id])
 
+    def test_audio_transform_routes_to_parent_stem_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            stem_audio = Path(tmp) / "vocals.wav"
+            write_wav(source_audio)
+            write_wav(stem_audio)
+            source_id = controller.import_audio(str(source_audio))
+            stem = add_generated_track(
+                controller._project,
+                source_id,
+                "Vocals",
+                "stems.vocals_stand_in",
+                {},
+                "1",
+                "artifact.stem.v1",
+                "stem-dep",
+            )
+            stem.result_state = ResultState.COMPLETE
+            cache_entry = CacheEntry(
+                id="cache_vocals",
+                dependency_hash="stem-dep",
+                artifact_kind="stem",
+                path="stem/cache_vocals.wav",
+                created_at="",
+                transform_version="1",
+            )
+            controller._project.cache_entries.append(cache_entry)
+            stem.cache_refs = [cache_entry.id]
+            cached_path = controller._job_queue.cache_store.artifact_path(cache_entry)
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            cached_path.write_bytes(stem_audio.read_bytes())
+
+            child_id = controller.add_transform_track(stem.id, "waveform.summary", "1", "{}")
+            child = self._track_by_id(controller, child_id)
+            params = controller._runtime_transform_params_for_track(child)
+
+        self.assertEqual(params["audio_path"], str(cached_path))
+        self.assertEqual(child.input_track_ids, [stem.id])
+
     def test_audio_transform_routes_editable_descendant_to_generated_audio_artifact(self):
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
@@ -808,6 +848,39 @@ class AppControllerTest(unittest.TestCase):
 
         self.assertEqual(params["audio_path"], str(cached_path))
         self.assertEqual(child.input_track_ids, [editable_id])
+
+    def test_audio_transform_routes_editable_descendant_past_stale_audio_artifact_to_source(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            drums = add_generated_track(
+                controller._project,
+                source_id,
+                "Drums",
+                "audio.drums_stand_in",
+                {},
+                "1",
+                "artifact.audio.v1",
+                "drums-dep",
+            )
+            drums.result_state = ResultState.STALE
+            editable = Track(
+                id="track_editable",
+                type=TrackType.EDITABLE,
+                name="Editable From Stale Drums",
+                input_track_ids=[drums.id],
+                result_state=ResultState.COMPLETE,
+            )
+            controller._project.tracks.append(editable)
+
+            child_id = controller.add_transform_track(editable.id, "waveform.summary", "1", "{}")
+            child = self._track_by_id(controller, child_id)
+            params = controller._runtime_transform_params_for_track(child)
+
+        self.assertEqual(params["audio_path"], str(source_audio))
+        self.assertEqual(child.input_track_ids, [editable.id])
 
     def test_audio_transform_rejects_stale_parent_artifact(self):
         controller = self._controller()
@@ -1267,6 +1340,8 @@ class AppControllerTest(unittest.TestCase):
         self.assertIn("leftPadding: root.timelineLeftPadding", qml)
         self.assertIn("sample.time", qml)
         self.assertIn("sample.intensity", qml)
+        self.assertIn("leadingContextSample", qml)
+        self.assertIn('"x": safeLeftPadding', qml)
         self.assertIn("sample.color", qml)
         self.assertIn("Canvas", qml)
         self.assertNotIn("width: parent ? parent.width : 0", qml)
@@ -2573,6 +2648,34 @@ class AppControllerTest(unittest.TestCase):
         self.assertTrue(controller.set_track_expanded(source.id, False))
 
         self.assertEqual(controller.selectedTrackId, source.id)
+
+    def test_controller_expands_collapsed_parent_when_transform_child_is_added(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            existing_child = add_generated_track(
+                controller._project,
+                source_id,
+                "Existing Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "existing-dep",
+            )
+            controller.trackModel.set_project(controller._project)
+            self.assertTrue(controller.set_track_expanded(source_id, False))
+            self.assertEqual(controller.trackModel.rowCount(), 1)
+
+            child_id = controller.add_transform_track(source_id, "markers.fixed_interval", "1", "{}")
+
+        self.assertNotEqual(child_id, "")
+        self.assertEqual(controller.selectedTrackId, child_id)
+        self.assertEqual(controller.trackModel.rowCount(), 3)
+        self.assertIn(source_id, controller._project.ui_state["expanded_track_ids"])
+        self.assertEqual(existing_child.input_track_ids, [source_id])
 
     def test_controller_persists_timeline_tree_expansion_state(self):
         controller = self._controller()

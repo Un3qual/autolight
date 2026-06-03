@@ -45,6 +45,7 @@ Canvas {
         var safePixelsPerSecond = Math.max(0, root.finiteNumber(root.pixelsPerSecond, 96))
         var safeLeftPadding = root.finiteNumber(root.leftPadding, 24)
         var drawableSamples = []
+        var leadingContextSample = null
         for (var index = 0; index < count; index += 1) {
             var sample = root.samples[index] || {}
             var sampleTime = root.finiteNumber(sample.time, NaN)
@@ -52,7 +53,17 @@ Canvas {
                 continue
             }
             var x = safeLeftPadding + (sampleTime - safeScrollSeconds) * safePixelsPerSecond
-            if (x < safeLeftPadding - 2 || x > width + 2) {
+            if (x < safeLeftPadding - 2) {
+                if (root.stripKind !== "energy") {
+                    leadingContextSample = {
+                        "x": safeLeftPadding,
+                        "intensity": root.clampedUnit(sample.intensity),
+                        "color": sample.color || "#93c5fd"
+                    }
+                }
+                continue
+            }
+            if (x > width + 2) {
                 continue
             }
             drawableSamples.push({
@@ -60,6 +71,9 @@ Canvas {
                 "intensity": root.clampedUnit(sample.intensity),
                 "color": sample.color || "#93c5fd"
             })
+        }
+        if (root.stripKind !== "energy" && leadingContextSample !== null) {
+            drawableSamples.unshift(leadingContextSample)
         }
         if (drawableSamples.length === 0) {
             return

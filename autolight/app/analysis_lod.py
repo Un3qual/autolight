@@ -13,6 +13,8 @@ class AnalysisLodStore:
         visible_seconds: float,
         max_frames: int = 256,
     ) -> dict[str, Any]:
+        if max_frames < 1:
+            raise ValueError("max_frames must be >= 1")
         frames = payload.get("frames", [])
         if not isinstance(frames, list):
             frames = []

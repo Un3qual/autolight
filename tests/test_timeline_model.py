@@ -239,6 +239,31 @@ class TimelineTrackModelTest(unittest.TestCase):
         self.assertEqual(model.data(model.index(0, 0), model.role_for_name("trackId")), source.id)
         self.assertFalse(model.data(model.index(0, 0), model.role_for_name("expanded")))
 
+    def test_model_default_expansion_uses_only_first_input_parent(self):
+        project = new_project("Demo")
+        source = Track(id="track_source", type=TrackType.SOURCE, name="Song", result_state=ResultState.COMPLETE)
+        sidechain = Track(
+            id="track_sidechain",
+            type=TrackType.GENERATED,
+            name="Sidechain",
+            result_state=ResultState.COMPLETE,
+        )
+        child = Track(
+            id="track_child",
+            type=TrackType.GENERATED,
+            name="Child",
+            input_track_ids=[source.id, sidechain.id],
+            result_state=ResultState.COMPLETE,
+        )
+        project.tracks.extend([source, sidechain, child])
+
+        model = TimelineTrackModel()
+        model.set_project(project)
+
+        self.assertEqual(model.expanded_track_ids(), [source.id])
+        self.assertTrue(model.data(model.index(0, 0), model.role_for_name("expanded")))
+        self.assertFalse(model.data(model.index(2, 0), model.role_for_name("expanded")))
+
     def test_model_renders_missing_parent_as_problem_root_row(self):
         project = new_project("Demo")
         orphan = Track(

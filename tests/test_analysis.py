@@ -235,23 +235,22 @@ class AnalysisRegistryTest(unittest.TestCase):
         progress_values = []
 
         with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
             result = transform.run(
                 TransformContext(
                     artifact_dir=Path(tmp),
                     cancel_requested=lambda: False,
                     progress=progress_values.append,
                 ),
-                {"label": "vocals"},
+                {"audio_path": str(source), "label": "vocals"},
             )
             artifact = Path(result.artifacts["stem"])
             self.assertEqual(
                 artifact.resolve().relative_to(Path(tmp).resolve()),
-                Path("stem.json"),
+                Path("stem.wav"),
             )
-            self.assertEqual(
-                json.loads(artifact.read_text(encoding="utf-8")),
-                {"samples": [], "stem": "vocals"},
-            )
+            self.assertEqual(artifact.read_bytes(), b"test audio bytes")
 
         self.assertEqual(progress_values[-1], 1.0)
 
@@ -282,6 +281,8 @@ class AnalysisRegistryTest(unittest.TestCase):
         transform = registry.get("stems.vocals_stand_in")
 
         with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
             artifact_dir = Path(tmp) / "artifacts"
             result = transform.run(
                 TransformContext(
@@ -289,12 +290,12 @@ class AnalysisRegistryTest(unittest.TestCase):
                     cancel_requested=lambda: False,
                     progress=lambda value: None,
                 ),
-                {"label": "../outside"},
+                {"audio_path": str(source), "label": "../outside"},
             )
             artifact = Path(result.artifacts["stem"]).resolve()
 
-            self.assertEqual(artifact.relative_to(artifact_dir.resolve()), Path("stem.json"))
-            self.assertFalse((Path(tmp) / "outside.json").exists())
+            self.assertEqual(artifact.relative_to(artifact_dir.resolve()), Path("stem.wav"))
+            self.assertFalse((Path(tmp) / "outside.wav").exists())
 
     def test_vocal_stand_in_cancellation_before_write_does_not_create_artifact(self):
         registry = TransformRegistry()

@@ -215,13 +215,18 @@ class TransformPickerTest(unittest.TestCase):
             )
         )
         controller.load_demo_project()
-        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        no_audio = Track(
+            id="track_no_audio",
+            type=TrackType.EDITABLE,
+            name="No Audio",
+            result_state=ResultState.COMPLETE,
+        )
         controller._project.tracks.append(no_audio)
 
         track_id = controller.add_transform_track(no_audio.id, "test.audio_path", "1", "{}")
 
         self.assertEqual(track_id, "")
-        self.assertIn("parent track is not complete", controller.lastError)
+        self.assertIn("editable track has no source audio context", controller.lastError)
 
     def test_controller_add_transform_track_rejects_supplied_audio_path_without_source_audio(self):
         from autolight.app_controller import AppController
@@ -243,7 +248,12 @@ class TransformPickerTest(unittest.TestCase):
             )
         )
         controller.load_demo_project()
-        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        no_audio = Track(
+            id="track_no_audio",
+            type=TrackType.EDITABLE,
+            name="No Audio",
+            result_state=ResultState.COMPLETE,
+        )
         controller._project.tracks.append(no_audio)
 
         track_id = controller.add_transform_track(
@@ -254,7 +264,7 @@ class TransformPickerTest(unittest.TestCase):
         )
 
         self.assertEqual(track_id, "")
-        self.assertIn("parent track is not complete", controller.lastError)
+        self.assertIn("editable track has no source audio context", controller.lastError)
 
     def test_controller_resolves_audio_path_at_submission_time(self):
         from autolight.app_controller import AppController
@@ -351,13 +361,18 @@ class TransformPickerTest(unittest.TestCase):
         controller = AppController()
         self.addCleanup(controller.cleanup)
         controller.load_demo_project()
-        no_audio = Track(id="track_no_audio", type=TrackType.EDITABLE, name="No Audio")
+        no_audio = Track(
+            id="track_no_audio",
+            type=TrackType.EDITABLE,
+            name="No Audio",
+            result_state=ResultState.COMPLETE,
+        )
         controller._project.tracks.append(no_audio)
 
         track_id = controller.add_vocals_stem_track(no_audio.id)
 
         self.assertEqual(track_id, "")
-        self.assertIn("parent track is not complete", controller.lastError)
+        self.assertIn("editable track has no source audio context", controller.lastError)
 
     def test_qml_uses_transform_model_and_generic_add_action(self):
         ui_root = Path(__file__).resolve().parents[1] / "UI"

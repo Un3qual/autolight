@@ -103,7 +103,7 @@ class TimelineTrackModel(QAbstractListModel):
         self._rebuild_marker_index()
         self._prune_expanded_track_ids()
         if project is not None and not self._has_explicit_expansion_state:
-            parent_ids = {input_id for track in project.tracks for input_id in track.input_track_ids}
+            parent_ids = {track.input_track_ids[0] for track in project.tracks if track.input_track_ids}
             known_ids = {track.id for track in project.tracks}
             self._expanded_track_ids |= parent_ids & known_ids
         self._rebuild_tree_projection()

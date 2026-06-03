@@ -430,6 +430,7 @@ class AppController(QObject):
                 output_schema="artifact.stem.v1",
                 dependency_hash=dependency_hash,
             )
+            self._expand_parent_for_new_child(parent.id)
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
@@ -467,6 +468,7 @@ class AppController(QObject):
                 output_schema=spec.output_schema,
                 dependency_hash=dependency_hash,
             )
+            self._expand_parent_for_new_child(parent.id)
             self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
@@ -1143,6 +1145,14 @@ class AppController(QObject):
 
     def _reset_track_model_expansion_defaults(self) -> None:
         self._track_model.reset_expansion_defaults()
+
+    def _expand_parent_for_new_child(self, parent_track_id: str) -> None:
+        expanded_ids = set(self._track_model.expanded_track_ids())
+        expanded_ids.add(parent_track_id)
+        self._track_model.set_expanded_track_ids(sorted(expanded_ids))
+        if not isinstance(self._project.ui_state, dict):
+            self._project.ui_state = {}
+        self._project.ui_state["expanded_track_ids"] = sorted(expanded_ids)
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:

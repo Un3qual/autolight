@@ -232,7 +232,7 @@ def _harmonic_change_markers(frames: list[dict[str, Any]], max_markers: int) -> 
         if previous is not None and current != previous:
             markers.append(
                 {
-                    "timestamp": float(frame["time"]),
+                    "timestamp": round(float(frame["time"]), 6),
                     "label": "Harmonic Change",
                     "category": "harmonic_change",
                     "confidence": 0.75,

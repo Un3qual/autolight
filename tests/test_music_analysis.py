@@ -94,6 +94,15 @@ class AnalysisLodStoreTest(unittest.TestCase):
 
         self.assertEqual(visible["kind"], "")
 
+    def test_visible_frames_rejects_non_positive_max_frames(self):
+        with self.assertRaisesRegex(ValueError, "max_frames"):
+            AnalysisLodStore().visible_frames(
+                {"kind": "energy", "frames": []},
+                scroll_seconds=0.0,
+                visible_seconds=1.0,
+                max_frames=0,
+            )
+
 
 class MusicAnalysisEngineTest(unittest.TestCase):
     def test_energy_profile_returns_bounded_normalized_frames(self):
@@ -162,6 +171,17 @@ class MusicAnalysisEngineTest(unittest.TestCase):
 
         self.assertEqual(frames[1]["dominant_pitch_class"], -1)
         self.assertEqual([marker["timestamp"] for marker in markers], [3.0])
+
+    def test_harmonic_change_markers_round_timestamps(self):
+        markers = _harmonic_change_markers(
+            [
+                {"time": 0.0, "dominant_pitch_class": 0},
+                {"time": 1.123456789, "dominant_pitch_class": 7},
+            ],
+            max_markers=16,
+        )
+
+        self.assertEqual(markers[0]["timestamp"], 1.123457)
 
     def test_invalid_numeric_settings_fail_before_audio_loading(self):
         missing_audio = Path("does-not-exist.wav")
