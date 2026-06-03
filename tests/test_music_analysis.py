@@ -3,11 +3,17 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from autolight.app.analysis_lod import AnalysisLodStore
-from autolight.analysis.music import MusicAnalysisEngine, _chroma_frames, _harmonic_change_markers
+from autolight.analysis.music import (
+    MusicAnalysisCancelled,
+    MusicAnalysisEngine,
+    _chroma_frames,
+    _harmonic_change_markers,
+)
 
 
 def write_impulse_wav(path: Path, *, sample_rate: int = 8000, seconds: float = 2.0) -> None:
@@ -193,6 +199,27 @@ class MusicAnalysisEngineTest(unittest.TestCase):
             engine.analyze_energy(missing_audio, {"max_frames": 0})
         with self.assertRaisesRegex(ValueError, "max_markers"):
             engine.analyze_harmony(missing_audio, {"max_markers": 0})
+
+    def test_energy_profile_observes_cancellation_between_analysis_stages(self):
+        cancelled = {"value": False}
+
+        def fake_rms(*_args, **_kwargs):
+            cancelled["value"] = True
+            return np.asarray([[0.25, 0.75]])
+
+        with (
+            patch("autolight.analysis.music._load_audio", return_value=(np.ones(4096), 8000)),
+            patch("autolight.analysis.music.librosa.feature.rms", side_effect=fake_rms),
+            patch("autolight.analysis.music.librosa.onset.onset_strength") as onset_strength,
+        ):
+            with self.assertRaises(MusicAnalysisCancelled):
+                MusicAnalysisEngine.analyze_energy(
+                    Path("song.wav"),
+                    {"max_frames": 8},
+                    cancel_requested=lambda: cancelled["value"],
+                )
+
+        onset_strength.assert_not_called()
 
     def test_analysis_results_are_strict_json_serializable(self):
         with tempfile.TemporaryDirectory() as tmp:

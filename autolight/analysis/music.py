@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from librosa.util.exceptions import ParameterError
 DEFAULT_HOP_LENGTH = 512
 DEFAULT_MAX_FRAMES = 2048
 DEFAULT_MAX_MARKERS = 2048
+CancelCallback = Callable[[], bool] | None
 
 
 @dataclass(slots=True)
@@ -24,20 +26,36 @@ class MusicAnalysisResult:
     frames: list[dict[str, Any]] = field(default_factory=list)
 
 
+class MusicAnalysisCancelled(Exception):
+    pass
+
+
 class MusicAnalysisEngine:
     @staticmethod
-    def analyze_rhythm(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    def analyze_rhythm(
+        audio_path: str | Path,
+        settings: dict[str, Any] | None = None,
+        *,
+        cancel_requested: CancelCallback = None,
+    ) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        _raise_if_cancelled(cancel_requested)
         y, sr = _load_audio(audio_path)
+        _raise_if_cancelled(cancel_requested)
         tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length, units="frames")
+        _raise_if_cancelled(cancel_requested)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length)
+        _raise_if_cancelled(cancel_requested)
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        _raise_if_cancelled(cancel_requested)
         normalized_onset_env = _normalize(onset_env)
         tempo_value = _first_float(tempo)
         markers = []
         for index, timestamp in enumerate(beat_times[:max_markers]):
+            if index % 512 == 0:
+                _raise_if_cancelled(cancel_requested)
             beat_strength = _frame_value(normalized_onset_env, int(beat_frames[index]))
             markers.append(
                 {
@@ -64,18 +82,28 @@ class MusicAnalysisEngine:
         return MusicAnalysisResult(kind="beat-grid", payload=payload, markers=markers)
 
     @staticmethod
-    def analyze_energy(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    def analyze_energy(
+        audio_path: str | Path,
+        settings: dict[str, Any] | None = None,
+        *,
+        cancel_requested: CancelCallback = None,
+    ) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
         max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        _raise_if_cancelled(cancel_requested)
         y, sr = _load_audio(audio_path)
+        _raise_if_cancelled(cancel_requested)
         rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
+        _raise_if_cancelled(cancel_requested)
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        _raise_if_cancelled(cancel_requested)
         times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
         intensity = _normalize(rms + _resize(onset_env, len(rms)))
+        _raise_if_cancelled(cancel_requested)
         frames = _decimated_frames(times, intensity, max_frames, "intensity")
-        markers = _energy_markers(times, intensity, max_markers)
+        markers = _energy_markers(times, intensity, max_markers, cancel_requested=cancel_requested)
         payload = {
             "version": 1,
             "kind": "energy",
@@ -86,18 +114,28 @@ class MusicAnalysisEngine:
         return MusicAnalysisResult(kind="energy", payload=payload, markers=markers, frames=frames)
 
     @staticmethod
-    def analyze_harmony(audio_path: str | Path, settings: dict[str, Any] | None = None) -> MusicAnalysisResult:
+    def analyze_harmony(
+        audio_path: str | Path,
+        settings: dict[str, Any] | None = None,
+        *,
+        cancel_requested: CancelCallback = None,
+    ) -> MusicAnalysisResult:
         settings = dict(settings or {})
         hop_length = _positive_int(settings.get("hop_length", DEFAULT_HOP_LENGTH), "hop_length")
         max_frames = _positive_int(settings.get("max_frames", DEFAULT_MAX_FRAMES), "max_frames")
         max_markers = _positive_int(settings.get("max_markers", DEFAULT_MAX_MARKERS), "max_markers")
+        _raise_if_cancelled(cancel_requested)
         y, sr = _load_audio(audio_path)
+        _raise_if_cancelled(cancel_requested)
         try:
             chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
         except ParameterError:
+            _raise_if_cancelled(cancel_requested)
             chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop_length)
+        _raise_if_cancelled(cancel_requested)
         times = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length)
         frames = _chroma_frames(times, chroma, max_frames)
+        _raise_if_cancelled(cancel_requested)
         markers = _harmonic_change_markers(frames, max_markers)
         payload = {
             "version": 1,
@@ -115,6 +153,11 @@ def _load_audio(audio_path: str | Path):
         warnings.filterwarnings("ignore", message=".*standard-'?sunau'?.*", category=DeprecationWarning)
         warnings.filterwarnings("ignore", message="n_fft=.*", category=UserWarning)
         return librosa.load(str(audio_path), sr=None, mono=True)
+
+
+def _raise_if_cancelled(cancel_requested: CancelCallback) -> None:
+    if cancel_requested is not None and cancel_requested():
+        raise MusicAnalysisCancelled("cancelled")
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -176,12 +219,20 @@ def _decimated_frames(times: np.ndarray, values: np.ndarray, max_frames: int, va
     ][:max_frames]
 
 
-def _energy_markers(times: np.ndarray, intensity: np.ndarray, max_markers: int) -> list[dict[str, Any]]:
+def _energy_markers(
+    times: np.ndarray,
+    intensity: np.ndarray,
+    max_markers: int,
+    *,
+    cancel_requested: CancelCallback = None,
+) -> list[dict[str, Any]]:
     if len(intensity) == 0:
         return []
     threshold = max(0.65, float(np.mean(intensity) + np.std(intensity)))
     markers = []
     for index in range(1, len(intensity) - 1):
+        if index % 512 == 0:
+            _raise_if_cancelled(cancel_requested)
         value = float(intensity[index])
         if value >= threshold and value >= intensity[index - 1] and value >= intensity[index + 1]:
             markers.append(

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from autolight.cache.store import CacheStore
+from autolight.project.audio_probe import probe_audio_file
 from autolight.project.models import ProjectDocument, ResultState, Track, TrackType
 from autolight.project.store import find_track
 
@@ -51,14 +52,13 @@ class TransformInputResolver:
                         candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS
                         and candidate.result_state != ResultState.COMPLETE
                     ):
-                        continue
+                        raise ValueError(f"parent track is not complete: {candidate.name}")
                     return str(self._valid_audio_artifact_path(candidate))
                 return self._source_audio_path(candidate)
             except ValueError as error:
                 if (
                     candidate.type == TrackType.GENERATED
                     and candidate.output_schema in GENERATED_AUDIO_OUTPUT_SCHEMAS
-                    and candidate.result_state == ResultState.COMPLETE
                 ):
                     raise
                 if first_source_error is None:
@@ -102,6 +102,14 @@ class TransformInputResolver:
             ):
                 continue
             path = self.cache_store.artifact_path(entry)
-            if path.is_file():
+            if path.is_file() and self._is_audio_file(path):
                 return path
         raise ValueError(f"parent track has no valid audio artifact: {track.name}")
+
+    @staticmethod
+    def _is_audio_file(path: Path) -> bool:
+        try:
+            probe_audio_file(path)
+        except Exception:
+            return False
+        return True

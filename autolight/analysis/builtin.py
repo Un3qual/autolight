@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
-from autolight.analysis.music import MusicAnalysisEngine
+from autolight.analysis.music import MusicAnalysisCancelled, MusicAnalysisEngine
 from autolight.analysis.registry import (
     TransformCancelled,
     TransformContext,
@@ -251,7 +251,10 @@ def _run_music_analysis(context: TransformContext, params: dict, artifact_kind: 
     context.progress(0.05)
     audio_path = Path(str(params["audio_path"]))
     settings = {key: value for key, value in params.items() if key != "audio_path"}
-    result = analyzer(audio_path, settings)
+    try:
+        result = analyzer(audio_path, settings, cancel_requested=context.cancel_requested)
+    except MusicAnalysisCancelled as exc:
+        raise TransformCancelled("cancelled") from exc
     _raise_if_cancelled(context)
     context.artifact_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = Path(context.artifact_dir) / f"{artifact_kind}.json"

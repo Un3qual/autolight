@@ -202,6 +202,7 @@ class TimelineTrackModel(QAbstractListModel):
         self._expanded_track_ids.add(parent_track_id)
         self._prune_expanded_track_ids()
         self.beginResetModel()
+        self._rebuild_marker_index()
         self._rebuild_tree_projection()
         self._generation += 1
         self.endResetModel()

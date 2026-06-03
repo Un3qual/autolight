@@ -849,7 +849,7 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(params["audio_path"], str(cached_path))
         self.assertEqual(child.input_track_ids, [editable_id])
 
-    def test_audio_transform_routes_editable_descendant_past_stale_audio_artifact_to_source(self):
+    def test_audio_transform_rejects_editable_descendant_with_stale_audio_ancestor(self):
         controller = self._controller()
         with tempfile.TemporaryDirectory() as tmp:
             source_audio = Path(tmp) / "song.wav"
@@ -876,11 +876,45 @@ class AppControllerTest(unittest.TestCase):
             controller._project.tracks.append(editable)
 
             child_id = controller.add_transform_track(editable.id, "waveform.summary", "1", "{}")
-            child = self._track_by_id(controller, child_id)
-            params = controller._runtime_transform_params_for_track(child)
 
-        self.assertEqual(params["audio_path"], str(source_audio))
-        self.assertEqual(child.input_track_ids, [editable.id])
+        self.assertEqual(child_id, "")
+        self.assertIn("parent track is not complete: Drums", controller.lastError)
+
+    def test_audio_transform_rejects_metadata_only_stem_artifact(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            stem = add_generated_track(
+                controller._project,
+                source_id,
+                "Vocals",
+                "stems.vocals_stand_in",
+                {},
+                "1",
+                "artifact.stem.v1",
+                "stem-dep",
+            )
+            stem.result_state = ResultState.COMPLETE
+            cache_entry = CacheEntry(
+                id="cache_vocals_metadata",
+                dependency_hash="stem-dep",
+                artifact_kind="stem",
+                path="stem/cache_vocals.json",
+                created_at="",
+                transform_version="1",
+            )
+            controller._project.cache_entries.append(cache_entry)
+            stem.cache_refs = [cache_entry.id]
+            cached_path = controller._job_queue.cache_store.artifact_path(cache_entry)
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            cached_path.write_text('{"samples": [], "stem": "vocals"}', encoding="utf-8")
+
+            child_id = controller.add_transform_track(stem.id, "waveform.summary", "1", "{}")
+
+        self.assertEqual(child_id, "")
+        self.assertIn("parent track has no valid audio artifact", controller.lastError)
 
     def test_audio_transform_rejects_stale_parent_artifact(self):
         controller = self._controller()
@@ -2420,6 +2454,16 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(
             self._track_id(controller, self._track_model_row_by_id(controller, editable_id)),
             editable_id,
+        )
+        editable_row = self._track_model_row_by_id(controller, editable_id)
+        editable_index = controller.trackModel.index(editable_row, 0)
+        self.assertEqual(
+            controller.trackModel.data(editable_index, controller.trackModel.role_for_name("markerCount")),
+            3,
+        )
+        self.assertEqual(
+            len(controller.trackModel.data(editable_index, controller.trackModel.role_for_name("markerSpans"))),
+            3,
         )
         self.assertIn(generated_id, controller._project.ui_state["expanded_track_ids"])
         editable = self._track_by_id(controller, editable_id)
