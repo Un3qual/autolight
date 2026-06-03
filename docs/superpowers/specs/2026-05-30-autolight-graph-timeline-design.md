@@ -2,6 +2,10 @@
 
 Date: 2026-05-30
 
+## Migration Status
+
+This document records the historical Python/PySide6 implementation direction for the graph-backed timeline foundation. The active forward architecture is the Rust/CXX-Qt port in `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md`. Future app work should preserve the behavior described here, but implement it in Rust with Qt Quick/QML exposed through CXX-Qt.
+
 ## Context
 
 Autolight is a Python desktop GUI app for analyzing music files and producing metadata-enriched timestamp markers for automated light shows. The long-term product goal is a non-linear-editor-like timeline where each track is either the source song, an analysis transform of another track, or an editable derivative. The first architecture milestone should build the transform graph and project model that make that timeline possible.
@@ -150,4 +154,4 @@ UI tests can start narrow: verify that QML launches, timeline view models expose
 - The project format optimizes for internal fidelity first.
 - Source separation is in the MVP capability set.
 - Execution is local background jobs.
-- PySide6/QML is the committed UI stack.
+- PySide6/QML was the committed UI stack for the original implementation. This is superseded for future work by Rust/CXX-Qt: Qt Quick/QML remains the UI layer, but Python/PySide6 is no longer the target app runtime.

@@ -1,6 +1,22 @@
 # Autolight
 
-Autolight is a PySide6/QML desktop app for building graph-backed audio analysis timelines. The first milestone focuses on a `.autolight` project model, generated and editable tracks, local background analysis jobs, cache-aware transform outputs, and a timeline shell.
+Autolight is a desktop app for building graph-backed audio analysis timelines.
+
+## Rust Port Direction
+
+The current checked-in application is implemented in Python with PySide6/QML. As of 2026-06-03, all continued product work on the app targets a Rust implementation that keeps Qt Quick/QML through CXX-Qt. The Python/PySide code remains the reference implementation and compatibility baseline until the Rust version reaches parity.
+
+Forward-looking feature plans, architecture decisions, and implementation batches should target the Rust/CXX-Qt app. Python changes should be limited to preserving the reference app, fixing parity blockers, or adding tests that define behavior the Rust version must match.
+
+See `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md` and `docs/superpowers/plans/2026-06-03-autolight-rust-cxx-qt-port.md`.
+
+## Working On The Repo
+
+Start from `docs/NOW.md`. It contains the one active implementation batch, target paths, verification commands, and handoff notes.
+
+Use `docs/ROADMAP.md` only when `docs/NOW.md` is complete, blocked, or stale. Use `docs/PROCESS.md` for the lightweight batch and handoff rules.
+
+## Legacy Python App
 
 ## Run
 

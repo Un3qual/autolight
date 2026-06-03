@@ -2,6 +2,10 @@
 
 Date: 2026-06-02
 
+## Migration Status
+
+This document records the current tree-aware analysis behavior and Python/PySide6 implementation assumptions. The active forward architecture is the Rust/CXX-Qt port in `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md`. Future app work should keep the graph, tree, cache, and analysis behaviors described here, but implement new product work in the Rust/CXX-Qt version.
+
 ## Context
 
 Milestone 2 made Autolight usable as an interactive timeline authoring tool: users can create manual cue tracks, edit markers directly, undo and redo edits, snap to generated timing markers, persist timeline viewport state, and inspect zoom-adaptive waveform detail.
@@ -212,3 +216,4 @@ Tests should cover:
 - Dense artifacts plus generated marker tracks are both required.
 - The timeline should become tree-aware so child transforms are visibly nested under their input tracks.
 - Child transforms must route to compatible parent artifacts when applicable.
+- Future analysis, tree, and timeline extensions target the Rust/CXX-Qt app. The existing Python/PySide6 implementation remains the behavior and project-compatibility baseline during the port.
