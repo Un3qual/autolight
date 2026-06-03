@@ -56,6 +56,9 @@ Rectangle {
         anchors.bottomMargin: 18
         samples: root.visibleEnergySamples
         stripKind: "energy"
+        scrollSeconds: root.appController.timelineScrollSeconds
+        pixelsPerSecond: root.appController.timelinePixelsPerSecond
+        leftPadding: root.timelineLeftPadding
     }
 
     AnalysisStrip {
@@ -65,6 +68,9 @@ Rectangle {
         anchors.bottomMargin: 2
         samples: root.visibleHarmonicColorSamples
         stripKind: "harmonic-color"
+        scrollSeconds: root.appController.timelineScrollSeconds
+        pixelsPerSecond: root.appController.timelinePixelsPerSecond
+        leftPadding: root.timelineLeftPadding
     }
 
     Repeater {
