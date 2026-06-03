@@ -1348,13 +1348,9 @@ class EditableMarkerInspectorTest(unittest.TestCase):
 
     @staticmethod
     def _track_id_for_type(controller, track_type: str) -> str:
-        model = controller.trackModel
-        type_role = model.role_for_name("trackType")
-        id_role = model.role_for_name("trackId")
-        for row in range(model.rowCount()):
-            index = model.index(row, 0)
-            if model.data(index, type_role) == track_type:
-                return model.data(index, id_role)
+        for track in controller._project.tracks:
+            if track.type.value == track_type:
+                return track.id
         raise AssertionError(f"track type not found: {track_type}")
 
     @staticmethod

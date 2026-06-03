@@ -509,6 +509,8 @@ class WaveformSummaryTest(unittest.TestCase):
             sorted(emissions),
             sorted(
                 [
+                    self._track_row(controller, source.id),
+                    self._track_row(controller, source.id),
                     self._track_row(controller, stale_track.id),
                     self._track_row(controller, invalid_cache_track.id),
                 ]

@@ -18,6 +18,21 @@ class CancelOnCall:
         return self.calls >= self.call_number
 
 
+def write_impulse_wav(path: Path) -> None:
+    import wave
+
+    sample_rate = 8000
+    samples = []
+    for index in range(sample_rate * 2):
+        value = 18000 if index % (sample_rate // 2) == 0 else 0
+        samples.append(value.to_bytes(2, "little", signed=True))
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(b"".join(samples))
+
+
 class AnalysisRegistryTest(unittest.TestCase):
     def test_builtin_registry_contains_marker_and_expensive_transforms(self):
         registry = TransformRegistry()
@@ -25,6 +40,73 @@ class AnalysisRegistryTest(unittest.TestCase):
 
         self.assertIn("markers.fixed_interval", registry.ids())
         self.assertIn("stems.vocals_stand_in", registry.ids())
+
+    def test_builtin_registry_contains_music_analysis_transforms(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+
+        self.assertIn("music.beat_grid", registry.ids())
+        self.assertIn("music.energy_profile", registry.ids())
+        self.assertIn("music.harmonic_color", registry.ids())
+
+    def test_music_analysis_transforms_write_expected_artifacts(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+
+        for transform_id, artifact_kind in [
+            ("music.beat_grid", "beat-grid"),
+            ("music.energy_profile", "energy"),
+            ("music.harmonic_color", "harmonic-color"),
+        ]:
+            with self.subTest(transform_id=transform_id):
+                with tempfile.TemporaryDirectory() as tmp:
+                    audio_path = Path(tmp) / "song.wav"
+                    write_impulse_wav(audio_path)
+                    transform = registry.get(transform_id, version="1")
+                    result = transform.run(
+                        TransformContext(
+                            artifact_dir=Path(tmp) / "artifacts",
+                            cancel_requested=lambda: False,
+                            progress=lambda value: None,
+                        ),
+                        {"audio_path": str(audio_path), "max_frames": 32, "max_markers": 64},
+                    )
+                    artifact = Path(result.artifacts[artifact_kind])
+                    payload = json.loads(artifact.read_text(encoding="utf-8"))
+
+                self.assertEqual(payload["version"], 1)
+                self.assertEqual(payload["kind"], artifact_kind)
+                self.assertIn("settings", payload)
+
+    def test_music_analysis_transform_cancels_before_loading_audio(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("music.energy_profile", version="1")
+
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(TransformCancelled):
+            transform.run(
+                TransformContext(
+                    artifact_dir=Path(tmp) / "artifacts",
+                    cancel_requested=lambda: True,
+                    progress=lambda value: None,
+                ),
+                {"audio_path": str(Path(tmp) / "missing.wav")},
+            )
+
+    def test_music_analysis_transform_cancels_inside_analyzer(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("music.energy_profile", version="1")
+
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(TransformCancelled):
+            transform.run(
+                TransformContext(
+                    artifact_dir=Path(tmp) / "artifacts",
+                    cancel_requested=CancelOnCall(2),
+                    progress=lambda value: None,
+                ),
+                {"audio_path": str(Path(tmp) / "missing.wav")},
+            )
 
     def test_registry_get_supports_version_lookup(self):
         registry = TransformRegistry()
@@ -168,32 +250,33 @@ class AnalysisRegistryTest(unittest.TestCase):
         progress_values = []
 
         with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
             result = transform.run(
                 TransformContext(
                     artifact_dir=Path(tmp),
                     cancel_requested=lambda: False,
                     progress=progress_values.append,
                 ),
-                {"label": "vocals"},
+                {"audio_path": str(source), "label": "vocals"},
             )
             artifact = Path(result.artifacts["stem"])
             self.assertEqual(
                 artifact.resolve().relative_to(Path(tmp).resolve()),
-                Path("stem.json"),
+                Path("stem.wav"),
             )
-            self.assertEqual(
-                json.loads(artifact.read_text(encoding="utf-8")),
-                {"samples": [], "stem": "vocals"},
-            )
+            self.assertEqual(artifact.read_bytes(), b"test audio bytes")
 
         self.assertEqual(progress_values[-1], 1.0)
 
-    def test_vocal_stand_in_label_cannot_escape_artifact_dir(self):
+    def test_drums_stand_in_writes_audio_artifact(self):
         registry = TransformRegistry()
         register_builtin_transforms(registry)
-        transform = registry.get("stems.vocals_stand_in")
+        transform = registry.get("audio.drums_stand_in", version="1")
 
         with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
             artifact_dir = Path(tmp) / "artifacts"
             result = transform.run(
                 TransformContext(
@@ -201,12 +284,33 @@ class AnalysisRegistryTest(unittest.TestCase):
                     cancel_requested=lambda: False,
                     progress=lambda value: None,
                 ),
-                {"label": "../outside"},
+                {"audio_path": str(source)},
+            )
+
+            self.assertEqual(set(result.artifacts), {"audio"})
+            self.assertEqual(Path(result.artifacts["audio"]).read_bytes(), b"test audio bytes")
+
+    def test_vocal_stand_in_label_cannot_escape_artifact_dir(self):
+        registry = TransformRegistry()
+        register_builtin_transforms(registry)
+        transform = registry.get("stems.vocals_stand_in")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.wav"
+            source.write_bytes(b"test audio bytes")
+            artifact_dir = Path(tmp) / "artifacts"
+            result = transform.run(
+                TransformContext(
+                    artifact_dir=artifact_dir,
+                    cancel_requested=lambda: False,
+                    progress=lambda value: None,
+                ),
+                {"audio_path": str(source), "label": "../outside"},
             )
             artifact = Path(result.artifacts["stem"]).resolve()
 
-            self.assertEqual(artifact.relative_to(artifact_dir.resolve()), Path("stem.json"))
-            self.assertFalse((Path(tmp) / "outside.json").exists())
+            self.assertEqual(artifact.relative_to(artifact_dir.resolve()), Path("stem.wav"))
+            self.assertFalse((Path(tmp) / "outside.wav").exists())
 
     def test_vocal_stand_in_cancellation_before_write_does_not_create_artifact(self):
         registry = TransformRegistry()

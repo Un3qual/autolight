@@ -16,7 +16,9 @@ from autolight.app import (
     TimelineViewport,
     WaveformLodStore,
 )
+from autolight.app.analysis_lod import AnalysisLodStore
 from autolight.app.edit_history import MarkerSnapshotCommand, ProjectSnapshotCommand, TrackSnapshotCommand
+from autolight.app.transform_inputs import TransformInputResolver
 from autolight.analysis.builtin import register_builtin_transforms
 from autolight.analysis.registry import TransformRegistry
 from autolight.cache.keys import track_dependency_hash
@@ -55,6 +57,10 @@ from autolight.timeline.transform_model import TransformSpecModel
 
 TIMELINE_UI_STATE_KEY = "timeline"
 TIMELINE_DEFAULT_PIXELS_PER_SECOND = 96.0
+ANALYSIS_ARTIFACT_PROVENANCE = {
+    "energy": ("analysis_energy_payload", "visible_energy"),
+    "harmonic-color": ("analysis_harmonic_color_payload", "visible_harmonic_color"),
+}
 
 
 class AppController(QObject):
@@ -84,6 +90,7 @@ class AppController(QObject):
         self._edit_history = EditHistory()
         self._viewport = TimelineViewport()
         self._waveform_lod = WaveformLodStore()
+        self._analysis_lod = AnalysisLodStore()
         self._project_path = ""
         self._last_error = ""
         self._selected_track_id = ""
@@ -99,8 +106,9 @@ class AppController(QObject):
         self._timeline_scroll_seconds = 0.0
         self._timeline_visible_seconds = 8.0
         self._visible_track_ids: list[str] | None = None
+        self._visible_track_range: tuple[int, int] | None = None
         self._track_model = TimelineTrackModel(parent=self)
-        self._track_model.set_project(self._project)
+        self._set_track_model_project()
         self._registry = TransformRegistry()
         register_builtin_transforms(self._registry)
         self._transform_model = TransformSpecModel(self._registry, parent=self)
@@ -189,7 +197,7 @@ class AppController(QObject):
     @Property(bool, notify=selectedTrackCanRerunChanged)
     def selectedTrackCanRerun(self) -> bool:
         track = find_track(self._project, self._selected_track_id)
-        return track is not None and bool(track.transform_id) and self._track_inputs_are_complete(track)
+        return self._track_can_rerun(track)
 
     @Property(bool, notify=selectedTrackIdChanged)
     def selectedTrackIsEditable(self) -> bool:
@@ -323,8 +331,31 @@ class AppController(QObject):
         )
         waveform.result_state = ResultState.COMPLETE
         self._attach_demo_waveform(waveform)
-        self._track_model.set_project(self._project)
-        self._refresh_visible_waveforms()
+        drums = add_generated_track(
+            self._project,
+            parent_track_id=source.id,
+            name="Drums Stem",
+            transform_id="audio.drums_stand_in",
+            transform_params={},
+            transform_version="1",
+            output_schema="artifact.audio.v1",
+            dependency_hash="demo-drums",
+        )
+        drums.result_state = ResultState.PENDING
+        add_generated_track(
+            self._project,
+            parent_track_id=drums.id,
+            name="Drum Energy",
+            transform_id="music.energy_profile",
+            transform_params={},
+            transform_version="1",
+            output_schema="artifact.energy.v1",
+            dependency_hash="demo-drum-energy",
+        )
+        self._project.ui_state["expanded_track_ids"] = [source.id, drums.id]
+        self._load_all_analysis_artifacts()
+        self._set_track_model_project()
+        self._refresh_visible_viewport_artifacts()
         self._set_selected_track_id(source.id)
         self._notify_timeline_duration_changed()
         self._set_last_error("")
@@ -363,7 +394,7 @@ class AppController(QObject):
                 output_schema="markers.v1",
                 dependency_hash=dependency_hash,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(parent.id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -382,7 +413,7 @@ class AppController(QObject):
             transform_id = "stems.vocals_stand_in"
             transform_version = "1"
             params = {"label": "vocals"}
-            self._require_source_audio_path_for_track(parent)
+            self._transform_input_resolver().audio_path_for_track(parent)
             dependency_hash = track_dependency_hash(
                 track_dependency_inputs(self._project, parent),
                 transform_id,
@@ -399,7 +430,7 @@ class AppController(QObject):
                 output_schema="artifact.stem.v1",
                 dependency_hash=dependency_hash,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(parent.id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -436,7 +467,7 @@ class AppController(QObject):
                 output_schema=spec.output_schema,
                 dependency_hash=dependency_hash,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(parent.id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -462,7 +493,7 @@ class AppController(QObject):
                 "Editable Cues",
                 marker_ids,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(source_track_id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -482,7 +513,8 @@ class AppController(QObject):
                 name or "Manual Cues",
             )
             track_index = self._project.tracks.index(track)
-            self.trackModel.set_project(self._project)
+            parent_track_id = track.input_track_ids[0] if track.input_track_ids else ""
+            self._expand_parent_for_new_child(parent_track_id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._push_track_creation_command(track, track_index)
@@ -837,10 +869,25 @@ class AppController(QObject):
 
     @Slot(int, int)
     def set_timeline_visible_track_range(self, first_row: int, row_count: int) -> None:
-        start = max(0, min(int(first_row), len(self._project.tracks)))
-        count = max(0, int(row_count))
-        stop = min(len(self._project.tracks), start + count)
-        self._visible_track_ids = [track.id for track in self._project.tracks[start:stop]]
+        self._visible_track_range = (first_row, row_count)
+        self._refresh_snap_visible_track_ids()
+
+    @Slot(str, bool, result=bool)
+    def set_track_expanded(self, track_id: str, expanded: bool) -> bool:
+        changed = self._track_model.set_track_expanded(track_id, expanded)
+        if changed:
+            self._refresh_snap_visible_track_ids()
+            if (
+                not expanded
+                and self._selected_track_id
+                and self._selected_track_id not in self._visible_track_id_set()
+            ):
+                self._set_selected_track_id(track_id)
+            if not isinstance(self._project.ui_state, dict):
+                self._project.ui_state = {}
+            self._project.ui_state["expanded_track_ids"] = self._track_model.expanded_track_ids()
+            self._mark_non_history_dirty()
+        return changed
 
     @Slot(str, result=str)
     def run_track(self, track_id: str) -> str:
@@ -876,7 +923,8 @@ class AppController(QObject):
         try:
             invalid_refs = self._job_queue.refresh_cache_validity(self._project)
             self._load_all_waveform_samples()
-            self._refresh_visible_waveforms()
+            self._load_all_analysis_artifacts()
+            self._refresh_visible_viewport_artifacts()
             self._track_model.set_project(self._project)
             self.selectedTrackCanRerunChanged.emit()
             if invalid_refs:
@@ -898,7 +946,7 @@ class AppController(QObject):
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
-            self._refresh_visible_waveforms()
+            self._refresh_visible_viewport_artifacts()
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
@@ -917,7 +965,7 @@ class AppController(QObject):
                 return False
             self._reconcile_selection_with_project()
             self.trackModel.set_project(self._project)
-            self._refresh_visible_waveforms()
+            self._refresh_visible_viewport_artifacts()
             self.selectedTrackMarkersChanged.emit()
             self._notify_timeline_duration_changed()
             self._notify_history_changed()
@@ -1002,7 +1050,7 @@ class AppController(QObject):
             self._timeline_visible_seconds = next_visible_seconds
             self.timelineVisibleSecondsChanged.emit()
         self._set_timeline_scroll_seconds(next_scroll, refresh_visible_waveforms=False)
-        self._refresh_visible_waveforms()
+        self._refresh_visible_viewport_artifacts()
 
     @Slot(float)
     def set_timeline_scroll_seconds(self, seconds: float) -> None:
@@ -1027,7 +1075,7 @@ class AppController(QObject):
         self._timeline_scroll_seconds = clamped
         self.timelineScrollSecondsChanged.emit()
         if refresh_visible_waveforms:
-            self._refresh_visible_waveforms()
+            self._refresh_visible_viewport_artifacts()
 
     @Slot(float)
     def set_timeline_visible_seconds(self, seconds: float) -> None:
@@ -1043,7 +1091,7 @@ class AppController(QObject):
             self._timeline_scroll_seconds,
             refresh_visible_waveforms=False,
         )
-        self._refresh_visible_waveforms()
+        self._refresh_visible_viewport_artifacts()
 
     @Slot()
     def cleanup(self) -> None:
@@ -1059,11 +1107,13 @@ class AppController(QObject):
         self._project = project
         self._session.project = project
         self._visible_track_ids = None
+        self._visible_track_range = None
         self._load_all_waveform_samples()
-        self._track_model.set_project(self._project)
+        self._set_track_model_project()
         self.set_timeline_zoom(TIMELINE_DEFAULT_PIXELS_PER_SECOND)
         self._timeline_scroll_seconds = 0.0
-        self._refresh_visible_waveforms()
+        self._load_all_analysis_artifacts()
+        self._refresh_visible_viewport_artifacts()
         self._set_selected_track_id("")
         self.projectNameChanged.emit()
         self.selectedTrackCanRerunChanged.emit()
@@ -1072,10 +1122,35 @@ class AppController(QObject):
         self.timelineScrollSecondsChanged.emit()
         if restore_ui_state:
             self._restore_timeline_ui_state()
-            self._refresh_visible_waveforms()
+            self._load_all_analysis_artifacts()
+            self._refresh_visible_viewport_artifacts()
         self._edit_history.clear()
         self._non_history_dirty = False
         self._notify_history_changed()
+
+    def _set_track_model_project(self) -> None:
+        ui_state = self._project.ui_state
+        expanded_ids = (
+            ui_state.get("expanded_track_ids")
+            if isinstance(ui_state, dict)
+            else None
+        )
+        if not isinstance(expanded_ids, list):
+            self._reset_track_model_expansion_defaults()
+            self._track_model.set_project(self._project)
+            return
+        self._track_model.set_project(self._project)
+        self._track_model.set_expanded_track_ids([str(track_id) for track_id in expanded_ids])
+
+    def _reset_track_model_expansion_defaults(self) -> None:
+        self._track_model.reset_expansion_defaults()
+
+    def _expand_parent_for_new_child(self, parent_track_id: str) -> None:
+        if not self._track_model.expand_parent_for_new_child(parent_track_id):
+            return
+        if not isinstance(self._project.ui_state, dict):
+            self._project.ui_state = {}
+        self._project.ui_state["expanded_track_ids"] = self._track_model.expanded_track_ids()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
@@ -1115,6 +1190,17 @@ class AppController(QObject):
             return [track.id for track in self._project.tracks]
         current_track_ids = {track.id for track in self._project.tracks}
         return [track_id for track_id in self._visible_track_ids if track_id in current_track_ids]
+
+    def _refresh_snap_visible_track_ids(self) -> None:
+        if self._visible_track_range is None:
+            self._visible_track_ids = None
+            return
+        first_row, row_count = self._visible_track_range
+        self._visible_track_ids = self._track_model.visible_track_ids(first_row, row_count)
+
+    def _visible_track_id_set(self) -> set[str]:
+        row_count = self._track_model.rowCount()
+        return set(self._track_model.visible_track_ids(0, row_count))
 
     def _set_dirty(self, dirty: bool) -> None:
         if self._is_dirty == dirty:
@@ -1187,7 +1273,7 @@ class AppController(QObject):
             self._timeline_scroll_seconds,
             refresh_visible_waveforms=False,
         )
-        self._refresh_visible_waveforms()
+        self._refresh_visible_viewport_artifacts()
 
     @staticmethod
     def _optional_float(value) -> float | None:
@@ -1207,7 +1293,9 @@ class AppController(QObject):
     @Slot(str)
     def _handle_track_changed(self, track_id: str) -> None:
         self._load_waveform_samples(track_id)
+        self._load_analysis_artifacts(track_id, refresh=False)
         self._refresh_visible_waveforms(track_ids={track_id})
+        self._refresh_visible_analysis_artifacts(track_ids={track_id})
         self._track_model.trackChangedRequested.emit(track_id)
         self.selectedTrackCanRerunChanged.emit()
         self._notify_timeline_duration_changed()
@@ -1218,9 +1306,12 @@ class AppController(QObject):
     def _params_with_parent_defaults(self, parent, spec, params: dict) -> dict:
         enriched = dict(params)
         if spec.input_schema == "audio.v1":
-            self._require_source_audio_path_for_track(parent)
+            self._transform_input_resolver().audio_path_for_track(parent)
             enriched.pop("audio_path", None)
         return enriched
+
+    def _transform_input_resolver(self) -> TransformInputResolver:
+        return TransformInputResolver(self._project, self._job_queue.cache_store)
 
     def _require_source_audio_path_for_track(self, track) -> str:
         audio_path = self._source_audio_path_for_track(track)
@@ -1393,6 +1484,123 @@ class AppController(QObject):
         if seconds > self._timeline_scroll_seconds + visible_seconds:
             return seconds - visible_seconds
         return self._timeline_scroll_seconds
+
+    def _refresh_visible_viewport_artifacts(self) -> None:
+        self._refresh_visible_waveforms()
+        self._refresh_visible_analysis_artifacts()
+
+    def _load_all_analysis_artifacts(self) -> None:
+        for track in self._project.tracks:
+            self._load_analysis_artifacts(track.id, refresh=False)
+        self._refresh_visible_analysis_artifacts()
+
+    def _load_analysis_artifacts(self, track_id: str, *, refresh: bool = True) -> None:
+        track = find_track(self._project, track_id)
+        if track is None:
+            return
+        for artifact_kind in ANALYSIS_ARTIFACT_PROVENANCE:
+            payload_key, _visible_key = ANALYSIS_ARTIFACT_PROVENANCE[artifact_kind]
+            payload_record = self._load_analysis_payload_record(track, artifact_kind)
+            if payload_record is None:
+                track.provenance.pop(payload_key, None)
+            else:
+                track.provenance[payload_key] = payload_record
+        if refresh:
+            self._refresh_visible_analysis_artifacts(track_ids={track_id})
+
+    def _load_analysis_payload_record(self, track, artifact_kind: str) -> dict | None:
+        if track.result_state != ResultState.COMPLETE:
+            return None
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        for cache_ref in track.cache_refs:
+            entry = entries.get(cache_ref)
+            if (
+                entry is None
+                or entry.artifact_kind != artifact_kind
+                or entry.validation_status != "valid"
+            ):
+                continue
+            try:
+                path = self._job_queue.cache_store.artifact_path(entry)
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            return {
+                "artifact_kind": artifact_kind,
+                "cache_ref": entry.id,
+                "payload_digest": entry.payload_digest,
+                "payload": payload,
+            }
+        return None
+
+    def _refresh_visible_analysis_artifacts(self, track_ids: set[str] | None = None) -> None:
+        for track in self._project.tracks:
+            if track_ids is not None and track.id not in track_ids:
+                continue
+            changed = False
+            for artifact_kind, (payload_key, visible_key) in ANALYSIS_ARTIFACT_PROVENANCE.items():
+                payload_record = track.provenance.get(payload_key)
+                if not self._analysis_payload_record_matches_current_artifact(
+                    track,
+                    artifact_kind,
+                    payload_record,
+                ):
+                    track.provenance.pop(payload_key, None)
+                    if track.provenance.pop(visible_key, None) is not None:
+                        changed = True
+                    continue
+                payload = payload_record["payload"]
+                visible = self._analysis_lod.visible_frames(
+                    payload,
+                    scroll_seconds=self._timeline_scroll_seconds,
+                    visible_seconds=self._visible_timeline_seconds(),
+                )
+                visible["artifact_kind"] = artifact_kind
+                visible["cache_ref"] = payload_record["cache_ref"]
+                visible["payload_digest"] = payload_record.get("payload_digest", "")
+                visible["scroll_seconds"] = self._timeline_scroll_seconds
+                visible["visible_seconds"] = self._visible_timeline_seconds()
+                if track.provenance.get(visible_key) != visible:
+                    track.provenance[visible_key] = visible
+                    changed = True
+            if changed:
+                self.trackModel.refresh_track(track.id)
+
+    def _analysis_payload_record_matches_current_artifact(
+        self,
+        track,
+        artifact_kind: str,
+        payload_record,
+    ) -> bool:
+        if track.result_state != ResultState.COMPLETE or not isinstance(payload_record, dict):
+            return False
+        if payload_record.get("artifact_kind") != artifact_kind:
+            return False
+        payload = payload_record.get("payload")
+        if not isinstance(payload, dict):
+            return False
+        entry = self._valid_analysis_entry_for_record(track, artifact_kind, payload_record)
+        return entry is not None
+
+    def _valid_analysis_entry_for_record(self, track, artifact_kind: str, payload_record: dict):
+        cache_ref = payload_record.get("cache_ref")
+        if not isinstance(cache_ref, str):
+            return None
+        entries = {entry.id: entry for entry in self._project.cache_entries}
+        entry = entries.get(cache_ref)
+        if (
+            entry is None
+            or cache_ref not in track.cache_refs
+            or entry.artifact_kind != artifact_kind
+            or entry.validation_status != "valid"
+        ):
+            return None
+        payload_digest = payload_record.get("payload_digest", "")
+        if payload_digest and entry.payload_digest and payload_digest != entry.payload_digest:
+            return None
+        return entry
 
     def _refresh_visible_waveforms(self, track_ids: set[str] | None = None) -> None:
         for track in self._project.tracks:
@@ -1602,8 +1810,28 @@ class AppController(QObject):
         spec = self._registry.get(track.transform_id, version=track.transform_version)
         if spec.input_schema == "audio.v1":
             params.pop("audio_path", None)
-            params["audio_path"] = self._require_source_audio_path_for_track(track)
+            parent = self._audio_input_parent_for_track(track)
+            params["audio_path"] = self._transform_input_resolver().audio_path_for_track(parent)
         return params
+
+    def _track_can_rerun(self, track) -> bool:
+        if track is None or not track.transform_id or not self._track_inputs_are_complete(track):
+            return False
+        try:
+            spec = self._registry.get(track.transform_id, version=track.transform_version)
+            if spec.input_schema == "audio.v1":
+                self._transform_input_resolver().audio_path_for_track(self._audio_input_parent_for_track(track))
+        except Exception:
+            return False
+        return True
+
+    def _audio_input_parent_for_track(self, track):
+        if not track.input_track_ids:
+            return track
+        parent = find_track(self._project, track.input_track_ids[0])
+        if parent is None:
+            raise ValueError(f"parent track not found: {track.input_track_ids[0]}")
+        return parent
 
     def _dependency_transform_params_for_track(self, track) -> dict:
         params = dict(track.transform_params)
