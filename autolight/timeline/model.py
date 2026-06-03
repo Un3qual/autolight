@@ -190,6 +190,23 @@ class TimelineTrackModel(QAbstractListModel):
         self._expanded_track_ids = set()
         self._has_explicit_expansion_state = False
 
+    def expand_parent_for_new_child(self, parent_track_id: str) -> bool:
+        if self._project is None:
+            return False
+        if not self._has_explicit_expansion_state:
+            self.set_project(self._project)
+            return False
+        known_track_ids = {track.id for track in self._project.tracks}
+        if parent_track_id not in known_track_ids:
+            return False
+        self._expanded_track_ids.add(parent_track_id)
+        self._prune_expanded_track_ids()
+        self.beginResetModel()
+        self._rebuild_tree_projection()
+        self._generation += 1
+        self.endResetModel()
+        return True
+
     def set_expanded_track_ids(self, track_ids: list[str]) -> None:
         self._has_explicit_expansion_state = True
         self._expanded_track_ids = {str(track_id) for track_id in track_ids}

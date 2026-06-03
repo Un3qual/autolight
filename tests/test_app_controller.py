@@ -2415,8 +2415,13 @@ class AppControllerTest(unittest.TestCase):
         editable_id = controller.create_editable_track_from_track(generated_id)
 
         self.assertNotEqual(editable_id, "")
-        self.assertEqual(controller.trackModel.rowCount(), 5)
+        self.assertEqual(controller.trackModel.rowCount(), 7)
         self.assertEqual(controller.selectedTrackId, editable_id)
+        self.assertEqual(
+            self._track_id(controller, self._track_model_row_by_id(controller, editable_id)),
+            editable_id,
+        )
+        self.assertIn(generated_id, controller._project.ui_state["expanded_track_ids"])
         editable = self._track_by_id(controller, editable_id)
         self.assertEqual(editable.input_track_ids, [generated_id])
         self.assertEqual(editable.result_state, ResultState.COMPLETE)
@@ -2676,6 +2681,88 @@ class AppControllerTest(unittest.TestCase):
         self.assertEqual(controller.trackModel.rowCount(), 3)
         self.assertIn(source_id, controller._project.ui_state["expanded_track_ids"])
         self.assertEqual(existing_child.input_track_ids, [source_id])
+
+    def test_controller_expands_collapsed_parent_when_fixed_interval_child_is_added(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            existing_child = add_generated_track(
+                controller._project,
+                source_id,
+                "Existing Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "existing-dep",
+            )
+            controller.trackModel.set_project(controller._project)
+            self.assertTrue(controller.set_track_expanded(source_id, False))
+            self.assertEqual(controller.trackModel.rowCount(), 1)
+
+            child_id = controller.add_fixed_interval_track(source_id, 1.0, 0.5)
+
+        self.assertNotEqual(child_id, "")
+        self.assertEqual(controller.selectedTrackId, child_id)
+        self.assertEqual(controller.trackModel.rowCount(), 3)
+        self.assertEqual(
+            self._track_id(controller, self._track_model_row_by_id(controller, child_id)),
+            child_id,
+        )
+        self.assertIn(source_id, controller._project.ui_state["expanded_track_ids"])
+        self.assertEqual(existing_child.input_track_ids, [source_id])
+
+    def test_controller_expands_collapsed_parent_when_manual_child_is_added(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+            existing_child = add_generated_track(
+                controller._project,
+                source_id,
+                "Existing Child",
+                "markers.fixed_interval",
+                {},
+                "1",
+                "markers.v1",
+                "existing-dep",
+            )
+            controller.trackModel.set_project(controller._project)
+            self.assertTrue(controller.set_track_expanded(source_id, False))
+            controller.select_track(source_id)
+            self.assertEqual(controller.trackModel.rowCount(), 1)
+
+            child_id = controller.add_manual_cue_track("Manual Cues")
+
+        self.assertNotEqual(child_id, "")
+        self.assertEqual(controller.selectedTrackId, child_id)
+        self.assertEqual(controller.trackModel.rowCount(), 3)
+        self.assertEqual(
+            self._track_id(controller, self._track_model_row_by_id(controller, child_id)),
+            child_id,
+        )
+        self.assertIn(source_id, controller._project.ui_state["expanded_track_ids"])
+        self.assertEqual(existing_child.input_track_ids, [source_id])
+
+    def test_controller_child_creation_preserves_default_expansion_state(self):
+        controller = self._controller()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_audio = Path(tmp) / "song.wav"
+            write_wav(source_audio)
+            source_id = controller.import_audio(str(source_audio))
+
+            child_id = controller.add_transform_track(source_id, "markers.fixed_interval", "1", "{}")
+
+        self.assertNotEqual(child_id, "")
+        self.assertEqual(controller.selectedTrackId, child_id)
+        self.assertEqual(
+            self._track_id(controller, self._track_model_row_by_id(controller, child_id)),
+            child_id,
+        )
+        self.assertNotIn("expanded_track_ids", controller._project.ui_state)
 
     def test_controller_persists_timeline_tree_expansion_state(self):
         controller = self._controller()

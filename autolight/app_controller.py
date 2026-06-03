@@ -394,7 +394,7 @@ class AppController(QObject):
                 output_schema="markers.v1",
                 dependency_hash=dependency_hash,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(parent.id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -431,7 +431,6 @@ class AppController(QObject):
                 dependency_hash=dependency_hash,
             )
             self._expand_parent_for_new_child(parent.id)
-            self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -469,7 +468,6 @@ class AppController(QObject):
                 dependency_hash=dependency_hash,
             )
             self._expand_parent_for_new_child(parent.id)
-            self._track_model.set_project(self._project)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -495,7 +493,7 @@ class AppController(QObject):
                 "Editable Cues",
                 marker_ids,
             )
-            self._track_model.set_project(self._project)
+            self._expand_parent_for_new_child(source_track_id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._set_last_error("")
@@ -515,7 +513,8 @@ class AppController(QObject):
                 name or "Manual Cues",
             )
             track_index = self._project.tracks.index(track)
-            self.trackModel.set_project(self._project)
+            parent_track_id = track.input_track_ids[0] if track.input_track_ids else ""
+            self._expand_parent_for_new_child(parent_track_id)
             self._set_selected_track_id(track.id)
             self._notify_timeline_duration_changed()
             self._push_track_creation_command(track, track_index)
@@ -1147,12 +1146,11 @@ class AppController(QObject):
         self._track_model.reset_expansion_defaults()
 
     def _expand_parent_for_new_child(self, parent_track_id: str) -> None:
-        expanded_ids = set(self._track_model.expanded_track_ids())
-        expanded_ids.add(parent_track_id)
-        self._track_model.set_expanded_track_ids(sorted(expanded_ids))
+        if not self._track_model.expand_parent_for_new_child(parent_track_id):
+            return
         if not isinstance(self._project.ui_state, dict):
             self._project.ui_state = {}
-        self._project.ui_state["expanded_track_ids"] = sorted(expanded_ids)
+        self._project.ui_state["expanded_track_ids"] = self._track_model.expanded_track_ids()
 
     def _set_project_path(self, path: str) -> None:
         if self._project_path == path:
