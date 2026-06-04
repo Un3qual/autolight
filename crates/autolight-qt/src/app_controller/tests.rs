@@ -576,7 +576,7 @@ fn controller_run_completion_error_refreshes_failed_state() {
         "light",
     );
     state.transform_registry.register(spec.clone()).unwrap();
-    let mut registry = JobRegistry::new();
+    let mut registry = JobRegistry::default();
     registry
         .register(spec, |_context, _params| {
             Ok(TransformResult::markers(vec![
@@ -628,7 +628,7 @@ fn controller_run_track_persists_artifact_payloads_in_project_directory() {
         "light",
     );
     state.transform_registry.register(spec.clone()).unwrap();
-    let mut registry = JobRegistry::new();
+    let mut registry = JobRegistry::default();
     registry
         .register(spec, |_context, _params| {
             Ok(TransformResult::artifact("stem", b"cached stem"))
@@ -676,7 +676,7 @@ fn controller_save_as_copies_cache_artifacts_to_new_project_directory() {
         "light",
     );
     state.transform_registry.register(spec.clone()).unwrap();
-    let mut registry = JobRegistry::new();
+    let mut registry = JobRegistry::default();
     registry
         .register(spec, |_context, _params| {
             Ok(TransformResult::artifact("stem", b"cached stem"))

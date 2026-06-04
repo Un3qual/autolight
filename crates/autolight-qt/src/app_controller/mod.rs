@@ -167,7 +167,7 @@ impl Default for AppControllerState {
             next_asset_number: 1,
             selected_marker_ids: Vec::default(),
             expanded_track_ids: BTreeSet::new(),
-            edit_history: EditHistory::new(),
+            edit_history: EditHistory::default(),
             non_history_dirty: false,
             demo_temp_dir: DemoTempDir::default(),
             timeline,

@@ -19,6 +19,12 @@ Updated: 2026-06-04
 
 ## Completion Update
 
+- 2026-06-04 follow-up: The pushed `263134a` commit resolved GitHub-visible review threads, but the current DeepSource status still reported Rust failed with no GitHub annotations for its outside-diff findings.
+- Changes made: audited the current Rust code for the recurring DeepSource `RS-W1079` empty-`new()` pattern and replaced the remaining local `JobRegistry::new()` / `EditHistory::new()` call sites with `Default`-based construction.
+- Verification:
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 84 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
 - 2026-06-04: Addressed the latest PR #13 bot-review findings from CodeRabbit, Codex, and the pasted DeepSource/Diffray Rust report.
 - Root cause: the post-push async/cache hardening still left edge cases in artifact job preflight, worker-panic terminalization, progress polling dirty-state handling, demo cache materialization, Windows save replacement, cache revalidation, QML temp extraction/path guards, WAV frame validation, and small Rust idioms flagged by DeepSource.
 - Changes made: artifact-producing jobs now require a project/demo cache directory before detaching a worker; progress polling marks non-history dirty without clearing undo/redo; worker join failures terminalize the run/track; demo cache refs are real hash-backed artifacts; Windows save replacement uses replace-existing semantics without deleting the old file first; cache validity refresh can restore recovered entries; QML asset extraction uses a unique directory and exclusive file creation; WAV inspection rejects partial frames; QML timeline guards handle missing/non-array models; runnable transform IDs are shared between the model and job registry; waveform LOD selection is viewport-based; UNC file URLs and relink hints are sanitized; DeepSource clone/map/test-path nits are fixed.

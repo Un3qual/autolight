@@ -16,7 +16,7 @@ const MAX_FIXED_INTERVAL_MARKERS: usize = 100_000;
 const DEFAULT_WAVEFORM_BUCKETS: usize = 512;
 
 pub(super) fn job_registry() -> JobRegistry {
-    let mut registry = JobRegistry::new();
+    let mut registry = JobRegistry::default();
     for spec in TransformRegistry::with_builtin_transforms()
         .specs()
         .into_iter()
