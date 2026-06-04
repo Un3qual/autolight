@@ -31,6 +31,14 @@ pub enum GraphError {
     TrackCacheRefNotFound(String),
     #[error("marker references missing track: {0}")]
     MarkerMissingTrack(String),
+    #[error("marker timestamp must be finite: {0}")]
+    MarkerTimestampNotFinite(String),
+    #[error("marker timestamp must be greater than or equal to zero: {0}")]
+    MarkerTimestampNegative(String),
+    #[error("marker duration must be finite: {0}")]
+    MarkerDurationNotFinite(String),
+    #[error("marker duration must be greater than or equal to zero: {0}")]
+    MarkerDurationNegative(String),
     #[error("job run references missing track: {0}")]
     JobRunMissingTrack(String),
     #[error("job run cache ref not found: {0}")]
@@ -104,6 +112,7 @@ pub fn validate_graph(project: &ProjectDocument) -> Result<(), GraphError> {
         if !track_ids.contains(&marker.track_id) {
             return Err(GraphError::MarkerMissingTrack(marker.track_id.clone()));
         }
+        validate_marker_extent(marker)?;
     }
 
     for run in &project.job_runs {
@@ -418,6 +427,24 @@ fn format_child_state_counts(counts: BTreeMap<&'static str, usize>) -> String {
         .join(", ")
 }
 
+fn validate_marker_extent(marker: &crate::project::Marker) -> Result<(), GraphError> {
+    if !marker.timestamp.is_finite() {
+        return Err(GraphError::MarkerTimestampNotFinite(marker.id.clone()));
+    }
+    if marker.timestamp < 0.0 {
+        return Err(GraphError::MarkerTimestampNegative(marker.id.clone()));
+    }
+    if let Some(duration) = marker.duration {
+        if !duration.is_finite() {
+            return Err(GraphError::MarkerDurationNotFinite(marker.id.clone()));
+        }
+        if duration < 0.0 {
+            return Err(GraphError::MarkerDurationNegative(marker.id.clone()));
+        }
+    }
+    Ok(())
+}
+
 fn validate_source_track(
     track: &Track,
     audio_asset_ids: &BTreeSet<String>,
@@ -549,6 +576,30 @@ mod tests {
         assert!(err
             .to_string()
             .contains("missing input track: track_not_here"));
+    }
+
+    #[test]
+    fn graph_validate_rejects_invalid_marker_extents() {
+        let invalid_cases = [
+            ("marker_nan_timestamp", f64::NAN, Some(0.1), "timestamp"),
+            ("marker_negative_timestamp", -0.1, Some(0.1), "timestamp"),
+            ("marker_nan_duration", 0.1, Some(f64::NAN), "duration"),
+            ("marker_negative_duration", 0.1, Some(-0.1), "duration"),
+        ];
+
+        for (marker_id, timestamp, duration, expected_error) in invalid_cases {
+            let mut project = project_with_source();
+            let mut marker = marker_on_track(marker_id, "track_source", timestamp);
+            marker.duration = duration;
+            project.markers.push(marker);
+
+            let error = validate_graph(&project).unwrap_err().to_string();
+
+            assert!(
+                error.contains(expected_error),
+                "expected {expected_error} error for {marker_id}, got {error}"
+            );
+        }
     }
 
     #[test]

@@ -70,7 +70,13 @@ QtObject {
     function playbackSourceUrl(path) {
         if (path.length === 0) return ""
         if (path.indexOf("file://") === 0) return path
-        var encodedPath = path.split("/").map(function(segment) { return encodeURIComponent(segment) }).join("/")
+        var normalizedPath = path.replace(/\\/g, "/")
+        var encodedPath = normalizedPath.split("/").map(function(segment, index) {
+            if (index === 0 && segment.match(/^[A-Za-z]:$/)) return segment
+            return encodeURIComponent(segment)
+        }).join("/")
+        if (normalizedPath.match(/^[A-Za-z]:\//)) return "file:///" + encodedPath
+        if (normalizedPath.indexOf("//") === 0) return "file:" + encodedPath
         return "file://" + encodedPath
     }
 
@@ -161,7 +167,7 @@ QtObject {
     function set_timeline_scroll_seconds(value) { rustController.applyTimelineScrollSeconds(value); reloadModels() }
     function set_timeline_visible_seconds(value) { rustController.applyTimelineVisibleSeconds(value); reloadModels() }
     function set_timeline_visible_track_range(firstRow, rowCount) { rustController.setTimelineVisibleTrackRange(firstRow, rowCount) }
-    function select_track(trackId) { rustController.selectTrack(trackId); reloadModels() }
+    function select_track(trackId) { rustController.selectTrack(trackId); reloadSelectionModels() }
     function set_track_expanded(trackId, expanded) { var changed = rustController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }
     function snap_timeline_time(seconds, bypassSnap) { return rustController.snapTimelineTime(seconds, bypassSnap) }
     function add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey) { var id = rustController.addMarkerToSelectedTrackWithDuration(timestamp, duration, label, category, colorKey); reloadModels(); return id }

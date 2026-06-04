@@ -2417,10 +2417,18 @@ fn latest_active_job_id(project: &ProjectDocument, track_id: &str) -> Option<Str
 
 fn path_from_qml(path: &str) -> PathBuf {
     let value = path.trim();
-    let path = value
-        .strip_prefix("file://")
-        .map_or_else(|| percent_decode(value), percent_decode);
-    PathBuf::from(path)
+    let path = value.strip_prefix("file://").unwrap_or(value);
+    let decoded = percent_decode(path);
+    PathBuf::from(strip_windows_drive_url_slash(&decoded))
+}
+
+fn strip_windows_drive_url_slash(path: &str) -> &str {
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+        &path[1..]
+    } else {
+        path
+    }
 }
 
 fn current_project_dir(path: &str) -> Option<PathBuf> {
@@ -2869,7 +2877,7 @@ fn round6(value: f64) -> f64 {
 mod tests {
     use serde_json::Value;
 
-    use super::{AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
+    use super::{path_from_qml, AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
     use autolight_core::cache::cache_entry_for_bytes;
     use autolight_core::project::{ResultState, TrackType};
     use autolight_core::transforms::TransformSpec;
@@ -4062,6 +4070,13 @@ mod tests {
     }
 
     #[test]
+    fn controller_decodes_windows_file_urls_to_local_paths() {
+        let path = path_from_qml("file:///C:/Users/me/My%20Song.wav");
+
+        assert_eq!(path.to_string_lossy(), "C:/Users/me/My Song.wav");
+    }
+
+    #[test]
     fn controller_playback_state_transitions_from_selected_track() {
         let root = test_dir("playback");
         let audio_path = root.join("song.wav");
@@ -4272,6 +4287,12 @@ mod tests {
             "onPositionChanged: { rustController.seekPlayback(position / 1000.0); reloadModels() }"
         ));
         assert!(adapter_qml.contains("encodeURIComponent(segment)"));
+        assert!(adapter_qml.contains("path.replace(/\\\\/g, \"/\")"));
+        assert!(adapter_qml.contains("normalizedPath.match(/^[A-Za-z]:\\//)"));
+        assert!(adapter_qml
+            .contains("function select_track(trackId) { rustController.selectTrack(trackId); reloadSelectionModels() }"));
+        assert!(!adapter_qml
+            .contains("function select_track(trackId) { rustController.selectTrack(trackId); reloadModels() }"));
         assert!(!adapter_qml.contains("encodeURI(path)"));
         assert!(adapter_qml.contains("rustController.timelinePixelsPerSecond"));
         assert!(adapter_qml.contains("rustController.timelineScrollSeconds"));
