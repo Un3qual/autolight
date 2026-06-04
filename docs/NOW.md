@@ -28,7 +28,7 @@ uv run python main.py
 
 - 2026-06-04: Addressed a fresh review-bot follow-through pass on PR #13 after commit `97c50c8`.
 - Changes made: fixed job terminal failure/cancel descendant staleness, rejected negative produced marker timestamps, blocked job submission when inputs are not complete, refreshed/marked dirty when `run_next` errors after mutating project state, encoded local playback paths with URL-safe path segments, bounded Rust `markers.fixed_interval` generation to the Python reference marker cap, disabled reruns for incomplete inputs, invalidated snapshot undo after structural non-history project mutations, finalized persisted active jobs on open, validated cache artifact files during open, restored source/dependent tracks when offline audio comes back online, tolerated JSON roundtrip noise in audio duration comparisons, and cleaned up DeepSource-flagged empty `JobRegistry::new()` test initializers.
-- Next batch: none. Re-fetch PR review threads after push and reply/resolve any still-unresolved bot threads.
+- Next batch: none. Final post-push GitHub refresh after replies/resolutions showed no unresolved bot review threads.
 - Verification:
   - `cargo fmt --all`: applied rustfmt changes.
   - `cargo fmt --all -- --check`: passed.
@@ -38,6 +38,7 @@ uv run python main.py
   - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt printed non-fatal audio-device and existing missing `Sans Serif` font alias warnings.
   - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: first failed inside the sandbox because `uv` could not access `/Users/admin/.cache/uv`; rerun outside the sandbox passed. Qt multimedia channel warnings were non-fatal.
   - `git diff --check`: passed.
+  - GitHub review-thread refresh after replies/resolutions: passed, `unresolved_bot_total: 0`.
 
 - 2026-06-04: Addressed review-bot follow-through on PR #13.
 - Changes made: fixed Rust-port review findings for persisted ID seeding, negative marker timestamps, job-run parameter persistence, job-run failure finalization, full cache digest IDs, graph child-state summary precomputation, checked waveform legacy integer fields, zero-count waveform buckets, beat-grid tempo estimation, boundary-only energy peaks, visible-row snapping, WAV import validation/fingerprinting, timeline artifact validation, QML visible track range wiring, WAV-only import filtering, unsupported transform failure handling, loaded-project audio status refresh, cache artifact file validation, QtMultimedia playback transport, root-load checks, and Qt exit-status propagation.
