@@ -40,6 +40,15 @@ const TIMELINE_DEFAULT_VISIBLE_SECONDS: f64 = 8.0;
 const TIMELINE_MIN_VISIBLE_SECONDS: f64 = 0.01;
 const SNAP_THRESHOLD_PIXELS: f64 = 10.0;
 const MAX_FIXED_INTERVAL_MARKERS: usize = 100_000;
+const WAVE_FORMAT_PCM: u16 = 1;
+const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
+const WAVE_FORMAT_EXTENSIBLE: u16 = 0xfffe;
+const WAVE_SUBFORMAT_PCM: [u8; 16] = [
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+];
+const WAVE_SUBFORMAT_IEEE_FLOAT: [u8; 16] = [
+    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+];
 const DEFAULT_MARKER_COLOR: &str = "cyan";
 const MARKER_COLOR_OPTIONS: &[(&str, &str, &str)] = &[
     ("cyan", "Cyan", "#67e8f9"),
@@ -153,7 +162,7 @@ impl AppControllerState {
         self.selected_marker_ids.clear();
         self.unload_playback();
         self.reset_timeline_view_state();
-        self.mark_clean();
+        self.reset_history_clean();
         self.last_error = QString::default();
         self.refresh_view_state();
     }
@@ -167,7 +176,7 @@ impl AppControllerState {
         self.expanded_track_ids.clear();
         self.unload_playback();
         self.reset_timeline_view_state();
-        self.mark_clean();
+        self.reset_history_clean();
         self.last_error = QString::default();
         self.refresh_view_state();
     }
@@ -350,7 +359,7 @@ impl AppControllerState {
         self.restore_timeline_view_state();
         self.selected_marker_ids.clear();
         self.unload_playback();
-        self.mark_clean();
+        self.reset_history_clean();
         if refreshed_audio_assets > 0 || finalized_active_jobs > 0 || !invalid_cache_refs.is_empty()
         {
             self.mark_project_mutation_dirty();
@@ -599,8 +608,9 @@ impl AppControllerState {
     }
 
     fn seek_playback_state(&mut self, seconds: f64) {
-        self.playback_position_seconds =
-            finite_non_negative(seconds).min(self.playback_duration_seconds.max(0.0));
+        let position = finite_non_negative(seconds).min(self.playback_duration_seconds.max(0.0));
+        self.playback_position_seconds = position;
+        self.keep_timeline_time_visible(position);
         self.refresh_selected_state();
     }
 
@@ -699,12 +709,7 @@ impl AppControllerState {
         self.transform_specs_json = QString::from(
             &transform_specs_json(&self.transform_registry).unwrap_or_else(|_| "[]".to_string()),
         );
-        self.timeline_duration_seconds = self
-            .project
-            .audio_assets
-            .iter()
-            .map(|asset| asset.duration)
-            .fold(self.playback_duration_seconds, f64::max);
+        self.timeline_duration_seconds = self.project_timeline_duration_seconds();
         self.clamp_timeline_scroll();
         self.refresh_visible_track_ids();
         self.refresh_selected_state();
@@ -1191,8 +1196,13 @@ impl AppControllerState {
         self.sync_dirty_from_history();
     }
 
-    fn mark_clean(&mut self) {
+    fn reset_history_clean(&mut self) {
         self.edit_history.clear();
+        self.non_history_dirty = false;
+        self.sync_dirty_from_history();
+    }
+
+    fn mark_clean(&mut self) {
         self.edit_history.mark_clean();
         self.non_history_dirty = false;
         self.sync_dirty_from_history();
@@ -1336,6 +1346,32 @@ impl AppControllerState {
     fn clamp_timeline_scroll(&mut self) {
         let max_scroll = (self.timeline_duration_seconds - self.timeline_visible_seconds).max(0.0);
         self.timeline_scroll_seconds = self.timeline_scroll_seconds.clamp(0.0, max_scroll);
+    }
+
+    fn keep_timeline_time_visible(&mut self, seconds: f64) {
+        let visible_seconds = self
+            .timeline_visible_seconds
+            .max(TIMELINE_MIN_VISIBLE_SECONDS);
+        if seconds < self.timeline_scroll_seconds {
+            self.timeline_scroll_seconds = seconds;
+        } else if seconds > self.timeline_scroll_seconds + visible_seconds {
+            self.timeline_scroll_seconds = seconds - visible_seconds;
+        }
+        self.clamp_timeline_scroll();
+    }
+
+    fn project_timeline_duration_seconds(&self) -> f64 {
+        let audio_duration = self
+            .project
+            .audio_assets
+            .iter()
+            .filter_map(|asset| finite_duration(asset.duration))
+            .fold(self.playback_duration_seconds, f64::max);
+        self.project
+            .markers
+            .iter()
+            .filter_map(marker_end_seconds)
+            .fold(audio_duration, f64::max)
     }
 
     fn reconcile_selection_with_project(&mut self) {
@@ -2589,13 +2625,21 @@ fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
                 .read_exact(&mut fmt)
                 .map_err(|error| error.to_string())?;
             let audio_format = u16::from_le_bytes([fmt[0], fmt[1]]);
-            if audio_format != 1 {
-                return Err("unsupported WAV encoding: expected PCM".to_string());
+            let extension_size = chunk_size - 16;
+            let extension_read_size = extension_size.min(24) as usize;
+            let mut extension = vec![0_u8; extension_read_size];
+            if extension_read_size > 0 {
+                reader
+                    .read_exact(&mut extension)
+                    .map_err(|error| error.to_string())?;
+            }
+            if !supported_wav_format(audio_format, &extension) {
+                return Err("unsupported WAV encoding".to_string());
             }
             channels = u16::from_le_bytes([fmt[2], fmt[3]]) as u32;
             sample_rate = u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]);
             bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]) as u32;
-            reader.skip_bytes(chunk_size - 16)?;
+            reader.skip_bytes(extension_size - extension_read_size as u64)?;
         } else if chunk_id == b"data" {
             has_data_chunk = true;
             data_bytes = chunk_size;
@@ -2614,6 +2658,9 @@ fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
     if !has_data_chunk || data_bytes == 0 {
         return Err("invalid WAV data chunk".to_string());
     }
+    if !bits_per_sample.is_multiple_of(8) {
+        return Err("invalid WAV frame size".to_string());
+    }
     let bytes_per_frame = u64::from(channels) * u64::from(bits_per_sample / 8);
     if bytes_per_frame == 0 {
         return Err("invalid WAV frame size".to_string());
@@ -2626,6 +2673,19 @@ fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
         },
         fingerprint: reader.finish(),
     })
+}
+
+fn supported_wav_format(audio_format: u16, extension: &[u8]) -> bool {
+    match audio_format {
+        WAVE_FORMAT_PCM | WAVE_FORMAT_IEEE_FLOAT => true,
+        WAVE_FORMAT_EXTENSIBLE => {
+            let Some(subformat) = extension.get(8..24) else {
+                return false;
+            };
+            subformat == WAVE_SUBFORMAT_PCM || subformat == WAVE_SUBFORMAT_IEEE_FLOAT
+        }
+        _ => false,
+    }
 }
 
 struct HashedReader<R> {
@@ -2676,6 +2736,16 @@ fn finite_non_negative(value: f64) -> f64 {
     } else {
         0.0
     }
+}
+
+fn finite_duration(value: f64) -> Option<f64> {
+    (value.is_finite() && value >= 0.0).then_some(value)
+}
+
+fn marker_end_seconds(marker: &Marker) -> Option<f64> {
+    let timestamp = finite_duration(marker.timestamp)?;
+    let duration = marker.duration.and_then(finite_duration).unwrap_or(0.0);
+    Some(timestamp + duration)
 }
 
 fn marker_color_options_json() -> String {
@@ -2738,7 +2808,7 @@ fn round6(value: f64) -> f64 {
 mod tests {
     use serde_json::Value;
 
-    use super::{AppControllerState, SMOKE_PROJECT_NAME};
+    use super::{AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
     use autolight_core::cache::cache_entry_for_bytes;
     use autolight_core::project::{ResultState, TrackType};
     use autolight_core::transforms::TransformSpec;
@@ -2774,6 +2844,8 @@ mod tests {
             .contains("track_source"));
         assert_eq!(state.timeline_duration_seconds, 2.0);
         assert!(!state.is_dirty);
+        assert!(!state.selected_track_can_play);
+        assert!(state.project.job_runs.is_empty());
     }
 
     #[test]
@@ -2786,6 +2858,18 @@ mod tests {
         assert_eq!(state.selected_track_id.to_string(), "track_edit");
         assert!(state.selected_track_is_editable);
         assert!(!state.selected_track_has_running_job);
+    }
+
+    #[test]
+    fn controller_demo_energy_track_does_not_expose_orphan_cancel() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+
+        state.select_track_state("track_drum_energy");
+        state.cancel_selected_job_state();
+
+        assert!(!state.selected_track_has_running_job);
+        assert!(!state.last_error.to_string().contains("job not found"));
     }
 
     #[test]
@@ -2852,10 +2936,13 @@ mod tests {
 
     #[test]
     fn controller_run_unsupported_builtin_transform_fails_without_empty_completion() {
+        let root = test_dir("unsupported-transform");
+        let audio_path = root.join("song.wav");
+        write_test_wav(&audio_path, 8_000, 1, 8_000);
         let mut state = AppControllerState::default();
-        state.load_demo_project_state();
+        let source_track_id = state.import_audio_state(audio_path.to_str().unwrap());
         let track_id =
-            state.add_transform_track_state("track_source", "waveform.summary", "1", "{}");
+            state.add_transform_track_state(&source_track_id, "waveform.summary", "1", "{}");
 
         let job_id = state.run_track_state(&track_id);
 
@@ -3317,6 +3404,34 @@ mod tests {
     }
 
     #[test]
+    fn controller_save_marks_clean_without_dropping_undo_history() {
+        let root = test_dir("save-preserve-undo");
+        let project_path = root.join("show.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+        let marker_id = state
+            .add_marker_to_selected_track_with_duration_state(1.25, 0.5, "Blackout", "cue", "cyan");
+
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+
+        assert!(!state.is_dirty);
+        assert!(state.can_undo);
+        assert!(state.undo_state());
+        assert!(!state
+            .project
+            .markers
+            .iter()
+            .any(|marker| marker.id == marker_id));
+        assert!(state.is_dirty);
+        assert!(state.can_redo);
+
+        assert!(state.redo_state());
+        assert!(!state.is_dirty);
+        assert!(!state.can_redo);
+    }
+
+    #[test]
     fn controller_collapses_tree_rows_and_reselects_visible_parent() {
         let mut state = AppControllerState::default();
         state.load_demo_project_state();
@@ -3358,6 +3473,53 @@ mod tests {
             state.project.tracks[0].provenance["asset_id"],
             "asset_rust_0001"
         );
+    }
+
+    #[test]
+    fn controller_import_audio_accepts_ieee_float_and_extensible_wav_metadata() {
+        let root = test_dir("import-common-wav-formats");
+        let float_path = root.join("float.wav");
+        let extensible_path = root.join("extensible.wav");
+        write_test_wav_with_format(&float_path, 8_000, 1, 8_000, 3, 32, None);
+        write_test_wav_with_format(
+            &extensible_path,
+            48_000,
+            2,
+            48_000,
+            0xfffe,
+            24,
+            Some(WAVE_SUBFORMAT_PCM),
+        );
+        let mut state = AppControllerState::default();
+
+        let float_track = state.import_audio_state(float_path.to_str().unwrap());
+        let extensible_track = state.import_audio_state(extensible_path.to_str().unwrap());
+
+        assert!(!float_track.is_empty());
+        assert!(!extensible_track.is_empty());
+        assert_eq!(state.project.audio_assets[0].duration, 1.0);
+        assert_eq!(state.project.audio_assets[0].sample_rate, 8_000);
+        assert_eq!(state.project.audio_assets[0].channels, 1);
+        assert_eq!(state.project.audio_assets[1].duration, 1.0);
+        assert_eq!(state.project.audio_assets[1].sample_rate, 48_000);
+        assert_eq!(state.project.audio_assets[1].channels, 2);
+    }
+
+    #[test]
+    fn controller_import_audio_rejects_unknown_wav_encoding() {
+        let root = test_dir("import-unknown-wav-format");
+        let audio_path = root.join("song.wav");
+        write_test_wav_with_format(&audio_path, 8_000, 1, 8_000, 6, 8, None);
+        let mut state = AppControllerState::default();
+
+        let track_id = state.import_audio_state(audio_path.to_str().unwrap());
+
+        assert!(track_id.is_empty());
+        assert!(state
+            .last_error
+            .to_string()
+            .contains("unsupported WAV encoding"));
+        assert!(state.project.audio_assets.is_empty());
     }
 
     #[test]
@@ -3700,6 +3862,38 @@ mod tests {
     }
 
     #[test]
+    fn controller_seek_keeps_playhead_inside_timeline_viewport() {
+        let root = test_dir("seek-scroll");
+        let audio_path = root.join("song.wav");
+        write_test_wav(&audio_path, 8_000, 1, 120_000);
+        let mut state = AppControllerState::default();
+        state.import_audio_state(audio_path.to_str().unwrap());
+        assert!(state.play_selected_track_state());
+        state.set_timeline_visible_seconds_state(4.0);
+
+        state.seek_playback_state(10.0);
+
+        assert_eq!(state.playback_position_seconds, 10.0);
+        assert_eq!(state.timeline_scroll_seconds, 6.0);
+
+        state.nudge_playback_state(-9.0);
+
+        assert_eq!(state.playback_position_seconds, 1.0);
+        assert_eq!(state.timeline_scroll_seconds, 1.0);
+    }
+
+    #[test]
+    fn controller_timeline_duration_includes_marker_extents() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+
+        state.add_marker_to_selected_track_with_duration_state(9.0, 2.5, "Long Cue", "cue", "cyan");
+
+        assert_eq!(state.timeline_duration_seconds, 11.5);
+    }
+
+    #[test]
     fn controller_persists_timeline_viewport_state() {
         let root = test_dir("viewport");
         let audio_path = root.join("song.wav");
@@ -3876,25 +4070,48 @@ mod tests {
     }
 
     fn write_test_wav(path: &std::path::Path, sample_rate: u32, channels: u16, frames: u32) {
+        write_test_wav_with_format(path, sample_rate, channels, frames, 1, 16, None);
+    }
+
+    fn write_test_wav_with_format(
+        path: &std::path::Path,
+        sample_rate: u32,
+        channels: u16,
+        frames: u32,
+        audio_format: u16,
+        bits_per_sample: u16,
+        extensible_subformat: Option<[u8; 16]>,
+    ) {
         use std::io::Write;
 
-        let bits_per_sample = 16_u16;
         let bytes_per_sample = u32::from(bits_per_sample / 8);
         let data_bytes = frames * u32::from(channels) * bytes_per_sample;
         let byte_rate = sample_rate * u32::from(channels) * bytes_per_sample;
         let block_align = channels * (bits_per_sample / 8);
+        let fmt_chunk_size = if extensible_subformat.is_some() {
+            40_u32
+        } else {
+            16_u32
+        };
+        let riff_size = 4 + (8 + fmt_chunk_size) + (8 + data_bytes);
         let mut file = std::fs::File::create(path).unwrap();
         file.write_all(b"RIFF").unwrap();
-        file.write_all(&(36 + data_bytes).to_le_bytes()).unwrap();
+        file.write_all(&riff_size.to_le_bytes()).unwrap();
         file.write_all(b"WAVE").unwrap();
         file.write_all(b"fmt ").unwrap();
-        file.write_all(&16_u32.to_le_bytes()).unwrap();
-        file.write_all(&1_u16.to_le_bytes()).unwrap();
+        file.write_all(&fmt_chunk_size.to_le_bytes()).unwrap();
+        file.write_all(&audio_format.to_le_bytes()).unwrap();
         file.write_all(&channels.to_le_bytes()).unwrap();
         file.write_all(&sample_rate.to_le_bytes()).unwrap();
         file.write_all(&byte_rate.to_le_bytes()).unwrap();
         file.write_all(&block_align.to_le_bytes()).unwrap();
         file.write_all(&bits_per_sample.to_le_bytes()).unwrap();
+        if let Some(subformat) = extensible_subformat {
+            file.write_all(&22_u16.to_le_bytes()).unwrap();
+            file.write_all(&bits_per_sample.to_le_bytes()).unwrap();
+            file.write_all(&0_u32.to_le_bytes()).unwrap();
+            file.write_all(&subformat).unwrap();
+        }
         file.write_all(b"data").unwrap();
         file.write_all(&data_bytes.to_le_bytes()).unwrap();
         file.write_all(&vec![0_u8; data_bytes as usize]).unwrap();

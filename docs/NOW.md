@@ -26,6 +26,19 @@ uv run python main.py
 
 ## Completion Update
 
+- 2026-06-04: Addressed six new unresolved Codex bot review threads on PR #13 after commit `489acff`.
+- Changes made: removed the orphan active demo job and stopped marking the nonexistent demo WAV online; preserved undo/redo stacks after project saves while still resetting history on load/open/new/demo; kept the Rust playhead visible by scrolling the viewport on seek/nudge; included marker end times in Rust timeline duration; accepted PCM, IEEE-float, and WAVE_FORMAT_EXTENSIBLE WAV metadata in the Rust importer while still rejecting unknown encodings; added focused Rust controller/timeline regressions for each review finding.
+- Next batch: none. Push this follow-up, refresh GitHub review threads, reply/resolve the six addressed Codex bot comments, and report any newly surfaced bot comments or external check failures.
+- Verification:
+  - `cargo fmt --all`: applied rustfmt changes.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 51 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 20 `autolight-analysis` tests, 2 `autolight-app` tests, 39 `autolight-core` tests, 19 `autolight-jobs` tests, and 51 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `git diff --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt printed non-fatal audio-device and missing `Sans Serif` font alias warnings.
+  - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: passed outside the sandbox because `uv` needs access to `/Users/admin/.cache/uv`. Qt multimedia channel warnings were non-fatal.
+
 - 2026-06-04: Addressed the latest unresolved Codex bot review threads on PR #13 after commit `32d9bd3`.
 - Changes made: stopped rebuilding the Rust QML `trackModel` for viewport-only visible-row updates; relinked missing source WAVs from the opened project directory when metadata/fingerprint match; persisted produced artifact payload files before recording cache refs; made project saves use a same-directory temp file and atomic replace; validated project graph invariants during load/save; normalized Rust demo and legacy fixture waveform/energy/harmonic payloads into drawable QML sample fields; preserved stale pending generated tracks before starting queued jobs; corrected the Rust README workflow so it no longer advertises unsupported analysis transforms or background execution; removed explicit temp-file `drop` calls flagged by DeepSource by relying on lexical file scopes before rename.
 - Next batch: none. Push this follow-up, refresh GitHub review threads, reply/resolve the addressed bot comments, and report any external check failures that remain outside GitHub-visible inline comments.

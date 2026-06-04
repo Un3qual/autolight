@@ -5,8 +5,7 @@ use autolight_core::graph::{
     default_expanded_track_ids, project_tree, source_track_id_for_context,
 };
 use autolight_core::project::{
-    AudioAsset, CacheEntry, JobRun, JsonObject, Marker, ProjectDocument, ResultState, Track,
-    TrackType,
+    AudioAsset, CacheEntry, JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -59,13 +58,13 @@ pub fn rust_demo_project() -> ProjectDocument {
     let mut project = ProjectDocument::new("project_rust_demo", RUST_DEMO_PROJECT_NAME);
     project.audio_assets.push(AudioAsset {
         id: "asset_demo".to_string(),
-        path: "/fixtures/audio/rust-demo.wav".to_string(),
+        path: "rust-demo.wav".to_string(),
         duration: 2.0,
         sample_rate: 44_100,
         channels: 2,
         fingerprint: "rust-demo-fingerprint".to_string(),
-        import_status: "online".to_string(),
-        relink_hint: String::new(),
+        import_status: "offline".to_string(),
+        relink_hint: "rust-demo.wav".to_string(),
     });
     project.cache_entries.extend([
         cache_entry(
@@ -129,7 +128,7 @@ pub fn rust_demo_project() -> ProjectDocument {
             "music.energy_profile",
             "artifact.energy.v1",
             "dep_energy",
-            ResultState::Pending,
+            ResultState::Complete,
             vec!["cache_energy".to_string()],
             json_object([(
                 "visible_energy",
@@ -192,19 +191,6 @@ pub fn rust_demo_project() -> ProjectDocument {
             vec!["marker_demo_2".to_string()],
         ),
     ]);
-    project.job_runs.push(JobRun {
-        id: "job_drum_energy".to_string(),
-        track_id: "track_drum_energy".to_string(),
-        transform_id: "music.energy_profile".to_string(),
-        parameters_hash: "dep_energy".to_string(),
-        parameters: JsonObject::new(),
-        state: ResultState::Pending,
-        progress: 0.0,
-        started_at: String::new(),
-        completed_at: String::new(),
-        error: String::new(),
-        produced_cache_refs: Vec::new(),
-    });
     project
 }
 
@@ -777,7 +763,26 @@ mod tests {
             [0, 1, 2, 1, 1, 2]
         );
         assert_eq!(rows[0].child_count, 3);
-        assert_eq!(rows[4].visible_child_state_summary, "pending: 1");
+        assert!(rows[4].visible_child_state_summary.is_empty());
+    }
+
+    #[test]
+    fn timeline_demo_project_has_no_fake_active_job_or_online_audio() {
+        let project = rust_demo_project();
+
+        assert!(project.job_runs.is_empty());
+        assert_eq!(project.audio_assets[0].import_status, "offline");
+        assert_eq!(project.audio_assets[0].relink_hint, "rust-demo.wav");
+
+        let rows = timeline_rows_for_project(&project);
+        let energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_drum_energy")
+            .unwrap();
+        assert_eq!(energy.result_state, "complete");
+        assert!(energy.active_job_id.is_empty());
+        assert!(energy.job_state.is_empty());
+        assert_eq!(energy.visible_energy_samples.len(), 2);
     }
 
     #[test]
@@ -949,6 +954,20 @@ mod tests {
     fn timeline_rows_hide_analysis_samples_without_valid_complete_artifacts() {
         let mut project = rust_demo_project();
 
+        let rows = timeline_rows_for_project(&project);
+        let pending_energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_drum_energy")
+            .unwrap();
+        assert_eq!(pending_energy.result_state, "complete");
+        assert!(!pending_energy.visible_energy_samples.is_empty());
+
+        project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drum_energy")
+            .unwrap()
+            .result_state = ResultState::Pending;
         let rows = timeline_rows_for_project(&project);
         let pending_energy = rows
             .iter()
