@@ -48,7 +48,6 @@ pub fn analyze_rhythm_fixture(
 ) -> Result<MusicAnalysisResult, MusicError> {
     validate_positive(max_markers, "max_markers")?;
     raise_if_cancelled(&mut cancel_requested)?;
-    let tempo = estimate_tempo(beat_times);
     let beat_times = beat_times
         .iter()
         .copied()
@@ -56,6 +55,7 @@ pub fn analyze_rhythm_fixture(
         .take(max_markers)
         .map(round6)
         .collect::<Vec<_>>();
+    let tempo = estimate_tempo(&beat_times);
     let markers = beat_times
         .iter()
         .enumerate()
@@ -255,9 +255,12 @@ fn energy_markers(frames: &[Value], max_markers: usize) -> Vec<AnalysisMarker> {
         .iter()
         .enumerate()
         .filter(|(index, value)| {
+            if *index == 0 || *index + 1 >= intensities.len() {
+                return false;
+            }
             **value >= threshold
-                && **value >= intensities[index.saturating_sub(1)]
-                && **value >= intensities[(*index + 1).min(intensities.len() - 1)]
+                && **value >= intensities[index - 1]
+                && **value >= intensities[index + 1]
         })
         .take(max_markers)
         .map(|(index, value)| {
@@ -479,6 +482,28 @@ mod tests {
             .markers
             .iter()
             .all(|marker| !marker.metadata.contains_key("meter")));
+    }
+
+    #[test]
+    fn music_beat_grid_tempo_uses_emitted_filtered_beats() {
+        let result =
+            analyze_rhythm_fixture(4.0, &[-1.0, 0.0, 0.5, f64::NAN, 9.0], 2, || false).unwrap();
+
+        assert_eq!(result.payload["beat_times"], json!([0.0, 0.5]));
+        assert_eq!(result.payload["tempo"], json!(120.0));
+        assert_eq!(result.markers[0].metadata["tempo"], json!(120.0));
+    }
+
+    #[test]
+    fn music_energy_peak_detection_excludes_boundary_only_peaks() {
+        let first_only = analyze_energy_fixture(2.0, &[1.0, 0.0, 0.0], 32, 8, || false).unwrap();
+        let last_only = analyze_energy_fixture(2.0, &[0.0, 0.0, 1.0], 32, 8, || false).unwrap();
+        let interior = analyze_energy_fixture(2.0, &[0.0, 1.0, 0.0], 32, 8, || false).unwrap();
+
+        assert!(first_only.markers.is_empty());
+        assert!(last_only.markers.is_empty());
+        assert_eq!(interior.markers.len(), 1);
+        assert_eq!(interior.markers[0].category, "energy_peak");
     }
 
     #[test]

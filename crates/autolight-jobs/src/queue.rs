@@ -231,6 +231,7 @@ impl LocalJobQueue {
         track_id: &str,
         runtime_params: JsonObject,
     ) -> Result<String, JobQueueError> {
+        self.seed_next_job_number(project);
         if has_active_job(project, track_id) {
             return Err(JobQueueError::DuplicateRunningTrack(track_id.to_string()));
         }
@@ -266,6 +267,7 @@ impl LocalJobQueue {
             track_id: track_id.to_string(),
             transform_id: snapshot.transform_id,
             parameters_hash: dependency_hash,
+            parameters: run_params,
             state: ResultState::Pending,
             progress: 0.0,
             started_at: String::new(),
@@ -324,7 +326,15 @@ impl LocalJobQueue {
         }
 
         match result {
-            Ok(result) => self.complete_success(project, &job_id, context.progress(), result)?,
+            Ok(result) => {
+                if let Err(error) =
+                    self.complete_success(project, &job_id, context.progress(), result)
+                {
+                    let message = error.to_string();
+                    self.complete_failed(project, &job_id, &message)?;
+                    return Err(error);
+                }
+            }
             Err(TransformRunError::Cancelled) => {
                 self.complete_cancelled(project, &job_id, "cancelled")?;
             }
@@ -501,6 +511,18 @@ impl LocalJobQueue {
         job_id
     }
 
+    fn seed_next_job_number(&mut self, project: &ProjectDocument) {
+        let next_from_project = project
+            .job_runs
+            .iter()
+            .filter_map(|run| run.id.strip_prefix("job_"))
+            .filter_map(|suffix| suffix.parse::<u64>().ok())
+            .max()
+            .map(|value| value + 1)
+            .unwrap_or(1);
+        self.next_job_number = self.next_job_number.max(next_from_project);
+    }
+
     fn timestamp(&mut self) -> String {
         (self.now)()
     }
@@ -554,7 +576,11 @@ fn run_snapshot(project: &ProjectDocument, job_id: &str) -> Result<RunSnapshot, 
         transform_id: run.transform_id.clone(),
         transform_version: track.transform_version.clone(),
         parameters_hash: run.parameters_hash.clone(),
-        params: track.transform_params.clone(),
+        params: if run.parameters.is_empty() {
+            track.transform_params.clone()
+        } else {
+            run.parameters.clone()
+        },
     })
 }
 
@@ -809,8 +835,40 @@ mod tests {
         let error = queue.run_next(&mut project).unwrap_err();
 
         assert!(error.to_string().contains("finite"));
-        assert_eq!(job_state(&project, &job_id), ResultState::Running);
+        assert_eq!(job_state(&project, &job_id), ResultState::Failed);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Failed
+        );
+        assert!(track_by_id(&project, "track_generated")
+            .error
+            .contains("finite"));
         assert!(project.markers.is_empty());
+        assert!(queue.submit(&mut project, "track_generated").is_ok());
+    }
+
+    #[test]
+    fn jobs_invalid_artifact_failure_does_not_leave_track_running() {
+        let mut registry = JobRegistry::new();
+        registry
+            .register(test_spec("test.bad_artifact"), |_context, _params| {
+                Ok(TransformResult::artifact("../bad", b"bad artifact"))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.bad_artifact");
+        let mut queue = LocalJobQueue::with_clock(registry, deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        let error = queue.run_next(&mut project).unwrap_err();
+
+        assert!(error.to_string().contains("invalid artifact kind"));
+        assert_eq!(job_state(&project, &job_id), ResultState::Failed);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Failed
+        );
+        assert!(project.cache_entries.is_empty());
+        assert!(queue.submit(&mut project, "track_generated").is_ok());
     }
 
     #[test]
@@ -918,6 +976,69 @@ mod tests {
         assert!(!track_by_id(&project, "track_generated")
             .dependency_hash
             .is_empty());
+    }
+
+    #[test]
+    fn jobs_seed_ids_from_persisted_job_runs() {
+        let mut project = project_with_generated_track("test.noop");
+        let mut first_queue =
+            LocalJobQueue::with_clock(registry_with_noop("test.noop"), deterministic_clock());
+
+        let first_job_id = first_queue.submit(&mut project, "track_generated").unwrap();
+        first_queue.run_next(&mut project).unwrap();
+        let mut fresh_queue =
+            LocalJobQueue::with_clock(registry_with_noop("test.noop"), deterministic_clock());
+        let second_job_id = fresh_queue.submit(&mut project, "track_generated").unwrap();
+
+        assert_eq!(first_job_id, "job_0001");
+        assert_eq!(second_job_id, "job_0002");
+        let unique_ids = project
+            .job_runs
+            .iter()
+            .map(|run| run.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique_ids.len(), project.job_runs.len());
+    }
+
+    #[test]
+    fn jobs_runtime_only_params_reach_runner_without_changing_saved_params() {
+        let mut registry = JobRegistry::new();
+        registry
+            .register(test_spec("test.runtime_param"), |_context, params| {
+                let label = params
+                    .get("audio_path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("missing")
+                    .to_string();
+                Ok(TransformResult::markers(vec![ProducedMarker::new(
+                    0.0, label,
+                )]))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.runtime_param");
+        track_by_id_mut(&mut project, "track_generated")
+            .transform_params
+            .insert("audio_path".to_string(), json!("/old.wav"));
+        let mut queue = LocalJobQueue::new(registry);
+
+        let job_id = queue
+            .submit_with_runtime_params(
+                &mut project,
+                "track_generated",
+                object(json!({"audio_path": "/new.wav"})),
+            )
+            .unwrap();
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(project.markers[0].label, "/new.wav");
+        assert_eq!(
+            track_by_id(&project, "track_generated").transform_params["audio_path"],
+            json!("/old.wav")
+        );
+        assert_eq!(
+            run_by_id(&project, &job_id).parameters["audio_path"],
+            "/new.wav"
+        );
     }
 
     fn registry_with_noop(transform_id: &str) -> JobRegistry {

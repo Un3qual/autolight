@@ -101,6 +101,7 @@ pub fn rust_demo_project() -> ProjectDocument {
                 "visible_waveform",
                 json!({
                     "duration_seconds": 2.0,
+                    "level_bucket_count": 64,
                     "samples": [
                         {"min": -0.1, "max": 0.2},
                         {"min": -0.3, "max": 0.4}
@@ -194,6 +195,7 @@ pub fn rust_demo_project() -> ProjectDocument {
         track_id: "track_drum_energy".to_string(),
         transform_id: "music.energy_profile".to_string(),
         parameters_hash: "dep_energy".to_string(),
+        parameters: JsonObject::new(),
         state: ResultState::Pending,
         progress: 0.0,
         started_at: String::new(),
@@ -255,8 +257,8 @@ pub fn timeline_rows_for_project_with_state(
                 artifact_kinds: artifact_kinds_for_track(project, track).join(", "),
                 waveform_duration_seconds: waveform_duration_seconds(track),
                 editable: track.track_type == TrackType::Editable,
-                visible_waveform_samples: visible_waveform_samples(track),
-                waveform_level_bucket_count: 0,
+                visible_waveform_samples: visible_waveform_samples(project, track),
+                waveform_level_bucket_count: waveform_level_bucket_count(project, track),
                 parent_track_id: tree_row.parent_track_id,
                 depth: tree_row.depth,
                 has_children: tree_row.has_children,
@@ -264,8 +266,9 @@ pub fn timeline_rows_for_project_with_state(
                 child_count: tree_row.child_count,
                 visible_child_state_summary: tree_row.visible_child_state_summary,
                 tree_error: tree_row.tree_error,
-                visible_energy_samples: visible_analysis_samples(track, "visible_energy"),
+                visible_energy_samples: visible_analysis_samples(project, track, "visible_energy"),
                 visible_harmonic_color_samples: visible_analysis_samples(
+                    project,
                     track,
                     "visible_harmonic_color",
                 ),
@@ -437,7 +440,10 @@ fn waveform_duration_seconds(track: &Track) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn visible_waveform_samples(track: &Track) -> Vec<Value> {
+fn visible_waveform_samples(project: &ProjectDocument, track: &Track) -> Vec<Value> {
+    if !track_has_valid_complete_artifact(project, track, "waveform") {
+        return Vec::new();
+    }
     track
         .provenance
         .get("visible_waveform")
@@ -447,13 +453,58 @@ fn visible_waveform_samples(track: &Track) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn visible_analysis_samples(track: &Track, key: &str) -> Vec<Value> {
+fn waveform_level_bucket_count(project: &ProjectDocument, track: &Track) -> usize {
+    if !track_has_valid_complete_artifact(project, track, "waveform") {
+        return 0;
+    }
+    track
+        .provenance
+        .get("visible_waveform")
+        .and_then(|value| {
+            value
+                .get("level_bucket_count")
+                .or_else(|| value.get("levelBucketCount"))
+        })
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0)
+}
+
+fn visible_analysis_samples(project: &ProjectDocument, track: &Track, key: &str) -> Vec<Value> {
+    let expected_kind = match key {
+        "visible_energy" => "energy",
+        "visible_harmonic_color" => "harmonic-color",
+        _ => return Vec::new(),
+    };
+    if !track_has_valid_complete_artifact(project, track, expected_kind) {
+        return Vec::new();
+    }
     track
         .provenance
         .get(key)
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn track_has_valid_complete_artifact(
+    project: &ProjectDocument,
+    track: &Track,
+    expected_kind: &str,
+) -> bool {
+    if track.result_state != ResultState::Complete {
+        return false;
+    }
+    if track.cache_refs.is_empty() {
+        return false;
+    }
+    track.cache_refs.iter().any(|cache_ref| {
+        project.cache_entries.iter().any(|entry| {
+            entry.id == *cache_ref
+                && entry.artifact_kind == expected_kind
+                && entry.validation_status == "valid"
+        })
+    })
 }
 
 fn marker_display_color(marker: &Marker) -> String {
@@ -486,6 +537,7 @@ mod tests {
         timeline_rows_json, timeline_rows_json_with_state,
     };
     use autolight_core::graph::default_expanded_track_ids;
+    use autolight_core::project::ResultState;
 
     #[test]
     fn timeline_demo_project_projects_expected_tree_rows() {
@@ -579,5 +631,64 @@ mod tests {
         assert!(first.get("jobProgress").is_some());
         assert!(first.get("cacheRefCount").is_some());
         assert!(first.get("artifactKinds").is_some());
+    }
+
+    #[test]
+    fn timeline_rows_expose_waveform_bucket_count() {
+        let project = rust_demo_project();
+        let rows = timeline_rows_for_project(&project);
+        let waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+
+        assert_eq!(waveform.waveform_level_bucket_count, 64);
+        assert_eq!(waveform.visible_waveform_samples.len(), 2);
+    }
+
+    #[test]
+    fn timeline_rows_hide_analysis_samples_without_valid_complete_artifacts() {
+        let mut project = rust_demo_project();
+
+        let rows = timeline_rows_for_project(&project);
+        let pending_energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_drum_energy")
+            .unwrap();
+        assert!(pending_energy.visible_energy_samples.is_empty());
+
+        project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drum_energy")
+            .unwrap()
+            .result_state = ResultState::Complete;
+        project
+            .cache_entries
+            .iter_mut()
+            .find(|entry| entry.id == "cache_energy")
+            .unwrap()
+            .validation_status = "invalid".to_string();
+
+        let rows = timeline_rows_for_project(&project);
+        let invalid_energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_drum_energy")
+            .unwrap();
+        assert!(invalid_energy.visible_energy_samples.is_empty());
+
+        project
+            .cache_entries
+            .iter_mut()
+            .find(|entry| entry.id == "cache_waveform")
+            .unwrap()
+            .validation_status = "invalid".to_string();
+        let rows = timeline_rows_for_project(&project);
+        let invalid_waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+        assert!(invalid_waveform.visible_waveform_samples.is_empty());
+        assert_eq!(invalid_waveform.waveform_level_bucket_count, 0);
     }
 }

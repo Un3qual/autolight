@@ -61,10 +61,7 @@ pub fn cache_entry_for_bytes(
         "kind": artifact_kind,
         "dependency": dependency_hash,
         "payload_digest": payload_digest,
-    }))?
-    .chars()
-    .take(16)
-    .collect::<String>();
+    }))?;
 
     Ok(CacheEntry {
         id: entry_id.clone(),
@@ -91,10 +88,7 @@ pub fn cache_entry_matches_payload(entry: &CacheEntry, payload: &[u8]) -> Result
         "kind": entry.artifact_kind,
         "dependency": entry.dependency_hash,
         "payload_digest": payload_digest,
-    }))?
-    .chars()
-    .take(16)
-    .collect::<String>();
+    }))?;
 
     Ok(entry.payload_digest == payload_digest && entry.id == expected_id)
 }
@@ -312,6 +306,7 @@ mod tests {
     fn cache_entry_metadata_uses_payload_digest_identity_and_validates_kind() {
         let entry = cache_entry_for_bytes("markers", "dep_hash", b"[]", "1", "now").unwrap();
 
+        assert_eq!(entry.id.len(), 64);
         assert_eq!(entry.artifact_kind, "markers");
         assert_eq!(entry.size_bytes, 2);
         assert_eq!(entry.transform_version, "1");

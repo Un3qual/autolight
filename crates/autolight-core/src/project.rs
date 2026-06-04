@@ -159,6 +159,8 @@ pub struct JobRun {
     pub track_id: String,
     pub transform_id: String,
     pub parameters_hash: String,
+    #[serde(default)]
+    pub parameters: JsonObject,
     pub state: ResultState,
     pub progress: f64,
     pub started_at: String,

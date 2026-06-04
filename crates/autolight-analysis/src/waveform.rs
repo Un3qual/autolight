@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -9,6 +11,8 @@ const MAX_VISIBLE_WAVEFORM_SAMPLES: usize = 16;
 pub enum WaveformError {
     #[error("buckets must be greater than zero")]
     InvalidBucketCount,
+    #[error("{0} exceeds u32 range")]
+    IntegerOutOfRange(&'static str),
     #[error("cancelled")]
     Cancelled,
     #[error("failed to parse waveform payload: {0}")]
@@ -174,8 +178,9 @@ pub fn visible_samples(
     visible_seconds: f64,
     pixels_per_second: f64,
 ) -> VisibleWaveform {
-    let level = select_waveform_level(payload, pixels_per_second);
-    let level_bucket_count = normalize_bucket_count(&level);
+    let selected_level = select_waveform_level(payload, pixels_per_second);
+    let level = selected_level.as_ref();
+    let level_bucket_count = normalize_bucket_count(level);
     let duration = payload.duration.max(0.0);
     if duration <= 0.0 || level_bucket_count == 0 {
         return VisibleWaveform {
@@ -197,7 +202,7 @@ pub fn visible_samples(
     let stop_index = stop_index.min(level.samples.len());
     let start_index = start_index.min(stop_index);
     let mut samples = (start_index..stop_index)
-        .map(|index| visible_sample(&level, index, duration, level_bucket_count))
+        .map(|index| visible_sample(level, index, duration, level_bucket_count))
         .collect::<Vec<_>>();
     if samples.len() > MAX_VISIBLE_WAVEFORM_SAMPLES {
         let stride = samples.len().div_ceil(MAX_VISIBLE_WAVEFORM_SAMPLES);
@@ -233,11 +238,8 @@ fn waveform_payload_from_json(value: &Value) -> Result<WaveformPayload, Waveform
             .cloned()
             .unwrap_or_else(|| Value::Array(Vec::new()));
         return Ok(WaveformPayload {
-            version: value.get("version").and_then(Value::as_u64).unwrap_or(1) as u32,
-            sample_rate: value
-                .get("sample_rate")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32,
+            version: optional_u32(value, "version", 1)?,
+            sample_rate: optional_u32(value, "sample_rate", 0)?,
             duration: value.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
             samples: serde_json::from_value(samples)?,
             levels: Vec::new(),
@@ -246,24 +248,33 @@ fn waveform_payload_from_json(value: &Value) -> Result<WaveformPayload, Waveform
     Ok(serde_json::from_value(value.clone())?)
 }
 
-fn select_waveform_level(payload: &WaveformPayload, pixels_per_second: f64) -> WaveformLevel {
-    let levels = if payload.levels.is_empty() {
-        vec![WaveformLevel {
+fn optional_u32(value: &Value, key: &'static str, default: u32) -> Result<u32, WaveformError> {
+    let Some(raw) = value.get(key).and_then(Value::as_u64) else {
+        return Ok(default);
+    };
+    u32::try_from(raw).map_err(|_| WaveformError::IntegerOutOfRange(key))
+}
+
+fn select_waveform_level(
+    payload: &WaveformPayload,
+    pixels_per_second: f64,
+) -> Cow<'_, WaveformLevel> {
+    if payload.levels.is_empty() {
+        return Cow::Owned(WaveformLevel {
             bucket_count: payload.samples.len(),
             samples: payload.samples.clone(),
-        }]
-    } else {
-        payload.levels.clone()
-    };
+        });
+    }
     let target_bucket_count = (payload.duration.max(0.0) * pixels_per_second.max(0.0) / 8.0)
         .ceil()
         .max(1.0) as usize;
-    levels
+    payload
+        .levels
         .iter()
         .min_by_key(|level| normalize_bucket_count(level).abs_diff(target_bucket_count))
-        .cloned()
+        .map(Cow::Borrowed)
         .unwrap_or_else(|| {
-            levels.last().cloned().unwrap_or(WaveformLevel {
+            Cow::Owned(WaveformLevel {
                 bucket_count: 0,
                 samples: Vec::new(),
             })
@@ -351,8 +362,17 @@ fn sample_frame_ranges(source_samples: &[WaveformSample]) -> Vec<(usize, usize, 
 }
 
 fn sample_with_energy(sample: &WaveformSample) -> WaveformSample {
+    let frame_count = sample_frame_count(sample);
+    if frame_count == 0 {
+        return WaveformSample {
+            peak: 0.0,
+            rms: 0.0,
+            count: 0,
+            sum_squares: 0.0,
+        };
+    }
     let mut normalized = sample.clone();
-    normalized.count = sample_frame_count(sample) as u64;
+    normalized.count = frame_count as u64;
     normalized.sum_squares = sample_square_total(sample);
     normalized
 }
@@ -362,10 +382,13 @@ fn sample_peak(sample: &WaveformSample) -> f64 {
 }
 
 fn sample_frame_count(sample: &WaveformSample) -> usize {
-    sample.count.max(1) as usize
+    sample.count as usize
 }
 
 fn sample_square_total(sample: &WaveformSample) -> f64 {
+    if sample_frame_count(sample) == 0 {
+        return 0.0;
+    }
     if sample.sum_squares.is_finite() && sample.sum_squares >= 0.0 {
         return sample.sum_squares;
     }
@@ -453,6 +476,26 @@ mod tests {
     }
 
     #[test]
+    fn waveform_lod_ignores_explicit_zero_count_samples() {
+        let samples = vec![sample(1.0, 1.0, 0, 1.0), sample(0.25, 0.25, 8, 0.5)];
+
+        let derived = derive_waveform_level(&samples, 1);
+
+        assert_eq!(derived[0].count, 8);
+        assert_eq!(derived[0].peak, 0.25);
+        assert!((derived[0].sum_squares - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn waveform_lod_preserves_explicit_zero_count_at_source_resolution() {
+        let samples = vec![sample(1.0, 1.0, 0, 1.0)];
+
+        let derived = derive_waveform_level(&samples, 1);
+
+        assert_eq!(derived[0], sample(0.0, 0.0, 0, 0.0));
+    }
+
+    #[test]
     fn waveform_lod_derives_coarse_buckets_by_frame_coverage() {
         let samples = vec![
             sample(0.1, 0.1, 10, 0.1),
@@ -516,6 +559,20 @@ mod tests {
 
         assert_eq!(visible.level_bucket_count, 1);
         assert_eq!(visible.samples[0].peak, 0.25);
+    }
+
+    #[test]
+    fn waveform_legacy_payload_rejects_oversized_u32_fields() {
+        let payload = json!({
+            "version": u64::MAX,
+            "sample_rate": u64::MAX,
+            "duration": 1.0,
+            "samples": [{"peak": 0.25, "rms": 0.10}]
+        });
+
+        let error = visible_samples_from_json(&payload, 0.0, 1.0, 96.0).unwrap_err();
+
+        assert!(matches!(error, WaveformError::IntegerOutOfRange("version")));
     }
 
     #[test]

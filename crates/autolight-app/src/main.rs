@@ -10,7 +10,7 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQmlEngine, QString, QU
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1)) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(status) => exit_code_from_qt_status(status),
         Err(error) => {
             eprintln!("{error}");
             ExitCode::from(1)
@@ -18,7 +18,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: impl IntoIterator<Item = String>) -> Result<(), String> {
+fn run(args: impl IntoIterator<Item = String>) -> Result<i32, String> {
     let smoke = args.into_iter().any(|arg| arg == "--smoke");
     autolight_qt::init_qml_module();
 
@@ -43,8 +43,11 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     if smoke {
         if root_loaded.load(Ordering::SeqCst) {
             println!("Rust smoke loaded UI/Main.qml with Autolight.Qt AppController");
-            return Ok(());
+            return Ok(0);
         }
+        return Err("QML root failed to load".to_string());
+    }
+    if !root_loaded.load(Ordering::SeqCst) {
         return Err("QML root failed to load".to_string());
     }
 
@@ -57,8 +60,7 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     let Some(app) = app.as_mut() else {
         return Err("failed to create Qt application".to_string());
     };
-    app.exec();
-    Ok(())
+    Ok(app.exec())
 }
 
 fn main_qml_url() -> Result<QUrl, String> {
@@ -75,4 +77,29 @@ fn main_qml_url() -> Result<QUrl, String> {
         .ok_or_else(|| format!("QML path is not valid UTF-8: {}", qml_path.display()))?;
 
     Ok(QUrl::from_local_file(&QString::from(qml_path)))
+}
+
+fn exit_code_from_qt_status(status: i32) -> ExitCode {
+    if status == 0 {
+        return ExitCode::SUCCESS;
+    }
+    ExitCode::from(u8::try_from(status).unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exit_code_from_qt_status;
+    use std::process::ExitCode;
+
+    #[test]
+    fn exit_code_from_qt_status_preserves_zero_and_small_nonzero_statuses() {
+        assert_eq!(exit_code_from_qt_status(0), ExitCode::SUCCESS);
+        assert_eq!(exit_code_from_qt_status(3), ExitCode::from(3));
+    }
+
+    #[test]
+    fn exit_code_from_qt_status_maps_unrepresentable_status_to_failure() {
+        assert_eq!(exit_code_from_qt_status(-1), ExitCode::from(1));
+        assert_eq!(exit_code_from_qt_status(300), ExitCode::from(1));
+    }
 }

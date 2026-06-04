@@ -1,6 +1,7 @@
 use core::pin::Pin;
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use autolight_core::cache::{track_dependency_hash, track_dependency_inputs};
@@ -62,6 +63,8 @@ pub struct AppControllerState {
     selected_marker_ids_json: QString,
     selected_track_markers_json: QString,
     marker_color_options_json: QString,
+    visible_track_range: Option<(usize, usize)>,
+    visible_track_ids: BTreeSet<String>,
     can_undo: bool,
     can_redo: bool,
     playback_source_path: QString,
@@ -105,6 +108,8 @@ impl Default for AppControllerState {
             selected_marker_ids_json: QString::from("[]"),
             selected_track_markers_json: QString::from("[]"),
             marker_color_options_json: QString::from(&marker_color_options_json()),
+            visible_track_range: None,
+            visible_track_ids: BTreeSet::new(),
             can_undo: false,
             can_redo: false,
             playback_source_path: QString::default(),
@@ -356,8 +361,8 @@ impl AppControllerState {
             self.set_error(format!("No such file: {}", audio_path.display()));
             return String::new();
         }
-        let metadata = match probe_wav_file(&audio_path) {
-            Ok(metadata) => metadata,
+        let inspection = match inspect_wav_file(&audio_path) {
+            Ok(inspection) => inspection,
             Err(error) => {
                 self.set_error(error);
                 return String::new();
@@ -368,10 +373,10 @@ impl AppControllerState {
         self.project.audio_assets.push(AudioAsset {
             id: asset_id.clone(),
             path: audio_path.to_string_lossy().to_string(),
-            duration: metadata.duration,
-            sample_rate: metadata.sample_rate,
-            channels: metadata.channels,
-            fingerprint: fingerprint_file(&audio_path).unwrap_or_default(),
+            duration: inspection.metadata.duration,
+            sample_rate: inspection.metadata.sample_rate,
+            channels: inspection.metadata.channels,
+            fingerprint: inspection.fingerprint,
             import_status: "online".to_string(),
             relink_hint: String::new(),
         });
@@ -499,16 +504,35 @@ impl AppControllerState {
         self.refresh_selected_state();
     }
 
+    fn set_timeline_visible_track_range_state(&mut self, first_row: i32, row_count: i32) {
+        let first_row = first_row.max(0) as usize;
+        let row_count = row_count.max(0) as usize;
+        self.visible_track_range = Some((first_row, row_count));
+        self.refresh_visible_track_ids();
+    }
+
     fn snap_timeline_time_state(&self, seconds: f64, bypass_snap: bool) -> f64 {
+        self.snap_timeline_time_excluding(seconds, bypass_snap, &BTreeSet::new())
+    }
+
+    fn snap_timeline_time_excluding(
+        &self,
+        seconds: f64,
+        bypass_snap: bool,
+        excluded_marker_ids: &BTreeSet<String>,
+    ) -> f64 {
         if bypass_snap || !seconds.is_finite() {
             return seconds;
         }
         let threshold_seconds = SNAP_THRESHOLD_PIXELS / self.timeline_pixels_per_second.max(1.0);
         let visible_track_ids = self.visible_track_ids();
+        let eligible_track_ids = self.eligible_snap_track_ids(&visible_track_ids);
         self.project
             .markers
             .iter()
-            .filter(|marker| visible_track_ids.contains(&marker.track_id))
+            .filter(|marker| eligible_track_ids.contains(&marker.track_id))
+            .filter(|marker| !excluded_marker_ids.contains(&marker.id))
+            .filter(|marker| is_timing_snap_category(&marker.category))
             .filter_map(|marker| {
                 let distance = (marker.timestamp - seconds).abs();
                 (distance <= threshold_seconds).then_some((distance, marker.timestamp))
@@ -542,6 +566,7 @@ impl AppControllerState {
             .map(|asset| asset.duration)
             .fold(self.playback_duration_seconds, f64::max);
         self.clamp_timeline_scroll();
+        self.refresh_visible_track_ids();
         self.refresh_selected_state();
     }
 
@@ -688,6 +713,7 @@ impl AppControllerState {
                 "expanded_track_ids".to_string(),
                 json!(self.expanded_track_ids.iter().cloned().collect::<Vec<_>>()),
             );
+            self.refresh_visible_track_ids();
             if !expanded
                 && !self
                     .visible_track_ids()
@@ -851,6 +877,7 @@ impl AppControllerState {
         }
         let track_id = self.selected_track_id.to_string();
         let delta_seconds = if !bypass_snap && self.selected_marker_ids.len() == 1 {
+            let excluded_marker_ids = self.selected_marker_ids_set();
             self.project
                 .markers
                 .iter()
@@ -858,8 +885,11 @@ impl AppControllerState {
                     marker.track_id == track_id && marker.id == self.selected_marker_ids[0]
                 })
                 .map(|marker| {
-                    self.snap_timeline_time_state(marker.timestamp + delta_seconds, false)
-                        - marker.timestamp
+                    self.snap_timeline_time_excluding(
+                        marker.timestamp + delta_seconds,
+                        false,
+                        &excluded_marker_ids,
+                    ) - marker.timestamp
                 })
                 .unwrap_or(delta_seconds)
         } else {
@@ -1187,10 +1217,10 @@ impl AppControllerState {
     }
 
     fn visible_track_ids(&self) -> BTreeSet<String> {
-        self.timeline_rows()
-            .into_iter()
-            .map(|row| row.track_id)
-            .collect()
+        if self.visible_track_range.is_some() {
+            return self.visible_track_ids.clone();
+        }
+        self.timeline_track_ids()
     }
 
     fn timeline_rows(&self) -> Vec<crate::timeline_model::TimelineRow> {
@@ -1200,6 +1230,43 @@ impl AppControllerState {
             &self.expanded_track_ids,
             &selected_marker_ids,
         )
+    }
+
+    fn timeline_track_ids(&self) -> BTreeSet<String> {
+        self.timeline_rows()
+            .into_iter()
+            .map(|row| row.track_id)
+            .collect()
+    }
+
+    fn eligible_snap_track_ids(&self, visible_track_ids: &BTreeSet<String>) -> BTreeSet<String> {
+        self.project
+            .tracks
+            .iter()
+            .filter(|track| visible_track_ids.contains(&track.id))
+            .filter(|track| track.track_type == TrackType::Generated)
+            .filter(|track| {
+                matches!(
+                    track.result_state,
+                    ResultState::Complete | ResultState::Stale
+                )
+            })
+            .map(|track| track.id.clone())
+            .collect()
+    }
+
+    fn refresh_visible_track_ids(&mut self) {
+        let Some((first_row, row_count)) = self.visible_track_range else {
+            self.visible_track_ids = self.timeline_track_ids();
+            return;
+        };
+        self.visible_track_ids = self
+            .timeline_rows()
+            .into_iter()
+            .skip(first_row)
+            .take(row_count)
+            .map(|row| row.track_id)
+            .collect();
     }
 
     fn qproperty_values(&self) -> ControllerPropertyValues {
@@ -1481,6 +1548,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "applyTimelineVisibleSeconds"]
         fn set_timeline_visible_seconds_invokable(self: Pin<&mut Self>, seconds: f64);
+
+        #[qinvokable]
+        #[cxx_name = "setTimelineVisibleTrackRange"]
+        fn set_timeline_visible_track_range(self: Pin<&mut Self>, first_row: i32, row_count: i32);
 
         #[qinvokable]
         #[cxx_name = "snapTimelineTime"]
@@ -1907,6 +1978,20 @@ impl qobject::AppController {
         self.apply_values(values);
     }
 
+    pub fn set_timeline_visible_track_range(
+        mut self: Pin<&mut Self>,
+        first_row: i32,
+        row_count: i32,
+    ) {
+        let values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.set_timeline_visible_track_range_state(first_row, row_count);
+            state.qproperty_values()
+        };
+        self.apply_values(values);
+    }
+
     pub fn snap_timeline_time(mut self: Pin<&mut Self>, seconds: f64, bypass_snap: bool) -> f64 {
         let (values, snapped) = {
             let mut rust = self.as_mut().rust_mut();
@@ -2154,71 +2239,128 @@ struct AudioMetadata {
     channels: u32,
 }
 
-fn probe_wav_file(path: &Path) -> Result<AudioMetadata, String> {
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+#[derive(Debug, Clone, PartialEq)]
+struct AudioInspection {
+    metadata: AudioMetadata,
+    fingerprint: String,
+}
+
+fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
+    let file = File::open(path).map_err(|error| error.to_string())?;
+    let mut reader = HashedReader::new(BufReader::new(file));
+    let mut header = [0_u8; 12];
+    reader
+        .read_exact(&mut header)
+        .map_err(|error| error.to_string())?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
         return Err("unsupported audio file: expected WAV".to_string());
     }
 
-    let mut offset = 12;
     let mut sample_rate = 0_u32;
     let mut channels = 0_u32;
     let mut bits_per_sample = 0_u32;
-    let mut data_bytes = 0_u32;
+    let mut data_bytes = 0_u64;
+    let mut has_data_chunk = false;
 
-    while offset + 8 <= bytes.len() {
-        let chunk_id = &bytes[offset..offset + 4];
-        let chunk_size = u32::from_le_bytes([
-            bytes[offset + 4],
-            bytes[offset + 5],
-            bytes[offset + 6],
-            bytes[offset + 7],
-        ]) as usize;
-        offset += 8;
-        if offset + chunk_size > bytes.len() {
-            break;
+    loop {
+        let mut chunk_header = [0_u8; 8];
+        match reader.read_exact(&mut chunk_header) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(error) => return Err(error.to_string()),
         }
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4],
+            chunk_header[5],
+            chunk_header[6],
+            chunk_header[7],
+        ]) as u64;
         if chunk_id == b"fmt " && chunk_size >= 16 {
-            let audio_format = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+            let mut fmt = [0_u8; 16];
+            reader
+                .read_exact(&mut fmt)
+                .map_err(|error| error.to_string())?;
+            let audio_format = u16::from_le_bytes([fmt[0], fmt[1]]);
             if audio_format != 1 {
                 return Err("unsupported WAV encoding: expected PCM".to_string());
             }
-            channels = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]) as u32;
-            sample_rate = u32::from_le_bytes([
-                bytes[offset + 4],
-                bytes[offset + 5],
-                bytes[offset + 6],
-                bytes[offset + 7],
-            ]);
-            bits_per_sample = u16::from_le_bytes([bytes[offset + 14], bytes[offset + 15]]) as u32;
+            channels = u16::from_le_bytes([fmt[2], fmt[3]]) as u32;
+            sample_rate = u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]);
+            bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]) as u32;
+            reader.skip_bytes(chunk_size - 16)?;
         } else if chunk_id == b"data" {
-            data_bytes = chunk_size as u32;
+            has_data_chunk = true;
+            data_bytes = chunk_size;
+            reader.skip_bytes(chunk_size)?;
+        } else {
+            reader.skip_bytes(chunk_size)?;
         }
-        offset += chunk_size + (chunk_size % 2);
+        if chunk_size % 2 == 1 {
+            reader.skip_bytes(1)?;
+        }
     }
 
     if sample_rate == 0 || channels == 0 || bits_per_sample == 0 {
         return Err("invalid WAV metadata".to_string());
     }
-    let bytes_per_frame = channels * (bits_per_sample / 8);
+    if !has_data_chunk || data_bytes == 0 {
+        return Err("invalid WAV data chunk".to_string());
+    }
+    let bytes_per_frame = u64::from(channels) * u64::from(bits_per_sample / 8);
     if bytes_per_frame == 0 {
         return Err("invalid WAV frame size".to_string());
     }
-    Ok(AudioMetadata {
-        duration: data_bytes as f64 / (sample_rate as f64 * bytes_per_frame as f64),
-        sample_rate,
-        channels,
+    Ok(AudioInspection {
+        metadata: AudioMetadata {
+            duration: data_bytes as f64 / (sample_rate as f64 * bytes_per_frame as f64),
+            sample_rate,
+            channels,
+        },
+        fingerprint: reader.finish(),
     })
 }
 
-fn fingerprint_file(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+struct HashedReader<R> {
+    inner: R,
+    hash: u64,
+}
+
+impl<R: Read> HashedReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            hash: 0xcbf29ce484222325_u64,
+        }
     }
-    Ok(format!("{hash:016x}"))
+
+    fn read_exact(&mut self, buffer: &mut [u8]) -> std::io::Result<()> {
+        self.inner.read_exact(buffer)?;
+        self.update(buffer);
+        Ok(())
+    }
+
+    fn skip_bytes(&mut self, mut remaining: u64) -> Result<(), String> {
+        let mut buffer = [0_u8; 8192];
+        while remaining > 0 {
+            let to_read = remaining.min(buffer.len() as u64) as usize;
+            self.read_exact(&mut buffer[..to_read])
+                .map_err(|error| error.to_string())?;
+            remaining -= to_read as u64;
+        }
+        Ok(())
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn finish(self) -> String {
+        format!("{:016x}", self.hash)
+    }
 }
 
 fn finite_non_negative(value: f64) -> f64 {
@@ -2261,6 +2403,13 @@ fn marker_display_color_for_key(color_key: &str) -> &'static str {
         .iter()
         .find_map(|(key, _, color)| (*key == color_key).then_some(*color))
         .unwrap_or("#67e8f9")
+}
+
+fn is_timing_snap_category(category: &str) -> bool {
+    matches!(
+        category.trim().to_lowercase().as_str(),
+        "timing" | "beat" | "onset"
+    )
 }
 
 fn json_string(value: &impl serde::Serialize) -> String {
@@ -2620,11 +2769,40 @@ mod tests {
         assert_eq!(state.project.audio_assets[0].duration, 2.0);
         assert_eq!(state.project.audio_assets[0].sample_rate, 8_000);
         assert_eq!(state.project.audio_assets[0].channels, 1);
+        assert!(!state.project.audio_assets[0].fingerprint.is_empty());
         assert_eq!(state.project.tracks[0].track_type, TrackType::Source);
         assert_eq!(
             state.project.tracks[0].provenance["asset_id"],
             "asset_rust_0001"
         );
+    }
+
+    #[test]
+    fn controller_import_audio_rejects_wav_without_data_chunk() {
+        let root = test_dir("import-audio-no-data");
+        let audio_path = root.join("song.wav");
+        write_test_wav_without_data(&audio_path, 8_000, 1);
+        let mut state = AppControllerState::default();
+
+        let track_id = state.import_audio_state(audio_path.to_str().unwrap());
+
+        assert!(track_id.is_empty());
+        assert!(state.last_error.to_string().contains("data chunk"));
+        assert!(state.project.audio_assets.is_empty());
+    }
+
+    #[test]
+    fn controller_import_audio_rejects_empty_wav_data_chunk() {
+        let root = test_dir("import-audio-empty-data");
+        let audio_path = root.join("song.wav");
+        write_test_wav(&audio_path, 8_000, 1, 0);
+        let mut state = AppControllerState::default();
+
+        let track_id = state.import_audio_state(audio_path.to_str().unwrap());
+
+        assert!(track_id.is_empty());
+        assert!(state.last_error.to_string().contains("data chunk"));
+        assert!(state.project.audio_assets.is_empty());
     }
 
     #[test]
@@ -2744,6 +2922,36 @@ mod tests {
     }
 
     #[test]
+    fn controller_snap_uses_visible_generated_timing_rows_only() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+
+        state.set_timeline_visible_track_range_state(2, 1);
+        assert_eq!(state.snap_timeline_time_state(0.53, false), 0.53);
+
+        state.set_timeline_visible_track_range_state(1, 1);
+        assert_eq!(state.snap_timeline_time_state(0.53, false), 0.5);
+    }
+
+    #[test]
+    fn controller_drag_does_not_snap_marker_to_itself() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+        state.set_timeline_visible_track_range_state(2, 1);
+        state.toggle_marker_selection_state("marker_edit_2", false);
+
+        assert!(state.move_selected_markers_state(0.03, false));
+        let marker = state
+            .project
+            .markers
+            .iter()
+            .find(|marker| marker.id == "marker_edit_2")
+            .unwrap();
+        assert_eq!(marker.timestamp, 0.53);
+    }
+
+    #[test]
     fn qml_rust_adapter_uses_controller_models_and_actions() {
         let qml = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
@@ -2774,16 +2982,21 @@ mod tests {
         assert!(qml.contains("rustController.playbackSourcePath"));
         assert!(qml.contains("rustController.playbackPositionSeconds"));
         assert!(qml.contains("rustController.playbackDurationSeconds"));
-        assert!(qml.contains("rustController.playbackIsPlaying"));
         assert!(qml.contains("rustController.playbackLastError"));
         assert!(qml.contains("rustController.playbackVolume"));
         assert!(qml.contains("rustController.setPlaybackVolumeValue"));
+        assert!(qml.contains("import QtMultimedia"));
+        assert!(qml.contains("MediaPlayer"));
+        assert!(qml.contains("MediaPlayer.PlayingState"));
+        assert!(qml.contains("AudioOutput"));
+        assert!(qml.contains("mediaPlayer.play()"));
         assert!(qml.contains("rustController.timelinePixelsPerSecond"));
         assert!(qml.contains("rustController.timelineScrollSeconds"));
         assert!(qml.contains("rustController.timelineVisibleSeconds"));
         assert!(qml.contains("rustController.setTimelineZoom"));
         assert!(qml.contains("rustController.applyTimelineScrollSeconds"));
         assert!(qml.contains("rustController.applyTimelineVisibleSeconds"));
+        assert!(qml.contains("rustController.setTimelineVisibleTrackRange"));
         assert!(qml.contains("rustController.snapTimelineTime"));
         assert!(qml.contains("function add_fixed_interval_track(trackId, duration, interval) { return add_transform_track"));
         assert!(
@@ -2833,5 +3046,26 @@ mod tests {
         file.write_all(b"data").unwrap();
         file.write_all(&data_bytes.to_le_bytes()).unwrap();
         file.write_all(&vec![0_u8; data_bytes as usize]).unwrap();
+    }
+
+    fn write_test_wav_without_data(path: &std::path::Path, sample_rate: u32, channels: u16) {
+        use std::io::Write;
+
+        let bits_per_sample = 16_u16;
+        let bytes_per_sample = u32::from(bits_per_sample / 8);
+        let byte_rate = sample_rate * u32::from(channels) * bytes_per_sample;
+        let block_align = channels * (bits_per_sample / 8);
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(b"RIFF").unwrap();
+        file.write_all(&36_u32.to_le_bytes()).unwrap();
+        file.write_all(b"WAVE").unwrap();
+        file.write_all(b"fmt ").unwrap();
+        file.write_all(&16_u32.to_le_bytes()).unwrap();
+        file.write_all(&1_u16.to_le_bytes()).unwrap();
+        file.write_all(&channels.to_le_bytes()).unwrap();
+        file.write_all(&sample_rate.to_le_bytes()).unwrap();
+        file.write_all(&byte_rate.to_le_bytes()).unwrap();
+        file.write_all(&block_align.to_le_bytes()).unwrap();
+        file.write_all(&bits_per_sample.to_le_bytes()).unwrap();
     }
 }

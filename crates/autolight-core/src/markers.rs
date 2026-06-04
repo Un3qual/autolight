@@ -83,7 +83,7 @@ pub fn create_manual_editable_track(
     let source_track_id = source_track_id_for_context(project, context_track_id)
         .ok_or(MarkerError::SourceAudioContextRequired)?;
     let track = Track {
-        id: new_id("track"),
+        id: new_unique_id(project, "track", id_exists),
         track_type: TrackType::Editable,
         name: if name.is_empty() {
             "Manual Cues".to_string()
@@ -119,7 +119,7 @@ pub fn add_editable_marker(
     let duration = optional_marker_duration(input.duration)?;
     let color = normalize_marker_color(&input.color)?;
     let marker = Marker {
-        id: new_id("marker"),
+        id: new_unique_id(project, "marker", id_exists),
         track_id: track_id.to_string(),
         timestamp,
         duration,
@@ -378,6 +378,9 @@ fn finite_marker_timestamp(timestamp: f64) -> Result<f64, MarkerError> {
     if !timestamp.is_finite() {
         return Err(MarkerError::TimestampNotFinite);
     }
+    if timestamp < 0.0 {
+        return Err(MarkerError::NegativeTimestamp);
+    }
     Ok(timestamp)
 }
 
@@ -436,9 +439,58 @@ fn json_object(values: impl IntoIterator<Item = (&'static str, Value)>) -> JsonO
         .collect()
 }
 
-fn new_id(prefix: &str) -> String {
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id:012x}")
+fn new_unique_id(
+    project: &ProjectDocument,
+    prefix: &str,
+    exists: impl Fn(&ProjectDocument, &str) -> bool,
+) -> String {
+    seed_next_id_from_project(project);
+    loop {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let candidate = format!("{prefix}_{id:012x}");
+        if !exists(project, &candidate) {
+            return candidate;
+        }
+    }
+}
+
+fn id_exists(project: &ProjectDocument, id: &str) -> bool {
+    project.tracks.iter().any(|track| track.id == id)
+        || project.markers.iter().any(|marker| marker.id == id)
+}
+
+fn seed_next_id_from_project(project: &ProjectDocument) {
+    let next_id = project
+        .tracks
+        .iter()
+        .filter_map(|track| auto_id_number(&track.id))
+        .chain(
+            project
+                .markers
+                .iter()
+                .filter_map(|marker| auto_id_number(&marker.id)),
+        )
+        .max()
+        .map(|id| id + 1)
+        .unwrap_or(1);
+    let mut current = NEXT_ID.load(Ordering::Relaxed);
+    while current < next_id {
+        match NEXT_ID.compare_exchange_weak(current, next_id, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn auto_id_number(id: &str) -> Option<u64> {
+    let suffix = id
+        .strip_prefix("track_")
+        .or_else(|| id.strip_prefix("marker_"))?;
+    if suffix.len() != 12 {
+        return None;
+    }
+    u64::from_str_radix(suffix, 16).ok()
 }
 
 #[cfg(test)]
@@ -446,9 +498,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        add_editable_marker, bulk_update_editable_markers, create_manual_editable_track,
-        delete_editable_marker, move_editable_markers, resize_editable_marker,
-        update_editable_marker, BulkMarkerUpdate, EditableMarkerInput, MarkerUpdate,
+        add_editable_marker, auto_id_number, bulk_update_editable_markers,
+        create_manual_editable_track, delete_editable_marker, move_editable_markers,
+        resize_editable_marker, update_editable_marker, BulkMarkerUpdate, EditableMarkerInput,
+        MarkerUpdate,
     };
     use crate::project::{
         AudioAsset, JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType,
@@ -499,6 +552,82 @@ mod tests {
 
         assert!(generated_err.to_string().contains("editable track"));
         assert!(timestamp_err.to_string().contains("finite"));
+    }
+
+    #[test]
+    fn markers_add_and_update_reject_negative_timestamps() {
+        let mut project = project_with_editable_track();
+        let marker = add_editable_marker(
+            &mut project,
+            "track_edit",
+            EditableMarkerInput::cue(1.0, "Cue"),
+        )
+        .unwrap();
+
+        let add_err = add_editable_marker(
+            &mut project,
+            "track_edit",
+            EditableMarkerInput::cue(-0.1, "Negative"),
+        )
+        .unwrap_err();
+        let update_err = update_editable_marker(
+            &mut project,
+            "track_edit",
+            &marker.id,
+            MarkerUpdate {
+                timestamp: -0.25,
+                duration: Some(0.1),
+                label: "Negative".to_string(),
+                category: "cue".to_string(),
+                color: "cyan".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(add_err.to_string().contains("negative timestamp"));
+        assert!(update_err.to_string().contains("negative timestamp"));
+        assert_eq!(marker_timestamp(&project, &marker.id), 1.0);
+        assert_eq!(
+            project
+                .markers
+                .iter()
+                .filter(|item| item.track_id == "track_edit")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn markers_seed_generated_ids_from_loaded_project_ids() {
+        let mut project = project_with_editable_track();
+        project
+            .tracks
+            .push(editable_track("track_000000001000", "track_generated"));
+        project.markers.push(Marker {
+            id: "marker_000000001005".to_string(),
+            track_id: "track_edit".to_string(),
+            timestamp: 0.5,
+            duration: None,
+            label: "Existing".to_string(),
+            category: "cue".to_string(),
+            confidence: None,
+            tags: Vec::new(),
+            source_transform: String::new(),
+            source_marker_ids: Vec::new(),
+            metadata: JsonObject::new(),
+        });
+
+        let track =
+            create_manual_editable_track(&mut project, "track_generated", "Manual").unwrap();
+        let marker = add_editable_marker(
+            &mut project,
+            "track_edit",
+            EditableMarkerInput::cue(1.0, "Cue"),
+        )
+        .unwrap();
+
+        assert!(auto_id_number(&track.id).unwrap() > 0x1005);
+        assert!(auto_id_number(&marker.id).unwrap() > 0x1005);
     }
 
     #[test]

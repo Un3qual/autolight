@@ -208,6 +208,7 @@ struct TreeProjection<'a> {
     children_by_track: BTreeMap<&'a str, Vec<usize>>,
     parents_by_track: BTreeMap<&'a str, &'a str>,
     tree_errors: BTreeMap<&'a str, String>,
+    child_state_summaries: BTreeMap<&'a str, String>,
     projected_ids: BTreeSet<&'a str>,
     rows: Vec<TreeRow>,
 }
@@ -221,10 +222,12 @@ impl<'a> TreeProjection<'a> {
             children_by_track: BTreeMap::new(),
             parents_by_track: BTreeMap::new(),
             tree_errors: BTreeMap::new(),
+            child_state_summaries: BTreeMap::new(),
             projected_ids: BTreeSet::new(),
             rows: Vec::new(),
         };
         projection.index_tracks();
+        projection.compute_child_state_summaries();
         projection.append_roots();
         projection.append_cycle_fallback_rows();
         projection
@@ -309,7 +312,11 @@ impl<'a> TreeProjection<'a> {
             has_children: !children.is_empty(),
             expanded,
             child_count: children.len(),
-            visible_child_state_summary: self.visible_child_state_summary(track.id.as_str()),
+            visible_child_state_summary: self
+                .child_state_summaries
+                .get(track.id.as_str())
+                .cloned()
+                .unwrap_or_default(),
             tree_error: self
                 .tree_errors
                 .get(track.id.as_str())
@@ -328,34 +335,52 @@ impl<'a> TreeProjection<'a> {
         active_path.remove(track.id.as_str());
     }
 
-    fn visible_child_state_summary(&self, track_id: &str) -> String {
-        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-        let mut pending = VecDeque::from(
-            self.children_by_track
-                .get(track_id)
-                .cloned()
-                .unwrap_or_default(),
-        );
-        let mut seen = BTreeSet::new();
+    fn compute_child_state_summaries(&mut self) {
+        let mut counts_by_track = BTreeMap::new();
+        for track in &self.project.tracks {
+            let counts = self.child_state_counts(
+                track.id.as_str(),
+                &mut counts_by_track,
+                &mut BTreeSet::new(),
+            );
+            if !counts.is_empty() {
+                self.child_state_summaries
+                    .insert(track.id.as_str(), format_child_state_counts(counts));
+            }
+        }
+    }
 
-        while let Some(index) = pending.pop_front() {
-            let child = &self.project.tracks[index];
-            if !seen.insert(child.id.as_str()) {
-                continue;
-            }
-            if child.result_state != ResultState::Complete {
-                *counts.entry(child.result_state.as_str()).or_default() += 1;
-            }
-            if let Some(children) = self.children_by_track.get(child.id.as_str()) {
-                pending.extend(children);
+    fn child_state_counts(
+        &self,
+        track_id: &'a str,
+        counts_by_track: &mut BTreeMap<&'a str, BTreeMap<&'static str, usize>>,
+        active_path: &mut BTreeSet<&'a str>,
+    ) -> BTreeMap<&'static str, usize> {
+        if let Some(counts) = counts_by_track.get(track_id) {
+            return counts.clone();
+        }
+        if !active_path.insert(track_id) {
+            return BTreeMap::new();
+        }
+
+        let mut counts = BTreeMap::new();
+        if let Some(children) = self.children_by_track.get(track_id) {
+            for child_index in children {
+                let child = &self.project.tracks[*child_index];
+                if child.result_state != ResultState::Complete {
+                    *counts.entry(child.result_state.as_str()).or_default() += 1;
+                }
+                for (state, count) in
+                    self.child_state_counts(child.id.as_str(), counts_by_track, active_path)
+                {
+                    *counts.entry(state).or_default() += count;
+                }
             }
         }
 
+        active_path.remove(track_id);
+        counts_by_track.insert(track_id, counts.clone());
         counts
-            .into_iter()
-            .map(|(state, count)| format!("{state}: {count}"))
-            .collect::<Vec<_>>()
-            .join(", ")
     }
 
     fn track_has_parent_cycle(&self, track_id: &str) -> bool {
@@ -383,6 +408,14 @@ impl<'a> TreeProjection<'a> {
         }
         false
     }
+}
+
+fn format_child_state_counts(counts: BTreeMap<&'static str, usize>) -> String {
+    counts
+        .into_iter()
+        .map(|(state, count)| format!("{state}: {count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn validate_source_track(
@@ -751,6 +784,7 @@ mod tests {
             track_id: track_id.to_string(),
             transform_id: "markers.fixed_interval".to_string(),
             parameters_hash: "dep".to_string(),
+            parameters: JsonObject::new(),
             state: ResultState::Complete,
             progress: 1.0,
             started_at: String::new(),
