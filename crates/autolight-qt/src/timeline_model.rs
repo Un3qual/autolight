@@ -216,7 +216,7 @@ pub fn timeline_rows_for_project_with_state(
     expanded: &BTreeSet<String>,
     selected_marker_ids: &BTreeSet<String>,
 ) -> Vec<TimelineRow> {
-    let tree_rows = project_tree(project, &expanded);
+    let tree_rows = project_tree(project, expanded);
     let tracks_by_id: BTreeMap<&str, &Track> = project
         .tracks
         .iter()
@@ -335,6 +335,7 @@ fn editable_track() -> Track {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generated_track(
     id: &str,
     name: &str,
@@ -363,6 +364,7 @@ fn generated_track(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn marker(
     id: &str,
     track_id: &str,

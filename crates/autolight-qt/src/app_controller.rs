@@ -3114,7 +3114,10 @@ mod tests {
         let marker_id = state
             .add_marker_to_selected_track_with_duration_state(1.25, 0.5, "Blackout", "cue", "cyan");
         assert!(!marker_id.is_empty());
-        assert_eq!(state.selected_marker_ids, [marker_id.clone()]);
+        assert_eq!(
+            state.selected_marker_ids.as_slice(),
+            std::slice::from_ref(&marker_id)
+        );
 
         assert!(state
             .update_selected_marker_with_duration_state(1.5, 0.75, "Scene", "lighting", "violet",));
@@ -3183,7 +3186,10 @@ mod tests {
         assert!(state.can_undo);
         assert!(!state.can_redo);
         assert!(state.is_dirty);
-        assert_eq!(state.selected_marker_ids, [marker_id.clone()]);
+        assert_eq!(
+            state.selected_marker_ids.as_slice(),
+            std::slice::from_ref(&marker_id)
+        );
 
         assert!(state.undo_state());
         assert!(!state

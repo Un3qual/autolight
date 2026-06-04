@@ -768,7 +768,7 @@ mod tests {
         let updated = bulk_update_editable_markers(
             &mut project,
             "track_edit",
-            &[second.id.clone()],
+            std::slice::from_ref(&second.id),
             BulkMarkerUpdate {
                 label: "Scene".to_string(),
                 category: "scene".to_string(),
