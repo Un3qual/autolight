@@ -2,6 +2,10 @@
 
 Date: 2026-06-01
 
+## Migration Status
+
+This document records Milestone 2 behavior and the Python/PySide6 implementation structure that delivered it. The active forward architecture is the Rust/CXX-Qt port in `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md`. Future app work should keep the interactive timeline behavior described here, but implement new product work in the Rust/CXX-Qt version.
+
 ## Context
 
 Milestone 1 established the graph-backed project model, transform jobs, cache-aware artifacts, editable derived tracks, playback controls, timeline viewport state, and a usable QML shell. The next milestone should make Autolight feel like an authoring tool: users should be able to create cue tracks directly, edit markers on the timeline while listening, recover from mistakes, and inspect dense waveform detail at practical zoom levels.
@@ -207,3 +211,4 @@ Performance checks should be pragmatic and deterministic:
 - Timeline editing should be direct manipulation, with the inspector retained for precision.
 - Snapping should use visible generated timing markers, with a modifier to bypass snapping.
 - Component extraction, playback follow performance, and waveform LOD are part of the same milestone because they are prerequisites for comfortable direct editing.
+- Future extensions to these behaviors target the Rust/CXX-Qt app. The existing Python/PySide6 code is the parity baseline, not the forward implementation target.
