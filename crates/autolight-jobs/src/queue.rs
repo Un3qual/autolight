@@ -1,4 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolight_core::cache::{
@@ -41,6 +44,12 @@ pub enum JobQueueError {
     Transform(#[from] TransformError),
     #[error(transparent)]
     Cache(#[from] CacheError),
+    #[error("project path is required before caching artifacts")]
+    MissingArtifactDirectory,
+    #[error("unsafe cache artifact path: {0}")]
+    UnsafeArtifactPath(String),
+    #[error("failed to write cache artifact {path}: {source}")]
+    ArtifactWrite { path: PathBuf, source: io::Error },
 }
 
 #[derive(Debug, Error)]
@@ -305,6 +314,14 @@ impl LocalJobQueue {
         &mut self,
         project: &mut ProjectDocument,
     ) -> Result<Option<String>, JobQueueError> {
+        self.run_next_with_artifact_dir(project, None)
+    }
+
+    pub fn run_next_with_artifact_dir(
+        &mut self,
+        project: &mut ProjectDocument,
+        artifact_dir: Option<&Path>,
+    ) -> Result<Option<String>, JobQueueError> {
         let Some(job_id) = self.pending_job_ids.pop_front() else {
             return Ok(None);
         };
@@ -329,9 +346,13 @@ impl LocalJobQueue {
 
         match result {
             Ok(result) => {
-                if let Err(error) =
-                    self.complete_success(project, &job_id, context.progress(), result)
-                {
+                if let Err(error) = self.complete_success(
+                    project,
+                    &job_id,
+                    context.progress(),
+                    result,
+                    artifact_dir,
+                ) {
                     let message = error.to_string();
                     self.complete_failed(project, &job_id, &message)?;
                     return Err(error);
@@ -391,6 +412,7 @@ impl LocalJobQueue {
         job_id: &str,
         progress: f64,
         result: TransformResult,
+        artifact_dir: Option<&Path>,
     ) -> Result<(), JobQueueError> {
         let run = run_snapshot(project, job_id)?;
         if track_changed_since_submit(project, &run.track_id, &run.parameters_hash)? {
@@ -399,25 +421,33 @@ impl LocalJobQueue {
         }
 
         let markers = build_markers(job_id, &run.track_id, &run.transform_id, result.markers)?;
-        let cache_entries = result
+        let cache_artifacts = result
             .artifacts
             .into_iter()
             .map(|artifact| {
-                cache_entry_for_bytes(
+                let entry = cache_entry_for_bytes(
                     &artifact.artifact_kind,
                     &run.parameters_hash,
                     &artifact.payload,
                     &run.transform_version,
                     self.timestamp(),
-                )
+                )?;
+                Ok::<(CacheEntry, Vec<u8>), CacheError>((entry, artifact.payload))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let produced_cache_refs = cache_entries
+        let produced_cache_refs = cache_artifacts
             .iter()
-            .map(|entry| entry.id.clone())
+            .map(|(entry, _)| entry.id.clone())
             .collect::<Vec<_>>();
 
-        for entry in cache_entries {
+        if !cache_artifacts.is_empty() {
+            let artifact_dir = artifact_dir.ok_or(JobQueueError::MissingArtifactDirectory)?;
+            for (entry, payload) in &cache_artifacts {
+                write_cache_artifact_payload(artifact_dir, entry, payload)?;
+            }
+        }
+
+        for (entry, _) in cache_artifacts {
             upsert_cache_entry(project, entry);
         }
         project
@@ -710,6 +740,75 @@ fn default_timestamp() -> String {
     format!("{}.{:09}Z", duration.as_secs(), duration.subsec_nanos())
 }
 
+fn write_cache_artifact_payload(
+    artifact_dir: &Path,
+    entry: &CacheEntry,
+    payload: &[u8],
+) -> Result<(), JobQueueError> {
+    let relative_path = Path::new(&entry.path);
+    if !cache_artifact_path_is_safe(relative_path) {
+        return Err(JobQueueError::UnsafeArtifactPath(entry.path.clone()));
+    }
+
+    let path = artifact_dir.join(relative_path);
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|source| JobQueueError::ArtifactWrite {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let tmp_path = cache_artifact_temp_path(&path);
+    let write_result = (|| -> Result<(), JobQueueError> {
+        let mut file =
+            fs::File::create(&tmp_path).map_err(|source| JobQueueError::ArtifactWrite {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        file.write_all(payload)
+            .map_err(|source| JobQueueError::ArtifactWrite {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        file.sync_all()
+            .map_err(|source| JobQueueError::ArtifactWrite {
+                path: tmp_path.clone(),
+                source,
+            })?;
+        drop(file);
+        fs::rename(&tmp_path, &path).map_err(|source| JobQueueError::ArtifactWrite {
+            path: path.clone(),
+            source,
+        })
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    write_result
+}
+
+fn cache_artifact_path_is_safe(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn cache_artifact_temp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact.bin");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    path.with_file_name(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()))
+}
+
 #[cfg(test)]
 mod tests {
     use autolight_core::cache::track_dependency_hash;
@@ -751,8 +850,14 @@ mod tests {
             ResultState::Pending
         );
         assert_eq!(job_state(&project, &job_id), ResultState::Pending);
+        let artifact_dir = test_dir("artifact-cache");
 
-        assert_eq!(queue.run_next(&mut project).unwrap(), Some(job_id.clone()));
+        assert_eq!(
+            queue
+                .run_next_with_artifact_dir(&mut project, Some(&artifact_dir))
+                .unwrap(),
+            Some(job_id.clone())
+        );
 
         let track = track_by_id(&project, "track_generated");
         let run = run_by_id(&project, &job_id);
@@ -762,8 +867,40 @@ mod tests {
         assert_eq!(project.markers.len(), 2);
         assert_eq!(project.cache_entries.len(), 1);
         assert_eq!(project.cache_entries[0].artifact_kind, "stem");
+        assert_eq!(
+            std::fs::read(artifact_dir.join(&project.cache_entries[0].path)).unwrap(),
+            b"cached stem"
+        );
         assert_eq!(track.cache_refs, vec![project.cache_entries[0].id.clone()]);
         assert_eq!(run.produced_cache_refs, track.cache_refs);
+    }
+
+    #[test]
+    fn jobs_artifact_output_requires_cache_directory() {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(test_spec("test.artifact"), |_context, _params| {
+                Ok(TransformResult::artifact("stem", b"cached stem"))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.artifact");
+        let mut queue = LocalJobQueue::with_clock(registry, deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        let error = queue.run_next(&mut project).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("project path is required before caching artifacts"));
+        assert_eq!(job_state(&project, &job_id), ResultState::Failed);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Failed
+        );
+        assert!(project.cache_entries.is_empty());
+        assert!(track_by_id(&project, "track_generated")
+            .cache_refs
+            .is_empty());
     }
 
     #[test]
@@ -1329,5 +1466,18 @@ mod tests {
 
     fn object(value: Value) -> JsonObject {
         value.as_object().cloned().unwrap()
+    }
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "autolight-jobs-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
     }
 }

@@ -260,7 +260,11 @@ impl AppControllerState {
     fn run_track_state(&mut self, track_id: &str) -> String {
         match self.job_queue.submit(&mut self.project, track_id) {
             Ok(job_id) => {
-                if let Err(error) = self.job_queue.run_next(&mut self.project) {
+                let artifact_dir = current_project_dir(&self.project_path.to_string());
+                if let Err(error) = self
+                    .job_queue
+                    .run_next_with_artifact_dir(&mut self.project, artifact_dir.as_deref())
+                {
                     self.mark_project_mutation_dirty();
                     self.set_error(error.to_string());
                     self.refresh_view_state();
@@ -291,7 +295,11 @@ impl AppControllerState {
             self.set_error(error.to_string());
             return;
         }
-        if let Err(error) = self.job_queue.run_next(&mut self.project) {
+        let artifact_dir = current_project_dir(&self.project_path.to_string());
+        if let Err(error) = self
+            .job_queue
+            .run_next_with_artifact_dir(&mut self.project, artifact_dir.as_deref())
+        {
             self.mark_project_mutation_dirty();
             self.set_error(error.to_string());
             self.refresh_view_state();
@@ -429,6 +437,7 @@ impl AppControllerState {
     }
 
     fn refresh_loaded_audio_assets(&mut self) -> usize {
+        let project_dir = current_project_dir(&self.project_path.to_string());
         let mut affected_assets = Vec::new();
         for asset in &mut self.project.audio_assets {
             let Some(error) = audio_asset_load_error(asset) else {
@@ -439,6 +448,17 @@ impl AppControllerState {
                 }
                 continue;
             };
+            if error.starts_with("input audio asset offline:") {
+                if let Some(relinked_path) =
+                    audio_asset_project_dir_relink_path(asset, project_dir.as_deref())
+                {
+                    asset.path = relinked_path.to_string_lossy().to_string();
+                    asset.import_status = "online".to_string();
+                    asset.relink_hint.clear();
+                    affected_assets.push((asset.id.clone(), String::new()));
+                    continue;
+                }
+            }
             let status = if error.starts_with("input audio asset offline:") {
                 "offline"
             } else {
@@ -2366,6 +2386,14 @@ fn current_project_dir(path: &str) -> Option<PathBuf> {
 
 fn audio_asset_load_error(asset: &AudioAsset) -> Option<String> {
     let path = Path::new(&asset.path);
+    audio_asset_load_error_at_path(asset, path, &asset.path)
+}
+
+fn audio_asset_load_error_at_path(
+    asset: &AudioAsset,
+    path: &Path,
+    display_path: &str,
+) -> Option<String> {
     match inspect_wav_file(path) {
         Ok(inspection) => {
             let metadata_changed = (asset.duration - inspection.metadata.duration).abs() > 1e-9
@@ -2374,14 +2402,43 @@ fn audio_asset_load_error(asset: &AudioAsset) -> Option<String> {
             if (!asset.fingerprint.is_empty() && asset.fingerprint != inspection.fingerprint)
                 || metadata_changed
             {
-                Some(format!("input audio asset modified: {}", asset.path))
+                Some(format!("input audio asset modified: {display_path}"))
             } else {
                 None
             }
         }
-        Err(_) if !path.is_file() => Some(format!("input audio asset offline: {}", asset.path)),
-        Err(_) => Some(format!("input audio asset modified: {}", asset.path)),
+        Err(_) if !path.is_file() => Some(format!("input audio asset offline: {display_path}")),
+        Err(_) => Some(format!("input audio asset modified: {display_path}")),
     }
+}
+
+fn audio_asset_project_dir_relink_path(
+    asset: &AudioAsset,
+    project_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    let project_dir = project_dir?;
+    let mut file_names = Vec::new();
+    if !asset.relink_hint.is_empty() {
+        file_names.push(asset.relink_hint.clone());
+    }
+    if let Some(file_name) = Path::new(&asset.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    {
+        if !file_names.iter().any(|candidate| candidate == file_name) {
+            file_names.push(file_name.to_string());
+        }
+    }
+
+    file_names.into_iter().find_map(|file_name| {
+        let candidate = project_dir.join(file_name);
+        let display_path = candidate.to_string_lossy();
+        if audio_asset_load_error_at_path(asset, &candidate, &display_path).is_none() {
+            Some(candidate)
+        } else {
+            None
+        }
+    })
 }
 
 fn cache_entry_is_valid(entry: &CacheEntry, project_dir: Option<&Path>) -> bool {
@@ -2867,6 +2924,53 @@ mod tests {
             .job_runs
             .iter()
             .any(|run| run.track_id == track_id && run.state == ResultState::Failed));
+    }
+
+    #[test]
+    fn controller_run_track_persists_artifact_payloads_in_project_directory() {
+        let root = test_dir("controller-artifact-cache");
+        let project_path = root.join("show.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.project_path = cxx_qt_lib::QString::from(project_path.to_string_lossy().to_string());
+        let spec = TransformSpec::new(
+            "test.artifact",
+            "1",
+            "Artifact",
+            "audio-or-markers.v1",
+            "artifact.stem.v1",
+            "light",
+        );
+        state.transform_registry.register(spec.clone()).unwrap();
+        let mut registry = JobRegistry::new();
+        registry
+            .register(spec, |_context, _params| {
+                Ok(TransformResult::artifact("stem", b"cached stem"))
+            })
+            .unwrap();
+        state.job_queue = LocalJobQueue::new(registry);
+        let track_id = state.add_transform_track_state("track_source", "test.artifact", "1", "{}");
+
+        let job_id = state.run_track_state(&track_id);
+
+        assert!(!job_id.is_empty());
+        let track = state
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap();
+        assert_eq!(track.result_state, ResultState::Complete);
+        let entry = state
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == track.cache_refs[0])
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.join(&entry.path)).unwrap(),
+            b"cached stem"
+        );
     }
 
     #[test]
@@ -3459,6 +3563,30 @@ mod tests {
     }
 
     #[test]
+    fn controller_open_project_rejects_invalid_graph_without_replacing_state() {
+        let root = test_dir("open-invalid-graph");
+        let project_path = root.join("bad.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let original_project_name = state.project_name.to_string();
+        let mut invalid_project = serde_json::to_value(&state.project).unwrap();
+        invalid_project["tracks"][1]["input_track_ids"] = serde_json::json!(["missing_track"]);
+        std::fs::write(
+            &project_path,
+            serde_json::to_string_pretty(&invalid_project).unwrap(),
+        )
+        .unwrap();
+
+        assert!(!state.open_project_state(project_path.to_str().unwrap()));
+
+        assert_eq!(state.project_name.to_string(), original_project_name);
+        assert!(state
+            .last_error
+            .to_string()
+            .contains("missing input track: missing_track"));
+    }
+
+    #[test]
     fn controller_open_project_restores_source_track_when_audio_returns() {
         let root = test_dir("open-restored-audio");
         let audio_path = root.join("song.wav");
@@ -3505,6 +3633,39 @@ mod tests {
         assert!(generated.error.is_empty());
         reopened.select_track_state(&source_id);
         assert!(reopened.selected_track_can_play);
+    }
+
+    #[test]
+    fn controller_open_project_relinks_audio_from_project_directory() {
+        let source_root = test_dir("open-project-relink-source");
+        let project_root = test_dir("open-project-relink-project");
+        let original_audio_path = source_root.join("song.wav");
+        let project_audio_path = project_root.join("song.wav");
+        let project_path = project_root.join("show.autolight");
+        write_test_wav(&original_audio_path, 44_100, 2, 16);
+        let mut state = AppControllerState::default();
+        let source_id = state.import_audio_state(original_audio_path.to_str().unwrap());
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::remove_file(&original_audio_path).unwrap();
+        write_test_wav(&project_audio_path, 44_100, 2, 16);
+
+        let mut opened = AppControllerState::default();
+        assert!(opened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(opened.is_dirty);
+        assert_eq!(
+            opened.project.audio_assets[0].path,
+            project_audio_path.to_string_lossy().to_string()
+        );
+        assert_eq!(opened.project.audio_assets[0].import_status, "online");
+        let source = opened
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == source_id)
+            .unwrap();
+        assert_eq!(source.result_state, ResultState::Complete);
+        assert!(source.error.is_empty());
     }
 
     #[test]
@@ -3683,6 +3844,12 @@ mod tests {
         assert!(adapter_qml.contains("rustController.applyTimelineScrollSeconds"));
         assert!(adapter_qml.contains("rustController.applyTimelineVisibleSeconds"));
         assert!(adapter_qml.contains("rustController.setTimelineVisibleTrackRange"));
+        assert!(adapter_qml.contains(
+            "function set_timeline_visible_track_range(firstRow, rowCount) { rustController.setTimelineVisibleTrackRange(firstRow, rowCount) }"
+        ));
+        assert!(!adapter_qml.contains(
+            "function set_timeline_visible_track_range(firstRow, rowCount) { rustController.setTimelineVisibleTrackRange(firstRow, rowCount); reloadModels() }"
+        ));
         assert!(adapter_qml.contains("rustController.snapTimelineTime"));
         assert!(adapter_qml.contains("function add_fixed_interval_track(trackId, duration, interval) { return add_transform_track"));
         assert!(adapter_qml

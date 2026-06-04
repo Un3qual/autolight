@@ -141,7 +141,7 @@ QtObject {
     function set_timeline_zoom(value) { rustController.setTimelineZoom(value); reloadModels() }
     function set_timeline_scroll_seconds(value) { rustController.applyTimelineScrollSeconds(value); reloadModels() }
     function set_timeline_visible_seconds(value) { rustController.applyTimelineVisibleSeconds(value); reloadModels() }
-    function set_timeline_visible_track_range(firstRow, rowCount) { rustController.setTimelineVisibleTrackRange(firstRow, rowCount); reloadModels() }
+    function set_timeline_visible_track_range(firstRow, rowCount) { rustController.setTimelineVisibleTrackRange(firstRow, rowCount) }
     function select_track(trackId) { rustController.selectTrack(trackId); reloadModels() }
     function set_track_expanded(trackId, expanded) { var changed = rustController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }
     function snap_timeline_time(seconds, bypassSnap) { return rustController.snapTimelineTime(seconds, bypassSnap) }

@@ -1,10 +1,13 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
+
+use crate::graph::{validate_graph, GraphError};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -22,6 +25,8 @@ pub enum ProjectError {
     Json(#[from] serde_json::Error),
     #[error("unsupported schema version: {0}")]
     UnsupportedSchemaVersion(u32),
+    #[error("invalid project graph: {0}")]
+    InvalidGraph(#[from] GraphError),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +66,7 @@ impl ProjectDocument {
     pub fn from_json_str(input: &str) -> Result<Self, ProjectError> {
         let project: Self = serde_json::from_str(input)?;
         project.ensure_supported_schema()?;
+        validate_graph(&project)?;
         Ok(project)
     }
 
@@ -75,22 +81,47 @@ impl ProjectDocument {
 
     pub fn to_json_string_pretty(&self) -> Result<String, ProjectError> {
         self.ensure_supported_schema()?;
+        validate_graph(self)?;
         Ok(serde_json::to_string_pretty(self)?)
     }
 
     pub fn save_path(&self, path: impl AsRef<Path>) -> Result<(), ProjectError> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent).map_err(|source| ProjectError::CreateDirectory {
                 path: parent.to_path_buf(),
                 source,
             })?;
         }
         let output = self.to_json_string_pretty()?;
-        fs::write(path, output).map_err(|source| ProjectError::Write {
-            path: path.to_path_buf(),
-            source,
-        })
+        let tmp_path = atomic_save_temp_path(path);
+        let write_result = (|| -> Result<(), ProjectError> {
+            let mut file = fs::File::create(&tmp_path).map_err(|source| ProjectError::Write {
+                path: tmp_path.clone(),
+                source,
+            })?;
+            file.write_all(output.as_bytes())
+                .map_err(|source| ProjectError::Write {
+                    path: tmp_path.clone(),
+                    source,
+                })?;
+            file.sync_all().map_err(|source| ProjectError::Write {
+                path: tmp_path.clone(),
+                source,
+            })?;
+            drop(file);
+            fs::rename(&tmp_path, path).map_err(|source| ProjectError::Write {
+                path: path.to_path_buf(),
+                source,
+            })
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        write_result
     }
 
     fn ensure_supported_schema(&self) -> Result<(), ProjectError> {
@@ -99,6 +130,18 @@ impl ProjectDocument {
         }
         Ok(())
     }
+}
+
+fn atomic_save_temp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("project.autolight");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    path.with_file_name(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -232,7 +275,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::{ProjectDocument, TrackType, SCHEMA_VERSION};
 
@@ -308,6 +351,38 @@ mod tests {
         let err = ProjectDocument::from_json_str(&raw).unwrap_err();
 
         assert!(err.to_string().contains("unsupported schema version: 999"));
+    }
+
+    #[test]
+    fn project_load_rejects_invalid_graph() {
+        let raw = fs::read_to_string(fixture_path("basic_graph.autolight")).unwrap();
+        let mut project: Value = serde_json::from_str(&raw).unwrap();
+        project["tracks"][1]["input_track_ids"] = json!(["missing_track"]);
+        let raw = serde_json::to_string(&project).unwrap();
+
+        let err = ProjectDocument::from_json_str(&raw).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("invalid project graph: missing input track: missing_track"));
+    }
+
+    #[test]
+    fn project_save_failure_does_not_replace_existing_file() {
+        let mut project =
+            ProjectDocument::load_path(fixture_path("basic_graph.autolight")).unwrap();
+        let path = round_trip_path("invalid-save");
+        project.save_path(&path).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        project.tracks[1].input_track_ids = vec!["missing_track".to_string()];
+
+        let err = project.save_path(&path).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("missing input track: missing_track"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        fs::remove_file(&path).unwrap();
     }
 
     fn track_count(project: &ProjectDocument, track_type: TrackType) -> usize {

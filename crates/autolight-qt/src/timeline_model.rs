@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use autolight_core::cache::artifact_kinds_for_track;
-use autolight_core::graph::{default_expanded_track_ids, project_tree};
+use autolight_core::graph::{
+    default_expanded_track_ids, project_tree, source_track_id_for_context,
+};
 use autolight_core::project::{
     AudioAsset, CacheEntry, JobRun, JsonObject, Marker, ProjectDocument, ResultState, Track,
     TrackType,
@@ -437,7 +439,11 @@ fn waveform_duration_seconds(track: &Track) -> f64 {
     track
         .provenance
         .get("visible_waveform")
-        .and_then(|value| value.get("duration_seconds"))
+        .and_then(|value| {
+            value
+                .get("duration_seconds")
+                .or_else(|| value.get("duration"))
+        })
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
 }
@@ -446,13 +452,133 @@ fn visible_waveform_samples(project: &ProjectDocument, track: &Track) -> Vec<Val
     if !track_has_valid_complete_artifact(project, track, "waveform") {
         return Vec::new();
     }
-    track
+    let Some(value) = track.provenance.get("visible_waveform") else {
+        return Vec::new();
+    };
+    let duration = waveform_duration_seconds(track)
+        .max(source_audio_duration_seconds(project, track))
+        .max(0.0);
+    if let Some(samples) = value.get("samples").and_then(Value::as_array) {
+        return normalize_waveform_samples(samples, duration);
+    }
+    normalize_waveform_min_max_arrays(value, duration)
+}
+
+fn normalize_waveform_samples(samples: &[Value], duration: f64) -> Vec<Value> {
+    let count = samples.len();
+    samples
+        .iter()
+        .enumerate()
+        .filter_map(|(index, sample)| {
+            let time = sample_time(sample, index, count, duration);
+            let peak = sample
+                .get("peak")
+                .and_then(Value::as_f64)
+                .or_else(|| waveform_peak_from_min_max(sample))?;
+            let rms = sample
+                .get("rms")
+                .and_then(Value::as_f64)
+                .unwrap_or_else(|| waveform_rms_from_min_max(sample).unwrap_or(peak));
+            Some(json!({
+                "time": round6(time),
+                "peak": clamped_unit(peak),
+                "rms": clamped_unit(rms),
+            }))
+        })
+        .collect()
+}
+
+fn normalize_waveform_min_max_arrays(value: &Value, duration: f64) -> Vec<Value> {
+    let Some(min_values) = value.get("min").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(max_values) = value.get("max").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let count = value
+        .get("buckets")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| min_values.len().min(max_values.len()));
+    let count = count.min(min_values.len()).min(max_values.len());
+    (0..count)
+        .filter_map(|index| {
+            let min_value = min_values[index].as_f64()?;
+            let max_value = max_values[index].as_f64()?;
+            let peak = min_value.abs().max(max_value.abs());
+            let rms = ((min_value.powi(2) + max_value.powi(2)) / 2.0).sqrt();
+            Some(json!({
+                "time": round6(time_for_index(index, count, duration)),
+                "peak": clamped_unit(peak),
+                "rms": clamped_unit(rms),
+            }))
+        })
+        .collect()
+}
+
+fn waveform_peak_from_min_max(sample: &Value) -> Option<f64> {
+    let min_value = sample.get("min").and_then(Value::as_f64)?;
+    let max_value = sample.get("max").and_then(Value::as_f64)?;
+    Some(min_value.abs().max(max_value.abs()))
+}
+
+fn waveform_rms_from_min_max(sample: &Value) -> Option<f64> {
+    let min_value = sample.get("min").and_then(Value::as_f64)?;
+    let max_value = sample.get("max").and_then(Value::as_f64)?;
+    Some(((min_value.powi(2) + max_value.powi(2)) / 2.0).sqrt())
+}
+
+fn sample_time(sample: &Value, index: usize, count: usize, duration: f64) -> f64 {
+    sample
+        .get("time")
+        .or_else(|| sample.get("timestamp"))
+        .and_then(Value::as_f64)
+        .filter(|time| time.is_finite())
+        .unwrap_or_else(|| time_for_index(index, count, duration))
+}
+
+fn time_for_index(index: usize, count: usize, duration: f64) -> f64 {
+    if count == 0 || !duration.is_finite() || duration <= 0.0 {
+        return 0.0;
+    }
+    index as f64 * duration / count as f64
+}
+
+fn round6(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
+fn clamped_unit(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    value.clamp(0.0, 1.0)
+}
+
+fn source_audio_duration_seconds(project: &ProjectDocument, track: &Track) -> f64 {
+    let Some(source_track_id) = source_track_id_for_context(project, &track.id) else {
+        return 0.0;
+    };
+    let Some(source_track) = project
+        .tracks
+        .iter()
+        .find(|candidate| candidate.id == source_track_id)
+    else {
+        return 0.0;
+    };
+    let Some(asset_id) = source_track
         .provenance
-        .get("visible_waveform")
-        .and_then(|value| value.get("samples"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
+        .get("asset_id")
+        .and_then(Value::as_str)
+    else {
+        return 0.0;
+    };
+    project
+        .audio_assets
+        .iter()
+        .find(|asset| asset.id == asset_id)
+        .map(|asset| asset.duration)
+        .unwrap_or(0.0)
 }
 
 fn waveform_level_bucket_count(project: &ProjectDocument, track: &Track) -> usize {
@@ -466,6 +592,7 @@ fn waveform_level_bucket_count(project: &ProjectDocument, track: &Track) -> usiz
             value
                 .get("level_bucket_count")
                 .or_else(|| value.get("levelBucketCount"))
+                .or_else(|| value.get("buckets"))
         })
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
@@ -481,10 +608,89 @@ fn visible_analysis_samples(project: &ProjectDocument, track: &Track, key: &str)
     if !track_has_valid_complete_artifact(project, track, expected_kind) {
         return Vec::new();
     }
-    track
-        .provenance
-        .get(key)
-        .and_then(Value::as_array)
+    let Some(value) = track.provenance.get(key) else {
+        return Vec::new();
+    };
+    let duration = source_audio_duration_seconds(project, track);
+    match key {
+        "visible_energy" => normalize_energy_samples(value, duration),
+        "visible_harmonic_color" => normalize_harmonic_color_samples(value, duration),
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_energy_samples(value: &Value, duration: f64) -> Vec<Value> {
+    if let Some(bins) = value.get("bins").and_then(Value::as_array) {
+        let sample_rate = value.get("sample_rate").and_then(Value::as_f64);
+        return bins
+            .iter()
+            .enumerate()
+            .filter_map(|(index, bin)| {
+                let intensity = bin.as_f64()?;
+                let time = sample_rate
+                    .filter(|rate| rate.is_finite() && *rate > 0.0)
+                    .map(|rate| index as f64 / rate)
+                    .unwrap_or_else(|| time_for_index(index, bins.len(), duration));
+                Some(json!({
+                    "time": round6(time),
+                    "intensity": clamped_unit(intensity),
+                }))
+            })
+            .collect();
+    }
+    let frames = provenance_frames(value);
+    frames
+        .iter()
+        .enumerate()
+        .filter_map(|(index, sample)| {
+            let time = sample_time(sample, index, frames.len(), duration);
+            let intensity = sample
+                .get("intensity")
+                .or_else(|| sample.get("value"))
+                .and_then(Value::as_f64)?;
+            let mut frame = json!({
+                "time": round6(time),
+                "intensity": clamped_unit(intensity),
+            });
+            if let Some(color) = sample.get("color").and_then(Value::as_str) {
+                frame["color"] = json!(color);
+            }
+            Some(frame)
+        })
+        .collect()
+}
+
+fn normalize_harmonic_color_samples(value: &Value, duration: f64) -> Vec<Value> {
+    let frames = provenance_frames(value);
+    frames
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| {
+            let time = sample_time(sample, index, frames.len(), duration);
+            let color = sample
+                .get("color")
+                .and_then(Value::as_str)
+                .unwrap_or("#93c5fd");
+            let mut frame = json!({
+                "time": round6(time),
+                "color": color,
+            });
+            if let Some(intensity) = sample
+                .get("intensity")
+                .or_else(|| sample.get("value"))
+                .and_then(Value::as_f64)
+            {
+                frame["intensity"] = json!(clamped_unit(intensity));
+            }
+            frame
+        })
+        .collect()
+}
+
+fn provenance_frames(value: &Value) -> Vec<Value> {
+    value
+        .as_array()
+        .or_else(|| value.get("frames").and_then(Value::as_array))
         .cloned()
         .unwrap_or_default()
 }
@@ -531,15 +737,22 @@ fn json_object(values: impl IntoIterator<Item = (&'static str, Value)>) -> JsonO
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
 
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use super::{
-        rust_demo_project, timeline_rows_for_project, timeline_rows_for_project_with_state,
-        timeline_rows_json, timeline_rows_json_with_state,
+        cache_entry, generated_track, json_object, rust_demo_project, timeline_rows_for_project,
+        timeline_rows_for_project_with_state, timeline_rows_json, timeline_rows_json_with_state,
     };
     use autolight_core::graph::default_expanded_track_ids;
-    use autolight_core::project::ResultState;
+    use autolight_core::project::{ProjectDocument, ResultState};
+
+    fn fixture_path(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/projects")
+            .join(name)
+    }
 
     #[test]
     fn timeline_demo_project_projects_expected_tree_rows() {
@@ -646,6 +859,90 @@ mod tests {
 
         assert_eq!(waveform.waveform_level_bucket_count, 64);
         assert_eq!(waveform.visible_waveform_samples.len(), 2);
+        assert_eq!(waveform.visible_waveform_samples[0]["time"], json!(0.0));
+        assert_eq!(waveform.visible_waveform_samples[0]["peak"], json!(0.2));
+        assert!(waveform.visible_waveform_samples[0].get("rms").is_some());
+    }
+
+    #[test]
+    fn timeline_rows_normalize_legacy_waveform_and_energy_payloads() {
+        let project = ProjectDocument::load_path(fixture_path("tree_analysis.autolight")).unwrap();
+        let rows = timeline_rows_for_project(&project);
+        let waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+        let energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_energy")
+            .unwrap();
+
+        assert_eq!(waveform.waveform_level_bucket_count, 3);
+        assert_eq!(waveform.visible_waveform_samples.len(), 3);
+        assert_eq!(waveform.visible_waveform_samples[1]["time"], json!(10.0));
+        assert_eq!(waveform.visible_waveform_samples[1]["peak"], json!(0.5));
+        assert!(waveform.visible_waveform_samples[1].get("rms").is_some());
+        assert_eq!(energy.visible_energy_samples.len(), 3);
+        assert_eq!(energy.visible_energy_samples[1]["time"], json!(0.1));
+        assert_eq!(energy.visible_energy_samples[1]["intensity"], json!(0.8));
+    }
+
+    #[test]
+    fn timeline_rows_emit_drawable_analysis_samples() {
+        let mut project = rust_demo_project();
+        project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drum_energy")
+            .unwrap()
+            .result_state = ResultState::Complete;
+        project.cache_entries.push(cache_entry(
+            "cache_harmonic",
+            "harmonic-color",
+            "cache/harmonic/rust-demo.json",
+        ));
+        project.tracks.push(generated_track(
+            "track_harmonic",
+            "Harmonic Color",
+            "track_source",
+            "music.harmonic_color",
+            "artifact.harmonic-color.v1",
+            "dep_harmonic",
+            ResultState::Complete,
+            vec!["cache_harmonic".to_string()],
+            json_object([(
+                "visible_harmonic_color",
+                json!([
+                    {"timestamp": 0.0, "color": "#f00"},
+                    {"time": 0.5, "color": "#0f0", "intensity": 0.75}
+                ]),
+            )]),
+        ));
+
+        let rows = timeline_rows_for_project(&project);
+        let energy = rows
+            .iter()
+            .find(|row| row.track_id == "track_drum_energy")
+            .unwrap();
+        let harmonic = rows
+            .iter()
+            .find(|row| row.track_id == "track_harmonic")
+            .unwrap();
+
+        assert_eq!(energy.visible_energy_samples[0]["time"], json!(0.0));
+        assert_eq!(energy.visible_energy_samples[0]["intensity"], json!(0.2));
+        assert_eq!(
+            harmonic.visible_harmonic_color_samples[0]["time"],
+            json!(0.0)
+        );
+        assert_eq!(
+            harmonic.visible_harmonic_color_samples[0]["color"],
+            json!("#f00")
+        );
+        assert_eq!(
+            harmonic.visible_harmonic_color_samples[1]["intensity"],
+            json!(0.75)
+        );
     }
 
     #[test]
