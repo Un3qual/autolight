@@ -9,7 +9,7 @@ Window {
     width: 1120
     height: 720
     visible: true
-    title: appController.projectName
+    title: root.controller.projectName
     color: "#181a1f"
     readonly property real timelineLeftPadding: 24
     readonly property real timelineLabelWidth: 280
@@ -34,19 +34,137 @@ Window {
     readonly property color footerBackground: "#111318"
     readonly property color controlTextColor: root.textPrimary
     readonly property color controlMutedTextColor: root.textMuted
-    readonly property string statusError: appController.lastError.length > 0 ? appController.lastError : appController.playback.lastError
-    readonly property var markerColorOptions: appController.markerColorOptions
-    readonly property var controller: appController
+    readonly property string rustAdapterSource: [
+        "import QtQml",
+        "import QtQml.Models",
+        "import Autolight.Qt 1.0",
+        "QtObject {",
+        "    id: rustAdapter",
+        "    property var rustController: AppController {}",
+        "    readonly property string projectName: rustController.projectName",
+        "    readonly property string lastError: rustController.lastError",
+        "    readonly property string timelineRowsJson: rustController.timelineRowsJson",
+        "    readonly property string transformSpecsJson: rustController.transformSpecsJson",
+        "    readonly property string selectedMarkerIdsJson: rustController.selectedMarkerIdsJson",
+        "    readonly property string selectedTrackMarkersJson: rustController.selectedTrackMarkersJson",
+        "    readonly property string markerColorOptionsJson: rustController.markerColorOptionsJson",
+        "    readonly property string projectPath: rustController.projectPath",
+        "    readonly property bool isDirty: rustController.isDirty",
+        "    readonly property bool canUndo: rustController.canUndo",
+        "    readonly property bool canRedo: rustController.canRedo",
+        "    readonly property string selectedTrackId: rustController.selectedTrackId",
+        "    readonly property bool selectedTrackCanPlay: rustController.selectedTrackCanPlay",
+        "    readonly property bool selectedTrackCanRerun: rustController.selectedTrackCanRerun",
+        "    readonly property bool selectedTrackHasRunningJob: rustController.selectedTrackHasRunningJob",
+        "    readonly property bool selectedTrackIsEditable: rustController.selectedTrackIsEditable",
+        "    property var selectedMarkerIds: []",
+        "    property var selectedTrackMarkers: []",
+        "    property var markerColorOptions: []",
+        "    readonly property real timelinePixelsPerSecond: rustController.timelinePixelsPerSecond",
+        "    readonly property real timelineScrollSeconds: rustController.timelineScrollSeconds",
+        "    readonly property real timelineVisibleSeconds: rustController.timelineVisibleSeconds",
+        "    readonly property real timelineDurationSeconds: rustController.timelineDurationSeconds",
+        "    property var trackModel: ListModel {}",
+        "    property var transformModel: ListModel {",
+        "        function version_at(index) {",
+        "            if (index < 0 || index >= count) return \"\"",
+        "            return get(index).version",
+        "        }",
+        "    }",
+        "    property var playback: QtObject {",
+        "        readonly property string lastError: rustController.playbackLastError",
+        "        readonly property bool isPlaying: rustController.playbackIsPlaying",
+        "        readonly property string sourcePath: rustController.playbackSourcePath",
+        "        readonly property real positionSeconds: rustController.playbackPositionSeconds",
+        "        readonly property real durationSeconds: rustController.playbackDurationSeconds",
+        "        readonly property real volume: rustController.playbackVolume",
+        "        function play() { var played = rustController.playLoadedPlayback(); rustAdapter.reloadModels(); return played }",
+        "        function set_volume(value) { rustController.setPlaybackVolumeValue(value); rustAdapter.reloadModels() }",
+        "    }",
+        "    function reloadTrackModel() {",
+        "        trackModel.clear()",
+        "        var rows = []",
+        "        try { rows = JSON.parse(rustController.timelineRowsJson) } catch (error) { return }",
+        "        for (var i = 0; i < rows.length; i++) {",
+        "            trackModel.append(rows[i])",
+        "        }",
+        "    }",
+        "    function parseJsonArray(payload) {",
+        "        try {",
+        "            var rows = JSON.parse(payload)",
+        "            return Array.isArray(rows) ? rows : []",
+        "        } catch (error) {",
+        "            return []",
+        "        }",
+        "    }",
+        "    function reloadTransformModel() {",
+        "        transformModel.clear()",
+        "        var rows = []",
+        "        try { rows = JSON.parse(rustController.transformSpecsJson) } catch (error) { return }",
+        "        for (var i = 0; i < rows.length; i++) {",
+        "            transformModel.append(rows[i])",
+        "        }",
+        "    }",
+        "    function reloadSelectionModels() {",
+        "        selectedMarkerIds = parseJsonArray(rustController.selectedMarkerIdsJson)",
+        "        selectedTrackMarkers = parseJsonArray(rustController.selectedTrackMarkersJson)",
+        "        markerColorOptions = parseJsonArray(rustController.markerColorOptionsJson)",
+        "    }",
+        "    function reloadModels() { reloadTrackModel(); reloadTransformModel(); reloadSelectionModels() }",
+        "    function new_project() { rustController.newProject(); reloadModels() }",
+        "    function open_project(path) { var opened = rustController.openProject(path); reloadModels(); return opened }",
+        "    function save_project(path) { var saved = rustController.saveProject(path || \"\"); reloadModels(); return saved }",
+        "    function import_audio(path) { var id = rustController.importAudio(path); reloadModels(); return id }",
+        "    function load_demo_project() { rustController.loadDemoProject(); reloadModels() }",
+        "    function add_manual_cue_track(name) { var id = rustController.addManualCueTrack(name || \"Manual Cues\"); reloadModels(); return id }",
+        "    function undo() { var changed = rustController.undo(); reloadModels(); return changed }",
+        "    function redo() { var changed = rustController.redo(); reloadModels(); return changed }",
+        "    function add_fixed_interval_track(trackId, duration, interval) { return add_transform_track(trackId, \"markers.fixed_interval\", \"1\", JSON.stringify({\"duration\": duration, \"interval\": interval})) }",
+        "    function run_track(trackId) { var id = rustController.runTrack(trackId); reloadModels(); return id }",
+        "    function rerun_track(trackId) { var id = rustController.rerunTrack(trackId); reloadModels(); return id }",
+        "    function cancel_selected_job() { rustController.cancelSelectedJob(); reloadModels() }",
+        "    function add_transform_track(trackId, transformId, transformVersion, params) { var id = rustController.addTransformTrack(trackId, transformId, transformVersion, params); reloadModels(); return id }",
+        "    function add_vocals_stem_track(trackId) { return add_transform_track(trackId, \"stems.vocals_stand_in\", \"1\", \"{}\") }",
+        "    function refresh_cache_status() { var refs = rustController.refreshCacheStatus(); reloadModels(); return refs }",
+        "    function create_editable_track_from_track(trackId) { var id = rustController.createEditableTrackFromTrack(trackId); reloadModels(); return id }",
+        "    function pause_playback() { rustController.pausePlayback(); reloadModels() }",
+        "    function play_selected_track() { var played = rustController.playSelectedTrack(); reloadModels(); return played }",
+        "    function stop_playback() { rustController.stopPlayback(); reloadModels() }",
+        "    function nudge_playback(delta) { rustController.nudgePlayback(delta); reloadModels() }",
+        "    function seek_playback(value) { rustController.seekPlayback(value); reloadModels() }",
+        "    function set_timeline_zoom(value) { rustController.setTimelineZoom(value); reloadModels() }",
+        "    function set_timeline_scroll_seconds(value) { rustController.applyTimelineScrollSeconds(value); reloadModels() }",
+        "    function set_timeline_visible_seconds(value) { rustController.applyTimelineVisibleSeconds(value); reloadModels() }",
+        "    function set_timeline_visible_track_range(firstRow, rowCount) {}",
+        "    function select_track(trackId) { rustController.selectTrack(trackId); reloadModels() }",
+        "    function set_track_expanded(trackId, expanded) { var changed = rustController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }",
+        "    function snap_timeline_time(seconds, bypassSnap) { return rustController.snapTimelineTime(seconds, bypassSnap) }",
+        "    function add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey) { var id = rustController.addMarkerToSelectedTrackWithDuration(timestamp, duration, label, category, colorKey); reloadModels(); return id }",
+        "    function delete_marker_from_selected_track(markerId) { var deleted = rustController.deleteMarkerFromSelectedTrack(markerId); reloadModels(); return deleted }",
+        "    function delete_selected_markers() { var deleted = rustController.deleteSelectedMarkers(); reloadModels(); return deleted }",
+        "    function update_selected_marker_with_duration(timestamp, duration, label, category, colorKey) { var updated = rustController.updateSelectedMarkerWithDuration(timestamp, duration, label, category, colorKey); reloadModels(); return updated }",
+        "    function bulk_update_selected_markers(label, category, colorKey) { var updated = rustController.bulkUpdateSelectedMarkers(label, category, colorKey); reloadModels(); return updated }",
+        "    function toggle_marker_selection(markerId, extendSelection) { rustController.toggleMarkerSelection(markerId, extendSelection); reloadModels() }",
+        "    function move_selected_markers(delta, bypass) { var moved = rustController.moveSelectedMarkers(delta, bypass); reloadModels(); return moved }",
+        "    function resize_marker(markerId, duration) { var resized = rustController.resizeMarker(markerId, duration); reloadModels(); return resized }",
+        "    Component.onCompleted: load_demo_project()",
+        "}",
+    ].join("\n")
+    readonly property var controller: typeof appController === "undefined"
+        ? Qt.createQmlObject(root.rustAdapterSource, root, "RustAppControllerAdapter")
+        : appController
+    readonly property string statusError: root.controller.lastError.length > 0 ? root.controller.lastError : root.controller.playback.lastError
+    readonly property var markerColorOptions: root.controller.markerColorOptions
 
     function seekTimelineAtX(xValue) {
-        var laneSeconds = appController.timelineScrollSeconds
-            + Math.max(0, xValue - root.timelineLeftPadding) / appController.timelinePixelsPerSecond
-        appController.seek_playback(Math.min(appController.timelineDurationSeconds, laneSeconds))
+        var laneSeconds = root.controller.timelineScrollSeconds
+            + Math.max(0, xValue - root.timelineLeftPadding) / root.controller.timelinePixelsPerSecond
+        root.controller.seek_playback(Math.min(root.controller.timelineDurationSeconds, laneSeconds))
     }
 
     function updateTimelineVisibleSeconds() {
         var laneWidth = Math.max(0, timelineView.rowsWidth - root.timelineLabelWidth - root.timelineLeftPadding)
-        appController.set_timeline_visible_seconds(laneWidth / appController.timelinePixelsPerSecond)
+        root.controller.set_timeline_visible_seconds(laneWidth / root.controller.timelinePixelsPerSecond)
     }
 
     function formatSeconds(seconds) {
@@ -57,52 +175,52 @@ Window {
     }
 
     function togglePlayback() {
-        if (appController.playback.isPlaying) {
-            appController.pause_playback()
-        } else if (appController.selectedTrackId.length === 0 && appController.playback.sourcePath.length > 0) {
-            appController.playback.play()
+        if (root.controller.playback.isPlaying) {
+            root.controller.pause_playback()
+        } else if (root.controller.selectedTrackId.length === 0 && root.controller.playback.sourcePath.length > 0) {
+            root.controller.playback.play()
         } else {
-            appController.play_selected_track()
+            root.controller.play_selected_track()
         }
     }
 
     function newProjectWithConfirmation() {
-        if (appController.isDirty) {
+        if (root.controller.isDirty) {
             discardChangesDialog.pendingAction = "new"
             discardChangesDialog.pendingPath = ""
             discardChangesDialog.open()
         } else {
-            appController.new_project()
+            root.controller.new_project()
         }
     }
 
     function openProjectWithConfirmation(path) {
-        if (appController.isDirty) {
+        if (root.controller.isDirty) {
             discardChangesDialog.pendingAction = "open"
             discardChangesDialog.pendingPath = path
             discardChangesDialog.open()
         } else {
-            appController.open_project(path)
+            root.controller.open_project(path)
         }
     }
 
     function demoProjectWithConfirmation() {
-        if (appController.isDirty) {
+        if (root.controller.isDirty) {
             discardChangesDialog.pendingAction = "demo"
             discardChangesDialog.pendingPath = ""
             discardChangesDialog.open()
         } else {
-            appController.load_demo_project()
+            root.controller.load_demo_project()
         }
     }
 
     function runPendingDiscardAction() {
         if (discardChangesDialog.pendingAction === "new") {
-            appController.new_project()
+            root.controller.new_project()
         } else if (discardChangesDialog.pendingAction === "open") {
-            appController.open_project(discardChangesDialog.pendingPath)
+            root.controller.open_project(discardChangesDialog.pendingPath)
         } else if (discardChangesDialog.pendingAction === "demo") {
-            appController.load_demo_project()
+            root.controller.load_demo_project()
         }
         discardChangesDialog.pendingAction = ""
         discardChangesDialog.pendingPath = ""
@@ -111,7 +229,7 @@ Window {
     Component.onCompleted: root.updateTimelineVisibleSeconds()
 
     Connections {
-        target: appController
+        target: root.controller
         function onTimelinePixelsPerSecondChanged() {
             root.updateTimelineVisibleSeconds()
         }
@@ -130,7 +248,7 @@ Window {
         title: "Save Autolight Project"
         nameFilters: ["Autolight projects (*.autolight)"]
         fileMode: FileDialog.SaveFile
-        onAccepted: appController.save_project(String(selectedFile))
+        onAccepted: root.controller.save_project(String(selectedFile))
     }
 
     FileDialog {
@@ -138,7 +256,7 @@ Window {
         title: "Import Audio"
         nameFilters: ["Audio files (*.wav *.mp3 *.flac *.aiff *.aif *.m4a)", "All files (*)"]
         fileMode: FileDialog.OpenFile
-        onAccepted: appController.import_audio(String(selectedFile))
+        onAccepted: root.controller.import_audio(String(selectedFile))
     }
 
     Dialog {
@@ -193,16 +311,16 @@ Window {
             secondaryText: root.secondaryText
             textMuted: root.textMuted
             Layout.fillWidth: true
-            onAddMarkersRequested: appController.add_fixed_interval_track(appController.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
-            onRunRequested: appController.run_track(appController.selectedTrackId)
-            onRerunRequested: appController.rerun_track(appController.selectedTrackId)
-            onCancelRequested: appController.cancel_selected_job()
+            onAddMarkersRequested: root.controller.add_fixed_interval_track(root.controller.selectedTrackId, root.defaultMarkerDuration, root.defaultMarkerInterval)
+            onRunRequested: root.controller.run_track(root.controller.selectedTrackId)
+            onRerunRequested: root.controller.rerun_track(root.controller.selectedTrackId)
+            onCancelRequested: root.controller.cancel_selected_job()
             onAddTransformRequested: function(transformId, transformVersion, params) {
-                appController.add_transform_track(appController.selectedTrackId, transformId, transformVersion, params)
+                root.controller.add_transform_track(root.controller.selectedTrackId, transformId, transformVersion, params)
             }
-            onAddVocalsStemRequested: appController.add_vocals_stem_track(appController.selectedTrackId)
-            onRefreshCacheRequested: appController.refresh_cache_status()
-            onDeriveEditableRequested: appController.create_editable_track_from_track(appController.selectedTrackId)
+            onAddVocalsStemRequested: root.controller.add_vocals_stem_track(root.controller.selectedTrackId)
+            onRefreshCacheRequested: root.controller.refresh_cache_status()
+            onDeriveEditableRequested: root.controller.create_editable_track_from_track(root.controller.selectedTrackId)
         }
 
         TimelineRuler {
@@ -222,11 +340,11 @@ Window {
             secondaryText: root.secondaryText
             formatSeconds: root.formatSeconds
             Layout.fillWidth: true
-            onNudgeRequested: function(delta) { appController.nudge_playback(delta) }
+            onNudgeRequested: function(delta) { root.controller.nudge_playback(delta) }
             onTogglePlaybackRequested: root.togglePlayback()
-            onStopRequested: appController.stop_playback()
-            onVolumeRequested: function(value) { appController.playback.set_volume(value) }
-            onSeekRequested: function(value) { appController.seek_playback(value) }
+            onStopRequested: root.controller.stop_playback()
+            onVolumeRequested: function(value) { root.controller.playback.set_volume(value) }
+            onSeekRequested: function(value) { root.controller.seek_playback(value) }
         }
 
         RowLayout {
@@ -241,12 +359,12 @@ Window {
                 id: timelineZoomSlider
                 from: 24
                 to: 240
-                value: appController.timelinePixelsPerSecond
+                value: root.controller.timelinePixelsPerSecond
                 Layout.preferredWidth: 180
-                onMoved: appController.set_timeline_zoom(value)
+                onMoved: root.controller.set_timeline_zoom(value)
             }
             Label {
-                text: Math.round(appController.timelinePixelsPerSecond) + " px/s"
+                text: Math.round(root.controller.timelinePixelsPerSecond) + " px/s"
                 color: root.textMuted
                 font.pixelSize: 12
                 Layout.preferredWidth: 64
@@ -254,10 +372,10 @@ Window {
             Slider {
                 id: timelineScrollSlider
                 from: 0
-                to: Math.max(0, appController.timelineDurationSeconds - appController.timelineVisibleSeconds)
-                value: appController.timelineScrollSeconds
+                to: Math.max(0, root.controller.timelineDurationSeconds - root.controller.timelineVisibleSeconds)
+                value: root.controller.timelineScrollSeconds
                 Layout.fillWidth: true
-                onMoved: appController.set_timeline_scroll_seconds(value)
+                onMoved: root.controller.set_timeline_scroll_seconds(value)
             }
         }
 
@@ -285,7 +403,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onLayoutWidthChanged: root.updateTimelineVisibleSeconds()
-                onTrackSelected: function(trackId) { appController.select_track(trackId) }
+                onTrackSelected: function(trackId) { root.controller.select_track(trackId) }
                 onSeekRequested: function(x) { root.seekTimelineAtX(x) }
             }
 
@@ -301,26 +419,26 @@ Window {
                 Layout.preferredWidth: 260
                 Layout.fillHeight: true
                 onAddCueRequested: function(timestamp, duration, label, category, colorKey) {
-                    appController.add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey)
+                    root.controller.add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey)
                 }
                 onDeleteCueRequested: function(markerId) {
-                    if (appController.delete_marker_from_selected_track(markerId)) {
+                    if (root.controller.delete_marker_from_selected_track(markerId)) {
                         markerInspector.clearSelectionId()
                     }
                 }
                 onDeleteSelectedCuesRequested: {
-                    if (appController.delete_selected_markers() > 0) {
+                    if (root.controller.delete_selected_markers() > 0) {
                         markerInspector.clearSelectionId()
                     }
                 }
                 onUpdateCueRequested: function(timestamp, duration, label, category, colorKey) {
-                    appController.update_selected_marker_with_duration(timestamp, duration, label, category, colorKey)
+                    root.controller.update_selected_marker_with_duration(timestamp, duration, label, category, colorKey)
                 }
                 onBulkUpdateRequested: function(label, category, colorKey) {
-                    appController.bulk_update_selected_markers(label, category, colorKey)
+                    root.controller.bulk_update_selected_markers(label, category, colorKey)
                 }
                 onToggleMarkerSelectionRequested: function(markerId, extendSelection) {
-                    appController.toggle_marker_selection(markerId, extendSelection)
+                    root.controller.toggle_marker_selection(markerId, extendSelection)
                     markerInspector.syncMarkerEditorFromSelection()
                 }
             }

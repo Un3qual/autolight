@@ -1,75 +1,52 @@
 # Autolight NOW
 
-Updated: 2026-06-03
+Updated: 2026-06-04
 
-## Active Batch: Rust CXX-Qt Smoke Spike
+## Active Batch: None
 
-**Status:** ready
+**Status:** complete
 
-**Goal:** Prove that a Rust binary can load the existing Qt Quick/QML shell through CXX-Qt and expose a minimal `AppController`-like object to QML.
+**Goal:** The Rust/CXX-Qt runtime cutover is complete for the current roadmap. No unblocked Rust-port batch remains in `docs/ROADMAP.md`.
 
-**Why this batch:** The Rust port is locked to CXX-Qt. Nothing else should be ported until the Qt/Rust bridge can launch the current shell in offscreen smoke mode.
+## Current State
 
-## Target Paths
+The Rust/CXX-Qt app is now the primary runtime path. The Python/PySide app remains checked in as the reference implementation and parity baseline.
 
-- `Cargo.toml`
-- `crates/autolight-qt/Cargo.toml`
-- `crates/autolight-qt/build.rs`
-- `crates/autolight-qt/src/lib.rs`
-- `crates/autolight-qt/src/app_controller.rs`
-- `crates/autolight-app/Cargo.toml`
-- `crates/autolight-app/src/main.rs`
-- `Cargo.lock`
-- `UI/Main.qml` only if a minimal import or context adapter is required
-- `README.md` only for new Rust smoke/run commands if the spike works
-
-## Reference Docs
-
-- Active architecture: `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md`
-- Background plan: `docs/superpowers/plans/2026-06-03-autolight-rust-cxx-qt-port.md`, Task 1 only
-- Process rules: `docs/PROCESS.md`
-
-Do not read older Python implementation plans unless the spike needs to understand an exact QML property or startup behavior.
-
-## Implementation Contract
-
-Build the smallest useful spike:
-
-- A Cargo workspace exists.
-- `autolight-app` starts a Qt application.
-- `autolight-qt` registers or exposes a minimal Rust-backed controller.
-- The controller exposes `projectName`, `lastError`, and `newProject()`.
-- Any other controller properties, child objects, or models read during `UI/Main.qml` startup are stubbed with inert values so the existing QML shell can load without runtime binding errors.
-- The Rust binary supports `--smoke`.
-- Offscreen smoke proves the QML root loads and can observe at least one Rust controller value.
-- `Cargo.lock` is created and committed before locked Cargo verification is required.
-
-Do not port project schema, jobs, transforms, timeline models, or analysis in this batch.
-
-## Verification
-
-Run the commands that exist after the spike is implemented:
+Default run path:
 
 ```bash
-cargo fmt --all -- --check
-cargo generate-lockfile
-cargo test --workspace --locked
-QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
-git diff --check
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app
 ```
 
-If CXX-Qt dependencies cannot be fetched because of sandboxed network access, rerun the dependency command with escalation and record the result in the handoff.
+Reference Python run path:
+
+```bash
+uv run python main.py
+```
 
 ## Completion Update
 
-When this batch is done, update this file:
+- 2026-06-04: Completed `Rust Runtime Cutover`.
+- Changes made: updated README to present the Rust/CXX-Qt binary as the primary app and Python/PySide as the reference app; kept the Rust and Python smoke/test commands explicit; folded in the runtime-cutover blocker for timeline viewport and snap parity by moving timeline zoom/scroll/visible-seconds state into the Rust controller, persisting zoom/scroll in `.autolight` UI state, routing `snap_timeline_time` through Rust, applying snap to single-marker moves, and guarding QML timeline list bindings against transient null values during Rust adapter reloads.
+- Next batch: none. All `docs/ROADMAP.md` ready-queue items are complete.
+- Verification:
+  - `cargo fmt --all`: applied rustfmt changes.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 23 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 15 `autolight-analysis` tests, 35 `autolight-core` tests, 10 `autolight-jobs` tests, and 23 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; the only warning was Qt's existing missing `Sans Serif` font alias warning.
+  - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: first failed inside the sandbox because `uv` could not access `/Users/admin/.cache/uv`; rerun outside the sandbox passed. Qt multimedia channel warnings were non-fatal.
+  - `git diff --check`: passed.
 
-- Set `Status` to `complete`.
-- Add the exact commands run and whether they passed.
-- Add the next active batch from `docs/ROADMAP.md`.
+## Previous Batch
 
-## Handoff Notes
-
-- Current app entrypoint is Python `main.py`; Rust entrypoint does not exist yet.
-- Existing QML root is `UI/Main.qml`.
-- Python/PySide remains the reference app until Rust parity is reached.
+- 2026-06-04: Completed `Rust File And Playback Controller Actions`.
+- Changes made: added Rust controller qproperties for project path, selected-track playability, playback source/position/duration/playing/error/volume state; wired Rust qinvokables for open/save/import, selected-track playback, loaded playback, pause/stop/seek/nudge, and volume; added minimal WAV probing and deterministic fingerprints for Rust audio import; connected the Rust QML adapter to file dialogs and playback controls while preserving the Python `appController` path; added focused Rust tests for audio import/playability, save/open roundtrip, playback state transitions, and QML adapter wiring.
+- Verification:
+  - `cargo fmt --all`: applied rustfmt changes.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 21 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 15 `autolight-analysis` tests, 35 `autolight-core` tests, 10 `autolight-jobs` tests, and 21 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`.
+  - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: first failed inside the sandbox because `uv` could not access `/Users/admin/.cache/uv`; rerun outside the sandbox passed. Qt multimedia channel warnings were non-fatal.
+  - `git diff --check`: passed.

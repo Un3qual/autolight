@@ -1,0 +1,10 @@
+[package]
+name = "autolight-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+autolight-qt = { path = "../autolight-qt" }
+cxx-qt = { workspace = true }
+cxx-qt-lib = { workspace = true }

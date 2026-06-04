@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "crates/autolight-app",
+    "crates/autolight-core",
+    "crates/autolight-analysis",
+    "crates/autolight-jobs",
+    "crates/autolight-qt",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+cxx = "1.0.144"
+cxx-qt = "0.8.1"
+cxx-qt-lib = { version = "0.8.1", features = ["qt_full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.10.9"
+thiserror = "2.0.17"

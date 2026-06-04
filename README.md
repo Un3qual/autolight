@@ -2,11 +2,11 @@
 
 Autolight is a desktop app for building graph-backed audio analysis timelines.
 
-## Rust Port Direction
+## Runtime Direction
 
-The current checked-in application is implemented in Python with PySide6/QML. As of 2026-06-03, all continued product work on the app targets a Rust implementation that keeps Qt Quick/QML through CXX-Qt. The Python/PySide code remains the reference implementation and compatibility baseline until the Rust version reaches parity.
+The primary application runtime is the Rust/CXX-Qt binary. It keeps the existing Qt Quick/QML UI while moving project, timeline, transform, marker-editing, file, and playback controller ownership into Rust.
 
-Forward-looking feature plans, architecture decisions, and implementation batches should target the Rust/CXX-Qt app. Python changes should be limited to preserving the reference app, fixing parity blockers, or adding tests that define behavior the Rust version must match.
+The Python/PySide6 app remains checked in as the reference implementation and parity baseline. Python changes should be limited to preserving that reference app, fixing parity blockers, or adding tests that define behavior the Rust version must match.
 
 See `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md` and `docs/superpowers/plans/2026-06-03-autolight-rust-cxx-qt-port.md`.
 
@@ -16,11 +16,33 @@ Start from `docs/NOW.md`. It contains the one active implementation batch, targe
 
 Use `docs/ROADMAP.md` only when `docs/NOW.md` is complete, blocked, or stale. Use `docs/PROCESS.md` for the lightweight batch and handoff rules.
 
-## Legacy Python App
+## Rust App
 
-The Python/PySide6 app is the current runnable implementation and the parity reference for the Rust/CXX-Qt port. Use the commands below to run or verify that reference app while the Rust version is being built.
+Install or expose a Qt 6 development package that provides `qmake`. On this machine Homebrew Qt 6 is used.
 
-## Run
+Run the primary app:
+
+```bash
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app
+```
+
+For headless Rust launch verification:
+
+```bash
+QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
+```
+
+Run the Rust test suite:
+
+```bash
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
+```
+
+## Python Reference App
+
+Use the Python/PySide6 app when checking reference behavior against the Rust runtime.
+
+Run the reference app:
 
 ```bash
 uv run python main.py
@@ -59,7 +81,7 @@ uv run python -m unittest discover -s tests -v
 
 ## Basic Workflow
 
-1. Launch the app with `uv run python main.py`.
+1. Launch the app with `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app`.
 2. Use `Import Audio` to add a local audio file as a source track.
 3. Select the source track and use `Play`, `Pause`, `Stop`, or the scrubber to inspect the audio.
 4. Use the timeline zoom and horizontal navigation controls to inspect markers at the needed time scale.

@@ -27,6 +27,10 @@ Rectangle {
         return root.appController.snap_timeline_time(seconds, bypassSnap)
     }
 
+    function listOrEmpty(value) {
+        return value && value.length !== undefined ? value : []
+    }
+
     color: root.rowIndex % 2 === 0 ? root.laneBackground : root.laneBackgroundAlt
     border.color: root.appController.selectedTrackId === root.trackId ? root.focusAccent : root.borderSubtle
     clip: true
@@ -41,12 +45,12 @@ Rectangle {
 
     WaveformStrip {
         anchors.fill: parent
-        samples: root.visibleWaveformSamples
+        samples: root.listOrEmpty(root.visibleWaveformSamples)
         durationSeconds: root.waveformDurationSeconds
         scrollSeconds: root.appController.timelineScrollSeconds
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
         leftPadding: root.timelineLeftPadding
-        visible: root.visibleWaveformSamples.length > 0
+        visible: root.listOrEmpty(root.visibleWaveformSamples).length > 0
     }
 
     AnalysisStrip {
@@ -54,7 +58,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 18
-        samples: root.visibleEnergySamples
+        samples: root.listOrEmpty(root.visibleEnergySamples)
         stripKind: "energy"
         scrollSeconds: root.appController.timelineScrollSeconds
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
@@ -66,7 +70,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 2
-        samples: root.visibleHarmonicColorSamples
+        samples: root.listOrEmpty(root.visibleHarmonicColorSamples)
         stripKind: "harmonic-color"
         scrollSeconds: root.appController.timelineScrollSeconds
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
@@ -74,7 +78,7 @@ Rectangle {
     }
 
     Repeater {
-        model: markerSpans
+        model: root.listOrEmpty(markerSpans)
         MarkerBlock {
             marker: modelData
             trackId: root.trackId
