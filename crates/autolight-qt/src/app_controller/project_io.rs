@@ -3,13 +3,22 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use autolight_core::cache::cache_entry_matches_payload;
-use autolight_core::project::{AudioAsset, CacheEntry, CacheValidationStatus};
+use autolight_core::project::{AudioAsset, CacheEntry};
 
 use super::audio::inspect_wav_file;
 
 pub(super) fn path_from_qml(path: &str) -> PathBuf {
     let value = path.trim();
-    let path = value.strip_prefix("file://").unwrap_or(value);
+    let path = if let Some(rest) = value.strip_prefix("file://") {
+        if rest.starts_with('/') {
+            rest
+        } else {
+            let decoded = percent_decode(rest);
+            return PathBuf::from(format!("//{decoded}"));
+        }
+    } else {
+        value
+    };
     let decoded = percent_decode(path);
     PathBuf::from(strip_windows_drive_url_slash(&decoded))
 }
@@ -66,7 +75,12 @@ pub(super) fn audio_asset_project_dir_relink_path(
     let project_dir = project_dir?;
     let mut file_names = Vec::default();
     if !asset.relink_hint.is_empty() {
-        file_names.push(asset.relink_hint.clone());
+        if let Some(file_name) = Path::new(&asset.relink_hint)
+            .file_name()
+            .and_then(|name| name.to_str())
+        {
+            file_names.push(file_name.to_string());
+        }
     }
     if let Some(file_name) = Path::new(&asset.path)
         .file_name()
@@ -89,9 +103,7 @@ pub(super) fn audio_asset_project_dir_relink_path(
 }
 
 pub(super) fn cache_entry_is_valid(entry: &CacheEntry, project_dir: Option<&Path>) -> bool {
-    if entry.validation_status != CacheValidationStatus::Valid
-        || !cache_entry_path_is_safe(Path::new(&entry.path))
-    {
+    if !cache_entry_path_is_safe(Path::new(&entry.path)) {
         return false;
     }
 

@@ -187,6 +187,64 @@ fn controller_submit_track_returns_before_worker_poll_commits_job() {
 }
 
 #[test]
+fn controller_submit_artifact_track_requires_cache_directory_before_creating_job() {
+    let root = test_dir("unsaved-artifact-submit");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 16_000);
+    let mut state = AppControllerState::default();
+    let source_id = state.import_audio_state(audio_path.to_str().unwrap());
+    let track_id = state.add_transform_track_state(&source_id, "waveform.summary", "1", "{}");
+
+    let job_id = state.submit_track_state(&track_id);
+
+    assert!(job_id.is_empty());
+    assert!(state.project.job_runs.is_empty());
+    assert!(state.job_workers.is_empty());
+    assert!(state
+        .last_error
+        .to_string()
+        .contains("save the project before running artifact-producing transforms"));
+}
+
+#[test]
+fn controller_worker_progress_preserves_manual_edit_history() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state.select_track_state("track_edit");
+    let marker_id =
+        state.add_marker_to_selected_track_with_duration_state(1.25, 0.5, "Cue", "cue", "cyan");
+    state.project.job_runs.push(JobRun {
+        id: "job_progress".to_string(),
+        track_id: "track_beats".to_string(),
+        transform_id: "markers.fixed_interval".to_string(),
+        transform_version: "1".to_string(),
+        parameters_hash: "dep_beats".to_string(),
+        parameters: serde_json::Map::default(),
+        state: ResultState::Running,
+        progress: 0.1,
+        started_at: String::default(),
+        completed_at: String::default(),
+        error: String::default(),
+        produced_cache_refs: Vec::default(),
+    });
+    state
+        .job_progress
+        .lock()
+        .unwrap()
+        .insert("job_progress".to_string(), 0.5);
+
+    assert_eq!(state.poll_job_workers_state(), 1);
+
+    assert!(state.can_undo);
+    assert!(state.undo_state());
+    assert!(!state
+        .project
+        .markers
+        .iter()
+        .any(|marker| marker.id == marker_id));
+}
+
+#[test]
 fn controller_async_worker_merge_preserves_current_stale_track_with_same_dependency_hash() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
@@ -276,6 +334,52 @@ fn controller_async_worker_merge_preserves_current_stale_track_with_same_depende
             .collect::<Vec<_>>(),
         original_marker_ids
     );
+}
+
+#[test]
+fn controller_async_worker_join_error_finalizes_active_job() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state.project.job_runs.push(JobRun {
+        id: "job_panicked".to_string(),
+        track_id: "track_beats".to_string(),
+        transform_id: "markers.fixed_interval".to_string(),
+        transform_version: "1".to_string(),
+        parameters_hash: "dep_beats".to_string(),
+        parameters: serde_json::Map::default(),
+        state: ResultState::Running,
+        progress: 0.5,
+        started_at: String::default(),
+        completed_at: String::default(),
+        error: String::default(),
+        produced_cache_refs: Vec::default(),
+    });
+    state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_beats")
+        .unwrap()
+        .result_state = ResultState::Running;
+
+    state.finalize_worker_join_error("job_panicked", "worker thread panicked");
+
+    let run = state
+        .project
+        .job_runs
+        .iter()
+        .find(|run| run.id == "job_panicked")
+        .unwrap();
+    assert_eq!(run.state, ResultState::Failed);
+    assert_eq!(run.error, "worker thread panicked");
+    let track = state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_beats")
+        .unwrap();
+    assert_eq!(track.result_state, ResultState::Failed);
+    assert_eq!(track.error, "worker thread panicked");
 }
 
 #[test]
@@ -797,17 +901,37 @@ fn controller_rejects_audio_transform_for_generated_marker_parent_without_audio_
 fn controller_refresh_cache_status_marks_invalid_refs_stale() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
-    state
+    let demo_artifact_dir = state.current_artifact_dir().unwrap();
+    state.project_path = cxx_qt_lib::QString::from(
+        demo_artifact_dir
+            .join("show.autolight")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let energy_cache_ref = state
         .project
-        .cache_entries
-        .iter_mut()
-        .find(|entry| entry.id == "cache_energy")
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_drum_energy")
         .unwrap()
-        .validation_status = CacheValidationStatus::Invalid;
+        .cache_refs
+        .first()
+        .cloned()
+        .unwrap();
+    let energy_entry_path = demo_artifact_dir.join(
+        &state
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == energy_cache_ref)
+            .unwrap()
+            .path,
+    );
+    std::fs::remove_file(energy_entry_path).unwrap();
 
     let invalid = state.refresh_cache_status_state();
 
-    assert_eq!(invalid, ["cache_energy"]);
+    assert_eq!(invalid, [energy_cache_ref]);
     assert!(state
         .last_error
         .to_string()
@@ -874,10 +998,53 @@ fn controller_refresh_cache_status_checks_persisted_artifact_files() {
 }
 
 #[test]
+fn controller_refresh_cache_status_restores_recovered_artifact_validity() {
+    let root = test_dir("cache-refresh-recovered");
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state.project_path =
+        cxx_qt_lib::QString::from(root.join("show.autolight").to_string_lossy().to_string());
+    let payload = b"valid stem";
+    let mut entry = cache_entry_for_bytes("stem", "dep_drums", payload, "1", "now").unwrap();
+    entry.validation_status = CacheValidationStatus::Invalid;
+    let artifact_path = root.join(&entry.path);
+    std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+    std::fs::write(&artifact_path, payload).unwrap();
+    state.project.cache_entries.clear();
+    state.project.cache_entries.push(entry.clone());
+    for track in &mut state.project.tracks {
+        track.cache_refs.clear();
+    }
+    state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_drums")
+        .unwrap()
+        .cache_refs = vec![entry.id.clone()];
+
+    let invalid = state.refresh_cache_status_state();
+
+    assert!(invalid.is_empty());
+    assert_eq!(
+        state
+            .project
+            .cache_entries
+            .iter()
+            .find(|candidate| candidate.id == entry.id)
+            .unwrap()
+            .validation_status,
+        CacheValidationStatus::Valid
+    );
+}
+
+#[test]
 fn controller_rejects_absolute_cache_entry_paths_during_validation() {
-    assert!(!cache_entry_path_is_safe(std::path::Path::new(
-        "/tmp/autolight-cache/entry.bin"
-    )));
+    let absolute_path = std::env::current_dir()
+        .unwrap()
+        .join("autolight-cache")
+        .join("entry.bin");
+    assert!(!cache_entry_path_is_safe(&absolute_path));
     assert!(!cache_entry_path_is_safe(std::path::Path::new(
         "../cache/entry.bin"
     )));
@@ -1689,6 +1856,35 @@ fn controller_decodes_windows_file_urls_to_local_paths() {
 }
 
 #[test]
+fn controller_preserves_unc_file_urls_to_network_paths() {
+    let path = path_from_qml("file://server/share/My%20Song.wav");
+
+    assert_eq!(path.to_string_lossy(), "//server/share/My Song.wav");
+}
+
+#[test]
+fn controller_relink_hint_is_constrained_to_basename() {
+    let root = test_dir("relink-hint-basename");
+    let escaped_dir = root.parent().unwrap().join("escaped");
+    std::fs::create_dir_all(&escaped_dir).unwrap();
+    let escaped_audio = escaped_dir.join("song.wav");
+    write_test_wav(&escaped_audio, 44_100, 2, 16);
+
+    let asset = autolight_core::project::AudioAsset {
+        id: "asset".to_string(),
+        path: escaped_audio.to_string_lossy().to_string(),
+        duration: 1.0,
+        sample_rate: 44_100,
+        channels: 2,
+        fingerprint: String::default(),
+        import_status: ImportStatus::Offline,
+        relink_hint: "../escaped/song.wav".to_string(),
+    };
+
+    assert!(super::project_io::audio_asset_project_dir_relink_path(&asset, Some(&root)).is_none());
+}
+
+#[test]
 fn controller_playback_state_transitions_from_selected_track() {
     let root = test_dir("playback");
     let audio_path = root.join("song.wav");
@@ -2154,9 +2350,11 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    assert!(timeline_qml.contains("model: timelineRows.appController.trackRows.length"));
-    assert!(timeline_qml
-        .contains("property var rowData: timelineRows.appController.trackRows[index] || ({})"));
+    assert!(timeline_qml.contains("readonly property var safeTrackRows"));
+    assert!(timeline_qml.contains("model: timelineRows.safeTrackRows.length"));
+    assert!(
+        timeline_qml.contains("property var rowData: timelineRows.safeTrackRows[index] || ({})")
+    );
     assert!(timeline_qml.contains("markerSpans: rowData.markerSpans || []"));
     assert!(!timeline_qml.contains("visibleWaveformSamples"));
     assert!(!timeline_qml.contains("model: timelineRows.appController.trackModel"));

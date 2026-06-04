@@ -64,10 +64,10 @@ pub(super) fn marker_display_color_for_key(color_key: &str) -> &'static str {
 }
 
 pub(super) fn is_timing_snap_category(category: &str) -> bool {
-    matches!(
-        category.trim().to_lowercase().as_str(),
-        "timing" | "beat" | "onset"
-    )
+    let category = category.trim();
+    category.eq_ignore_ascii_case("timing")
+        || category.eq_ignore_ascii_case("beat")
+        || category.eq_ignore_ascii_case("onset")
 }
 
 pub(super) fn json_string(value: &impl serde::Serialize) -> String {

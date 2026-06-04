@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolight_analysis::waveform::visible_samples_from_json;
+use autolight_core::cache::cache_entry_for_bytes;
 use autolight_core::graph::{default_expanded_track_ids, find_track, mark_dependents_stale};
 use autolight_core::history::{
     DependentTrackSnapshot, EditHistory, MarkerSnapshotCommand, ProjectSnapshotCommand,
@@ -265,6 +266,86 @@ impl AppControllerState {
         asset.fingerprint = inspection.fingerprint;
         asset.import_status = ImportStatus::Online;
         asset.relink_hint.clear();
+        self.prepare_demo_cache_artifacts(&demo_dir)?;
+        Ok(())
+    }
+
+    fn prepare_demo_cache_artifacts(&mut self, demo_dir: &Path) -> Result<(), String> {
+        let waveform_payload = self
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == "track_waveform")
+            .and_then(|track| track.provenance.get("waveform_payload"))
+            .cloned()
+            .ok_or_else(|| "demo waveform payload missing".to_string())?;
+        let waveform_payload =
+            serde_json::to_vec(&waveform_payload).map_err(|error| error.to_string())?;
+        self.materialize_demo_cache_artifact(
+            demo_dir,
+            "track_waveform",
+            "cache_waveform",
+            "waveform",
+            "dep_waveform",
+            &waveform_payload,
+        )?;
+        let stem_payload = fs::read(demo_dir.join("rust-demo.wav")).map_err(|error| {
+            format!(
+                "failed to read demo stem payload {}: {error}",
+                demo_dir.join("rust-demo.wav").display()
+            )
+        })?;
+        self.materialize_demo_cache_artifact(
+            demo_dir,
+            "track_drums",
+            "cache_drums",
+            "stem",
+            "dep_drums",
+            &stem_payload,
+        )?;
+        let energy_payload = br#"{"duration":2.0,"samples":[{"time":0.0,"energy":0.24},{"time":1.0,"energy":0.67}]}"#;
+        self.materialize_demo_cache_artifact(
+            demo_dir,
+            "track_drum_energy",
+            "cache_energy",
+            "energy",
+            "dep_energy",
+            energy_payload,
+        )?;
+        Ok(())
+    }
+
+    fn materialize_demo_cache_artifact(
+        &mut self,
+        demo_dir: &Path,
+        track_id: &str,
+        placeholder_cache_id: &str,
+        artifact_kind: &str,
+        dependency_hash: &str,
+        payload: &[u8],
+    ) -> Result<(), String> {
+        let entry = cache_entry_for_bytes(artifact_kind, dependency_hash, payload, "1", "demo")
+            .map_err(|error| error.to_string())?;
+        let payload_path = demo_dir.join(&entry.path);
+        if let Some(parent) = payload_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&payload_path, payload).map_err(|error| error.to_string())?;
+        self.project
+            .cache_entries
+            .retain(|candidate| candidate.id != placeholder_cache_id);
+        self.project.cache_entries.push(entry.clone());
+        if let Some(track) = self
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+        {
+            track.cache_refs = vec![entry.id];
+        }
         Ok(())
     }
 
@@ -439,6 +520,11 @@ impl AppControllerState {
                 return String::default();
             }
         };
+        if let Err(error) = self.ensure_artifact_dir_for_track_run(track_id) {
+            self.set_error(error);
+            self.refresh_view_state();
+            return String::default();
+        }
         match self
             .job_queue
             .submit_with_runtime_params(&mut self.project, track_id, runtime_params)
@@ -481,6 +567,11 @@ impl AppControllerState {
                 return String::default();
             }
         };
+        if let Err(error) = self.ensure_artifact_dir_for_track_run(track_id) {
+            self.set_error(error);
+            self.refresh_view_state();
+            return String::default();
+        }
         let job_id = match self.job_queue.submit_with_runtime_params(
             &mut self.project,
             track_id,
@@ -529,6 +620,7 @@ impl AppControllerState {
                     self.merge_job_worker_result(result);
                 }
                 Err(error) => {
+                    self.finalize_worker_join_error(&job_id, &error);
                     self.set_error(error);
                 }
             }
@@ -536,7 +628,7 @@ impl AppControllerState {
             changed += 1;
         }
         if changed > 0 {
-            self.mark_project_mutation_dirty();
+            self.mark_non_history_dirty();
             self.refresh_view_state();
         } else {
             self.refresh_selected_state();
@@ -559,6 +651,53 @@ impl AppControllerState {
             }
         }
         changed
+    }
+
+    fn ensure_artifact_dir_for_track_run(&self, track_id: &str) -> Result<(), String> {
+        if self.current_artifact_dir().is_some() {
+            return Ok(());
+        }
+        let Some(track) = find_track(&self.project, track_id) else {
+            return Ok(());
+        };
+        let spec = self
+            .transform_registry
+            .get(&track.transform_id, Some(&track.transform_version))
+            .map_err(|error| error.to_string())?;
+        if spec.output_schema.as_str().starts_with("artifact.") {
+            Err("save the project before running artifact-producing transforms".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn finalize_worker_join_error(&mut self, job_id: &str, error: &str) {
+        let run_index = self
+            .project
+            .job_runs
+            .iter()
+            .position(|run| run.id == job_id);
+        if let Some(run_index) = run_index {
+            if matches!(
+                self.project.job_runs[run_index].state,
+                ResultState::Pending | ResultState::Running
+            ) {
+                self.project.job_runs[run_index].state = ResultState::Failed;
+                self.project.job_runs[run_index].progress = 1.0;
+                self.project.job_runs[run_index].error = error.to_string();
+                let track_id = self.project.job_runs[run_index].track_id.clone();
+                if let Some(track) = self
+                    .project
+                    .tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                {
+                    track.result_state = ResultState::Failed;
+                    track.error = error.to_string();
+                    mark_dependents_stale(&mut self.project, &track_id, "");
+                }
+            }
+        }
     }
 
     fn merge_job_worker_result(&mut self, result: job_worker::JobWorkerResult) {
@@ -1898,6 +2037,14 @@ impl AppControllerState {
             playback_volume: self.playback_volume,
         }
     }
+}
+
+pub(crate) fn runnable_transform_ids() -> &'static [&'static str] {
+    &["markers.fixed_interval", "waveform.summary"]
+}
+
+pub(crate) fn is_runnable_transform_id(transform_id: &str) -> bool {
+    runnable_transform_ids().contains(&transform_id)
 }
 
 struct ViewportPropertyValues {

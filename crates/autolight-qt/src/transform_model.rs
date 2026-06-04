@@ -1,6 +1,8 @@
 use autolight_core::transforms::{TransformRegistry, TransformSpec};
 use serde::{Deserialize, Serialize};
 
+use crate::app_controller::is_runnable_transform_id;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransformSpecRow {
@@ -31,10 +33,7 @@ fn spec_row(spec: &TransformSpec) -> TransformSpecRow {
         name: spec.name.clone(),
         estimated_cost: spec.estimated_cost.clone(),
         output_schema: spec.output_schema.to_string(),
-        runnable: matches!(
-            spec.id.as_str(),
-            "markers.fixed_interval" | "waveform.summary"
-        ),
+        runnable: is_runnable_transform_id(&spec.id),
     }
 }
 

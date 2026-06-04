@@ -112,6 +112,7 @@ impl TimelineControllerState {
         self.pixels_per_second = TIMELINE_DEFAULT_PIXELS_PER_SECOND;
         self.scroll_seconds = 0.0;
         self.visible_seconds = TIMELINE_DEFAULT_VISIBLE_SECONDS;
+        self.clamp_scroll();
     }
 
     fn restore_view(&mut self, ui_state: &Value) {

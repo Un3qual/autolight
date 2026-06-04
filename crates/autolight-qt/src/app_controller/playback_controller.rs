@@ -106,11 +106,13 @@ impl PlaybackControllerState {
 
 impl AppControllerState {
     pub(super) fn sync_playback_bridge_state(&mut self) {
-        self.playback_source_path = self.playback.source_path().clone();
+        self.playback_source_path
+            .clone_from(self.playback.source_path());
         self.playback_position_seconds = self.playback.position_seconds();
         self.playback_duration_seconds = self.playback.duration_seconds();
         self.playback_is_playing = self.playback.is_playing();
-        self.playback_last_error = self.playback.last_error().clone();
+        self.playback_last_error
+            .clone_from(self.playback.last_error());
         self.playback_volume = self.playback.volume();
     }
 

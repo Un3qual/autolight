@@ -19,41 +19,26 @@ Updated: 2026-06-04
 
 ## Completion Update
 
-- 2026-06-04: Addressed new PR #13 bot-review follow-up findings from CodeRabbit, DeepSource, and Codex.
-- Root cause: the async worker path still exposed several edge cases after the hardening batch: non-selected pending worker jobs were invisible to the QML poll timer, stale current tracks could be overwritten by completed worker results with the same dependency hash, New/Open/Demo dropped worker handles without cancellation, Save As moved the project directory without copying relative cache artifacts, generated-audio parents fell back to the source WAV at runtime, stale timing tracks were still snap guides, and minor Rust review nits remained in job cancellation/project save code.
-- Changes made: timeline rows now expose pending jobs as active for polling; async worker merge now commits only into still-active current runs/tracks; runtime reset cancels and drains workers before replacing the queue; Save As validates/copies valid relative cache artifacts into the new project directory before saving; audio-input transforms prefer valid immediate-parent `audio`/`stem` artifacts and fail on missing artifact files instead of silently using the source WAV; snap guides now only use complete generated timing tracks; `TransformCancellationToken` uses `Default`, the legacy job-run version fallback is documented, and Windows project save retries rename after removing an existing destination.
-- Comments triaged without code changes: the stale `UI/RustAdapter.qml` CodeRabbit thread is already addressed because the file was replaced by `UI/AppRuntime.qml`, whose `select_track` refreshes selection and track rows; the duplicate CodeRabbit Windows-save note is addressed by the current `replace_project_file` Windows branch.
-- Next batch: none from this bot-review pass. Refresh PR comments after push and reply to the fixed/evidence threads.
+- 2026-06-04: Addressed the latest PR #13 bot-review findings from CodeRabbit, Codex, and the pasted DeepSource/Diffray Rust report.
+- Root cause: the post-push async/cache hardening still left edge cases in artifact job preflight, worker-panic terminalization, progress polling dirty-state handling, demo cache materialization, Windows save replacement, cache revalidation, QML temp extraction/path guards, WAV frame validation, and small Rust idioms flagged by DeepSource.
+- Changes made: artifact-producing jobs now require a project/demo cache directory before detaching a worker; progress polling marks non-history dirty without clearing undo/redo; worker join failures terminalize the run/track; demo cache refs are real hash-backed artifacts; Windows save replacement uses replace-existing semantics without deleting the old file first; cache validity refresh can restore recovered entries; QML asset extraction uses a unique directory and exclusive file creation; WAV inspection rejects partial frames; QML timeline guards handle missing/non-array models; runnable transform IDs are shared between the model and job registry; waveform LOD selection is viewport-based; UNC file URLs and relink hints are sanitized; DeepSource clone/map/test-path nits are fixed.
+- Comments triaged without code changes: Diffray's broader summary risks around deeper controller thinning, parity audits, telemetry, malformed project recovery, and large-timeline performance are roadmap-scale follow-ups, not new blocking defects for this PR cleanup.
+- Next batch: none for this PR cleanup after the pushed commit is refreshed on GitHub and fixed bot threads are replied/resolved.
 - Verification:
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: first failed after broadening cache validation to demo temp artifacts; passed after keeping normal refresh tied to saved project dirs and using a separate Save As validation source.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis`, 3 `autolight-app`, 44 `autolight-core`, 22 `autolight-jobs`, and 78 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-jobs --offline`: passed after offline lock metadata update, 25 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: first failed while updating stale cache-refresh test assumptions; passed with 84 tests after validating real missing/recovered artifacts and adding artifact-preflight/progress-history regressions.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-app --locked`: passed, 5 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis`, 5 `autolight-app`, 44 `autolight-core`, 25 `autolight-jobs`, and 84 `autolight-qt` tests.
   - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
   - `cargo fmt --all -- --check`: passed.
   - `git diff --check`: passed.
   - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt emitted non-fatal host audio/font warnings.
-
-- 2026-06-04: Completed the Rust-port expert-review hardening batch.
-- Root cause: the Rust runtime still had several transition-era seams after the port: QML assets loaded from the source checkout, unsupported built-in transform specs were exposed as runnable UI, cache artifact read validation accepted absolute paths while writes rejected them, waveform rows still serialized a legacy visible-slice fallback, playback/viewport invokables reapplied the full bridge payload, transform compatibility was driven by raw schema strings with a permissive unknown-schema fallback, audio/cache statuses were raw strings, and architecture tests still asserted file shape instead of behavior.
-- Changes made: embedded the QML asset bundle in `autolight-app` and materialized it at runtime for self-contained smoke/release loading; filtered transform rows to runnable specs and blocked track creation when the active job queue has no runner; removed the vocals placeholder action; aligned cache validation with relative-only normal artifact paths; removed `visibleWaveformSamples` from Rust/QML waveform drawing and kept `waveformLevels` as the single drawable contract; added targeted viewport/selection/playback bridge snapshots for high-frequency invokables; added a background job worker with cooperative cancellation/progress and QML polling so `runTrack` submits without blocking the controller path; introduced typed `SchemaId`, `ImportStatus`, and `CacheValidationStatus`; replaced line-count architecture tests with behavior tests for row-payload preservation; added crate docs plus workspace rustdoc lint posture.
-- Next batch: none for this review set. Remaining larger polish would be a deeper typed artifact-kind/newtype pass and engine-backed QML behavior tests, but the concrete issues listed in the review are addressed in code.
-- Verification:
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-app --locked embedded_qml_bundle_contains_runtime_and_components`: first failed because `embedded_qml_assets` did not exist; passed after embedding the QML asset manifest.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_rejects_unrunnable_builtin_transform_before_track_creation`: first failed because `timing.beats` still created a generated track; passed after gating by job-runner availability.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_rejects_absolute_cache_entry_paths_during_validation`: first failed because absolute cache paths were treated as safe; passed after matching the writer's relative-only policy.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_waveform_summary_completes_with_visible_waveform`: first failed because `visibleWaveformSamples` was still serialized; passed after removing the legacy fallback row role.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_submit_track_returns_before_worker_poll_commits_job`: passed after adding async submit plus worker polling.
-  - `cargo test -p autolight-core --locked`: passed, 44 tests.
-  - `cargo test -p autolight-jobs --locked`: passed, 22 tests.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 72 tests.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 3 `autolight-app` tests, 44 `autolight-core` tests, 22 `autolight-jobs` tests, and 72 `autolight-qt` tests.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
-  - `cargo fmt --all -- --check`: passed.
-  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt emitted non-fatal host audio/font warnings.
-  - `git diff --check`: passed.
 
 ## Current State
 
 The Rust/CXX-Qt app is now the primary runtime path. The Python/PySide app remains checked in as the reference implementation and parity baseline.
+
+Older completed batches are retained below as completion history for this PR branch.
 
 Default run path:
 
@@ -67,7 +52,7 @@ Reference Python run path:
 uv run python main.py
 ```
 
-## Completion Update
+## Completion History
 
 - 2026-06-04: Addressed the Rust-port review quality cleanup batch for playback viewport mirroring, marker undo payload size, timeline projection cost, cooperative job cancellation, and low-level Rust perf nits.
 - Root cause: playback position ticks updated Rust playback state without refreshing QML viewport mirrors; Qt marker edits used full `ProjectDocument` undo snapshots even though core has marker/dependent snapshot commands; timeline row projection rebuilt marker/job/cache lookups repeatedly and still emitted a dead legacy `waveformSamples` JSON role; job cancellation only represented pending cancellation, not a token a running transform could observe; the WAV reader and fixed-interval runner still had clippy/perf anti-patterns.

@@ -55,9 +55,10 @@ Canvas {
     }
 
     function targetBucketCount() {
-        var safeDurationSeconds = Math.max(0, root.finiteNumber(durationSeconds, 0))
         var safePixelsPerSecond = Math.max(0, root.finiteNumber(pixelsPerSecond, 96))
-        return Math.max(1, Math.ceil(safeDurationSeconds * safePixelsPerSecond / 8))
+        var drawableWidth = Math.max(0, width - root.finiteNumber(leftPadding, 24))
+        var visibleSeconds = safePixelsPerSecond > 0 ? drawableWidth / safePixelsPerSecond : 0
+        return Math.max(1, Math.ceil(visibleSeconds * safePixelsPerSecond / 8))
     }
 
     function selectedLevelPair() {

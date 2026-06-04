@@ -65,50 +65,63 @@ pub(super) fn spawn_job_worker(
             Some(progress_reporter),
         );
         let error = run_result.err().map(|error| error.to_string());
-        match result_from_project(&project, &job_id, artifact_dir.clone(), error) {
+        match result_from_project(&project, &job_id, artifact_dir.clone(), error.clone()) {
             Some(result) => result,
-            None => JobWorkerResult {
-                job_id: job_id.clone(),
-                track_id: String::default(),
-                track: Track {
-                    id: String::default(),
-                    track_type: autolight_core::project::TrackType::Generated,
-                    name: String::default(),
-                    input_track_ids: Vec::default(),
-                    transform_id: String::default(),
-                    transform_params: autolight_core::project::JsonObject::default(),
-                    transform_version: String::default(),
-                    output_schema: String::default(),
-                    dependency_hash: String::default(),
-                    result_state: autolight_core::project::ResultState::Failed,
-                    cache_refs: Vec::default(),
-                    provenance: autolight_core::project::JsonObject::default(),
-                    error: "job disappeared while running".to_string(),
-                },
-                job_run: JobRun {
-                    id: job_id,
-                    track_id: String::default(),
-                    transform_id: String::default(),
-                    transform_version: String::default(),
-                    parameters_hash: String::default(),
-                    parameters: autolight_core::project::JsonObject::default(),
-                    state: autolight_core::project::ResultState::Failed,
-                    progress: 1.0,
-                    started_at: String::default(),
-                    completed_at: String::default(),
-                    error: "job disappeared while running".to_string(),
-                    produced_cache_refs: Vec::default(),
-                },
-                markers: Vec::default(),
-                cache_entries: Vec::default(),
+            None => fallback_failed_worker_result(
+                job_id,
                 artifact_dir,
-                error: Some("job disappeared while running".to_string()),
-            },
+                error.unwrap_or_else(|| "job disappeared while running".to_string()),
+            ),
         }
     });
     JobWorker {
         job_id: worker_job_id,
         handle,
+    }
+}
+
+pub(super) fn fallback_failed_worker_result(
+    job_id: String,
+    artifact_dir: Option<PathBuf>,
+    error: impl Into<String>,
+) -> JobWorkerResult {
+    let error = error.into();
+    JobWorkerResult {
+        job_id: job_id.clone(),
+        track_id: String::default(),
+        track: Track {
+            id: String::default(),
+            track_type: autolight_core::project::TrackType::Generated,
+            name: String::default(),
+            input_track_ids: Vec::default(),
+            transform_id: String::default(),
+            transform_params: autolight_core::project::JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
+            result_state: autolight_core::project::ResultState::Failed,
+            cache_refs: Vec::default(),
+            provenance: autolight_core::project::JsonObject::default(),
+            error: error.clone(),
+        },
+        job_run: JobRun {
+            id: job_id,
+            track_id: String::default(),
+            transform_id: String::default(),
+            transform_version: String::default(),
+            parameters_hash: String::default(),
+            parameters: autolight_core::project::JsonObject::default(),
+            state: autolight_core::project::ResultState::Failed,
+            progress: 1.0,
+            started_at: String::default(),
+            completed_at: String::default(),
+            error: error.clone(),
+            produced_cache_refs: Vec::default(),
+        },
+        markers: Vec::default(),
+        cache_entries: Vec::default(),
+        artifact_dir,
+        error: Some(error),
     }
 }
 

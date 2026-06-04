@@ -36,6 +36,8 @@ pub enum JobQueueError {
     DuplicateRunningTrack(String),
     #[error("job not found: {0}")]
     JobNotFound(String),
+    #[error("job is not pending: {0}")]
+    JobNotPending(String),
     #[error("runtime transform params cannot change cached identity")]
     RuntimeParamsChangeIdentity,
     #[error("marker timestamp must be finite and non-negative")]
@@ -453,9 +455,18 @@ impl LocalJobQueue {
     pub fn refresh_cache_validity(
         &mut self,
         project: &mut ProjectDocument,
-        is_entry_valid: impl FnMut(&CacheEntry) -> bool,
+        mut is_entry_valid: impl FnMut(&CacheEntry) -> bool,
     ) -> Vec<String> {
-        let invalid = invalid_cache_refs(project, is_entry_valid);
+        for entry in &mut project.cache_entries {
+            entry.validation_status = if is_entry_valid(entry) {
+                CacheValidationStatus::Valid
+            } else {
+                CacheValidationStatus::Invalid
+            };
+        }
+        let invalid = invalid_cache_refs(project, |entry| {
+            entry.validation_status == CacheValidationStatus::Valid
+        });
         let invalid_ids = invalid.iter().collect::<BTreeSet<_>>();
         for entry in &mut project.cache_entries {
             if invalid_ids.contains(&entry.id) {
@@ -472,6 +483,9 @@ impl LocalJobQueue {
         job_id: &str,
     ) -> Result<(), JobQueueError> {
         let run_index = job_run_index(project, job_id)?;
+        if project.job_runs[run_index].state != ResultState::Pending {
+            return Err(JobQueueError::JobNotPending(job_id.to_string()));
+        }
         let track_id = project.job_runs[run_index].track_id.clone();
         let started_at = self.timestamp();
         project.job_runs[run_index].state = ResultState::Running;
@@ -589,9 +603,18 @@ impl LocalJobQueue {
     ) -> Result<(), JobQueueError> {
         let completed_at = self.timestamp();
         let run_index = job_run_index(project, job_id)?;
+        let track_id = project.job_runs[run_index].track_id.clone();
         project.job_runs[run_index].state = ResultState::Stale;
         project.job_runs[run_index].completed_at = completed_at;
         project.job_runs[run_index].error = error.to_string();
+        let track = project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == track_id)
+            .ok_or_else(|| JobQueueError::TrackNotFound(track_id.clone()))?;
+        track.result_state = ResultState::Stale;
+        track.error = error.to_string();
+        mark_dependents_stale(project, &track_id, "");
         Ok(())
     }
 
@@ -1020,6 +1043,50 @@ mod tests {
     }
 
     #[test]
+    fn jobs_reject_starting_non_pending_job() {
+        let mut project = project_with_generated_track("test.noop");
+        let mut queue =
+            LocalJobQueue::with_clock(registry_with_noop("test.noop"), deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        queue.run_next(&mut project).unwrap();
+        let error = queue
+            .run_detached_job_with_artifact_dir(
+                &mut project,
+                &job_id,
+                None,
+                super::TransformCancellationToken::default(),
+                None,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("job is not pending"));
+        assert_eq!(job_state(&project, &job_id), ResultState::Complete);
+    }
+
+    #[test]
+    fn jobs_stale_commit_marks_track_stale() {
+        let mut project = project_with_generated_track("test.noop");
+        project
+            .tracks
+            .push(generated_child("track_downstream", "track_generated"));
+        let mut queue =
+            LocalJobQueue::with_clock(registry_with_noop("test.noop"), deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        track_by_id_mut(&mut project, "track_generated").dependency_hash =
+            "changed-after-submit".to_string();
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(job_state(&project, &job_id), ResultState::Stale);
+        assert_eq!(track_state(&project, "track_generated"), ResultState::Stale);
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Stale
+        );
+    }
+
+    #[test]
     fn jobs_reject_duplicate_pending_submit_for_track() {
         let mut project = project_with_generated_track("test.noop");
         let mut queue = LocalJobQueue::new(registry_with_noop("test.noop"));
@@ -1317,6 +1384,25 @@ mod tests {
         assert_eq!(
             track_state(&project, "track_downstream"),
             ResultState::Stale
+        );
+    }
+
+    #[test]
+    fn jobs_refresh_cache_validity_restores_valid_refs() {
+        let mut project = project_with_generated_track("test.noop");
+        track_by_id_mut(&mut project, "track_generated").cache_refs =
+            vec!["cache_recovered".to_string()];
+        let mut entry = cache_entry("cache_recovered", "stem");
+        entry.validation_status = CacheValidationStatus::Invalid;
+        project.cache_entries.push(entry);
+        let mut queue = LocalJobQueue::new(registry_with_noop("test.noop"));
+
+        let invalid = queue.refresh_cache_validity(&mut project, |_| true);
+
+        assert!(invalid.is_empty());
+        assert_eq!(
+            project.cache_entries[0].validation_status,
+            CacheValidationStatus::Valid
         );
     }
 

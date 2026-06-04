@@ -240,6 +240,9 @@ impl WavChunkMetadata {
         if bytes_per_frame == 0 {
             return Err("invalid WAV frame size".to_string());
         }
+        if !self.data_bytes.is_multiple_of(bytes_per_frame) {
+            return Err("invalid WAV frame size".to_string());
+        }
         Ok(AudioMetadata {
             duration: self.data_bytes as f64 / (format.sample_rate as f64 * bytes_per_frame as f64),
             sample_rate: format.sample_rate,

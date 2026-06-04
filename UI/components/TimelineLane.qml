@@ -29,7 +29,7 @@ Rectangle {
     }
 
     function listOrEmpty(value) {
-        return value && value.length !== undefined ? value : []
+        return Array.isArray(value) ? value : []
     }
 
     color: root.rowIndex % 2 === 0 ? root.laneBackground : root.laneBackgroundAlt

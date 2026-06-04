@@ -89,9 +89,16 @@ impl<'a> TimelineProjectionContext<'a> {
                     .then_with(|| left.id.cmp(&right.id))
             });
         }
-        let mut latest_job_by_track = BTreeMap::new();
+        let mut latest_job_by_track: BTreeMap<&str, &JobRun> = BTreeMap::new();
         for run in &project.job_runs {
-            latest_job_by_track.insert(run.track_id.as_str(), run);
+            latest_job_by_track
+                .entry(run.track_id.as_str())
+                .and_modify(|current| {
+                    if job_run_is_newer(run, current) {
+                        *current = run;
+                    }
+                })
+                .or_insert(run);
         }
         let cache_entries_by_id = project
             .cache_entries
@@ -120,8 +127,7 @@ impl<'a> TimelineProjectionContext<'a> {
     fn markers_for_track(&self, track_id: &str) -> &[&'a Marker] {
         self.markers_by_track
             .get(track_id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+            .map_or(&[], Vec::as_slice)
     }
 
     fn latest_job_for_track(&self, track_id: &str) -> Option<&'a JobRun> {
@@ -166,8 +172,25 @@ impl<'a> TimelineProjectionContext<'a> {
         };
         self.audio_assets_by_id
             .get(asset_id)
-            .map(|asset| asset.duration)
-            .unwrap_or(0.0)
+            .map_or(0.0, |asset| asset.duration)
+    }
+}
+
+fn job_run_is_newer(candidate: &JobRun, current: &JobRun) -> bool {
+    let candidate_rank = job_run_state_rank(candidate.state);
+    let current_rank = job_run_state_rank(current.state);
+    candidate_rank > current_rank
+        || (candidate_rank == current_rank && candidate.id.as_str() > current.id.as_str())
+}
+
+fn job_run_state_rank(state: ResultState) -> u8 {
+    match state {
+        ResultState::Running => 5,
+        ResultState::Pending => 4,
+        ResultState::Failed | ResultState::Cancelled => 3,
+        ResultState::Complete => 2,
+        ResultState::Blocked => 2,
+        ResultState::Stale => 1,
     }
 }
 

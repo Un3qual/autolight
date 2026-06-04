@@ -1,9 +1,11 @@
 //! Autolight desktop application entry point.
 
-use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
@@ -14,6 +16,8 @@ struct EmbeddedQmlAsset {
     relative_path: &'static str,
     contents: &'static str,
 }
+
+static NEXT_QML_ASSET_DIR_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1)) {
@@ -80,12 +84,14 @@ fn main_qml_url() -> Result<QUrl, String> {
 }
 
 fn prepare_embedded_qml_assets() -> Result<PathBuf, String> {
-    let root = std::env::temp_dir().join(format!(
-        "autolight-qml-assets-{}-{}",
-        env!("CARGO_PKG_VERSION"),
-        std::process::id()
-    ));
+    let root = create_unique_qml_asset_dir()?;
     for asset in embedded_qml_assets() {
+        if !embedded_qml_relative_path_is_safe(asset.relative_path) {
+            return Err(format!(
+                "embedded QML asset path is unsafe: {}",
+                asset.relative_path
+            ));
+        }
         let path = root.join(asset.relative_path);
         if let Some(parent) = path
             .parent()
@@ -98,7 +104,17 @@ fn prepare_embedded_qml_assets() -> Result<PathBuf, String> {
                 )
             })?;
         }
-        std::fs::write(&path, asset.contents).map_err(|error| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| {
+                format!(
+                    "failed to create embedded QML asset {}: {error}",
+                    path.display()
+                )
+            })?;
+        file.write_all(asset.contents.as_bytes()).map_err(|error| {
             format!(
                 "failed to write embedded QML asset {}: {error}",
                 path.display()
@@ -106,6 +122,60 @@ fn prepare_embedded_qml_assets() -> Result<PathBuf, String> {
         })?;
     }
     Ok(root)
+}
+
+fn create_unique_qml_asset_dir() -> Result<PathBuf, String> {
+    for _ in 0..16 {
+        let nonce = qml_asset_dir_nonce()?;
+        let sequence = NEXT_QML_ASSET_DIR_ATTEMPT.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "autolight-qml-assets-{}-{nonce}-{sequence}",
+            env!("CARGO_PKG_VERSION")
+        ));
+        match std::fs::create_dir(&root) {
+            Ok(()) => return Ok(root),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "failed to create QML asset directory {}: {error}",
+                    root.display()
+                ));
+            }
+        }
+    }
+    Err("failed to create a unique QML asset directory".to_string())
+}
+
+#[cfg(unix)]
+fn qml_asset_dir_nonce() -> Result<String, String> {
+    let mut random = [0_u8; 16];
+    let mut file = std::fs::File::open("/dev/urandom")
+        .map_err(|error| format!("failed to open system random source: {error}"))?;
+    file.read_exact(&mut random)
+        .map_err(|error| format!("failed to read system random source: {error}"))?;
+    Ok(hex_bytes(&random))
+}
+
+#[cfg(not(unix))]
+fn qml_asset_dir_nonce() -> Result<String, String> {
+    let sequence = NEXT_QML_ASSET_DIR_ATTEMPT.load(Ordering::Relaxed);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    Ok(format!("{}-{}-{sequence}", std::process::id(), timestamp))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn embedded_qml_relative_path_is_safe(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
 }
 
 fn embedded_qml_assets() -> &'static [EmbeddedQmlAsset] {
@@ -182,7 +252,10 @@ fn exit_code_from_qt_status(status: i32) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{embedded_qml_assets, exit_code_from_qt_status};
+    use super::{
+        create_unique_qml_asset_dir, embedded_qml_assets, embedded_qml_relative_path_is_safe,
+        exit_code_from_qt_status,
+    };
     use std::process::ExitCode;
 
     #[test]
@@ -208,5 +281,30 @@ mod tests {
         assert!(asset_names.contains(&"AppRuntime.qml"));
         assert!(asset_names.contains(&"components/TimelineView.qml"));
         assert!(asset_names.contains(&"components/WaveformStrip.qml"));
+    }
+
+    #[test]
+    fn embedded_qml_asset_paths_are_relative_and_normal() {
+        let absolute_path = std::env::current_dir().unwrap().join("Main.qml");
+
+        assert!(embedded_qml_relative_path_is_safe(
+            "components/TimelineView.qml"
+        ));
+        assert!(!embedded_qml_relative_path_is_safe("../Main.qml"));
+        assert!(!embedded_qml_relative_path_is_safe(
+            absolute_path.to_str().unwrap()
+        ));
+    }
+
+    #[test]
+    fn embedded_qml_assets_use_unique_exclusive_directories() {
+        let first = create_unique_qml_asset_dir().unwrap();
+        let second = create_unique_qml_asset_dir().unwrap();
+
+        assert_ne!(first, second);
+        assert!(first.is_dir());
+        assert!(second.is_dir());
+        std::fs::remove_dir_all(first).unwrap();
+        std::fs::remove_dir_all(second).unwrap();
     }
 }

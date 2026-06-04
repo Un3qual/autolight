@@ -38,7 +38,11 @@ ListView {
         return isFinite(number) ? number : 0
     }
 
-    model: timelineRows.appController.trackRows.length
+    readonly property var safeTrackRows: timelineRows.appController && Array.isArray(timelineRows.appController.trackRows)
+        ? timelineRows.appController.trackRows
+        : []
+
+    model: timelineRows.safeTrackRows.length
     clip: true
     onWidthChanged: timelineRows.layoutWidthChanged()
     onHeightChanged: timelineRows.updateVisibleTrackRange()
@@ -47,7 +51,7 @@ ListView {
     Component.onCompleted: timelineRows.updateVisibleTrackRange()
 
     delegate: TrackRow {
-        property var rowData: timelineRows.appController.trackRows[index] || ({})
+        property var rowData: timelineRows.safeTrackRows[index] || ({})
         width: timelineRows.width
         trackId: rowData.trackId || ""
         name: rowData.name || ""

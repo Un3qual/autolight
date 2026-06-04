@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use super::audio::read_wav_mono_samples;
 use super::markers::round6;
+use super::runnable_transform_ids;
 
 const MAX_FIXED_INTERVAL_MARKERS: usize = 100_000;
 const DEFAULT_WAVEFORM_BUCKETS: usize = 512;
@@ -23,10 +24,13 @@ pub(super) fn job_registry() -> JobRegistry {
         .collect::<Vec<_>>()
     {
         let transform_id = spec.id.clone();
+        if !runnable_transform_ids().contains(&transform_id.as_str()) {
+            continue;
+        }
         let register_result = match transform_id.as_str() {
             "markers.fixed_interval" => registry.register(spec, fixed_interval_runner),
             "waveform.summary" => registry.register(spec, waveform_summary_runner),
-            _ => continue,
+            _ => unreachable!("runnable transform without a registered runner"),
         };
         register_result.expect("builtin job transforms are unique");
     }
