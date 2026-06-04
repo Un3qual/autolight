@@ -3627,61 +3627,68 @@ mod tests {
 
     #[test]
     fn qml_rust_adapter_uses_controller_models_and_actions() {
-        let qml = std::fs::read_to_string(
+        let main_qml = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
         )
         .unwrap();
+        let adapter_qml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/RustAdapter.qml"),
+        )
+        .unwrap();
 
-        assert!(qml.contains("rustController.transformSpecsJson"));
-        assert!(qml.contains("rustController.selectedTrackId"));
-        assert!(qml.contains("rustController.addTransformTrack"));
-        assert!(qml.contains("rustController.runTrack"));
-        assert!(qml.contains("rustController.selectedMarkerIdsJson"));
-        assert!(qml.contains("rustController.selectedTrackMarkersJson"));
-        assert!(qml.contains("rustController.markerColorOptionsJson"));
-        assert!(qml.contains("rustController.addMarkerToSelectedTrackWithDuration"));
-        assert!(qml.contains("rustController.updateSelectedMarkerWithDuration"));
-        assert!(qml.contains("rustController.bulkUpdateSelectedMarkers"));
-        assert!(qml.contains("rustController.toggleMarkerSelection"));
-        assert!(qml.contains("rustController.createEditableTrackFromTrack"));
-        assert!(qml.contains("rustController.setTrackExpanded"));
-        assert!(qml.contains("rustController.undo"));
-        assert!(qml.contains("rustController.redo"));
-        assert!(qml.contains("rustController.projectPath"));
-        assert!(qml.contains("rustController.selectedTrackCanPlay"));
-        assert!(qml.contains("rustController.openProject"));
-        assert!(qml.contains("rustController.saveProject"));
-        assert!(qml.contains("rustController.importAudio"));
-        assert!(qml.contains("WAV audio files (*.wav)"));
-        assert!(!qml.contains("*.mp3"));
-        assert!(qml.contains("rustController.playSelectedTrack"));
-        assert!(qml.contains("rustController.playbackSourcePath"));
-        assert!(qml.contains("rustController.playbackPositionSeconds"));
-        assert!(qml.contains("rustController.playbackDurationSeconds"));
-        assert!(qml.contains("rustController.playbackLastError"));
-        assert!(qml.contains("rustController.playbackVolume"));
-        assert!(qml.contains("rustController.setPlaybackVolumeValue"));
-        assert!(qml.contains("import QtMultimedia"));
-        assert!(qml.contains("MediaPlayer"));
-        assert!(qml.contains("MediaPlayer.PlayingState"));
-        assert!(qml.contains("AudioOutput"));
-        assert!(qml.contains("mediaPlayer.play()"));
-        assert!(qml.contains("encodeURIComponent(segment)"));
-        assert!(!qml.contains("encodeURI(path)"));
-        assert!(qml.contains("rustController.timelinePixelsPerSecond"));
-        assert!(qml.contains("rustController.timelineScrollSeconds"));
-        assert!(qml.contains("rustController.timelineVisibleSeconds"));
-        assert!(qml.contains("rustController.setTimelineZoom"));
-        assert!(qml.contains("rustController.applyTimelineScrollSeconds"));
-        assert!(qml.contains("rustController.applyTimelineVisibleSeconds"));
-        assert!(qml.contains("rustController.setTimelineVisibleTrackRange"));
-        assert!(qml.contains("rustController.snapTimelineTime"));
-        assert!(qml.contains("function add_fixed_interval_track(trackId, duration, interval) { return add_transform_track"));
-        assert!(
-            qml.contains("function add_vocals_stem_track(trackId) { return add_transform_track")
-        );
-        assert!(qml.contains("transformModel.append"));
-        assert!(qml.contains("function version_at(index)"));
+        assert!(main_qml.contains("Qt.createComponent(Qt.resolvedUrl(\"RustAdapter.qml\"))"));
+        assert!(!main_qml.contains("rustAdapterSource"));
+        assert!(!main_qml.contains("Qt.createQmlObject"));
+        assert!(main_qml.contains("WAV audio files (*.wav)"));
+        assert!(!main_qml.contains("*.mp3"));
+
+        assert!(adapter_qml.contains("rustController.transformSpecsJson"));
+        assert!(adapter_qml.contains("rustController.selectedTrackId"));
+        assert!(adapter_qml.contains("rustController.addTransformTrack"));
+        assert!(adapter_qml.contains("rustController.runTrack"));
+        assert!(adapter_qml.contains("rustController.selectedMarkerIdsJson"));
+        assert!(adapter_qml.contains("rustController.selectedTrackMarkersJson"));
+        assert!(adapter_qml.contains("rustController.markerColorOptionsJson"));
+        assert!(adapter_qml.contains("rustController.addMarkerToSelectedTrackWithDuration"));
+        assert!(adapter_qml.contains("rustController.updateSelectedMarkerWithDuration"));
+        assert!(adapter_qml.contains("rustController.bulkUpdateSelectedMarkers"));
+        assert!(adapter_qml.contains("rustController.toggleMarkerSelection"));
+        assert!(adapter_qml.contains("rustController.createEditableTrackFromTrack"));
+        assert!(adapter_qml.contains("rustController.setTrackExpanded"));
+        assert!(adapter_qml.contains("rustController.undo"));
+        assert!(adapter_qml.contains("rustController.redo"));
+        assert!(adapter_qml.contains("rustController.projectPath"));
+        assert!(adapter_qml.contains("rustController.selectedTrackCanPlay"));
+        assert!(adapter_qml.contains("rustController.openProject"));
+        assert!(adapter_qml.contains("rustController.saveProject"));
+        assert!(adapter_qml.contains("rustController.importAudio"));
+        assert!(adapter_qml.contains("rustController.playSelectedTrack"));
+        assert!(adapter_qml.contains("rustController.playbackSourcePath"));
+        assert!(adapter_qml.contains("rustController.playbackPositionSeconds"));
+        assert!(adapter_qml.contains("rustController.playbackDurationSeconds"));
+        assert!(adapter_qml.contains("rustController.playbackLastError"));
+        assert!(adapter_qml.contains("rustController.playbackVolume"));
+        assert!(adapter_qml.contains("rustController.setPlaybackVolumeValue"));
+        assert!(adapter_qml.contains("import QtMultimedia"));
+        assert!(adapter_qml.contains("MediaPlayer"));
+        assert!(adapter_qml.contains("MediaPlayer.PlayingState"));
+        assert!(adapter_qml.contains("AudioOutput"));
+        assert!(adapter_qml.contains("mediaPlayer.play()"));
+        assert!(adapter_qml.contains("encodeURIComponent(segment)"));
+        assert!(!adapter_qml.contains("encodeURI(path)"));
+        assert!(adapter_qml.contains("rustController.timelinePixelsPerSecond"));
+        assert!(adapter_qml.contains("rustController.timelineScrollSeconds"));
+        assert!(adapter_qml.contains("rustController.timelineVisibleSeconds"));
+        assert!(adapter_qml.contains("rustController.setTimelineZoom"));
+        assert!(adapter_qml.contains("rustController.applyTimelineScrollSeconds"));
+        assert!(adapter_qml.contains("rustController.applyTimelineVisibleSeconds"));
+        assert!(adapter_qml.contains("rustController.setTimelineVisibleTrackRange"));
+        assert!(adapter_qml.contains("rustController.snapTimelineTime"));
+        assert!(adapter_qml.contains("function add_fixed_interval_track(trackId, duration, interval) { return add_transform_track"));
+        assert!(adapter_qml
+            .contains("function add_vocals_stem_track(trackId) { return add_transform_track"));
+        assert!(adapter_qml.contains("transformModel.append"));
+        assert!(adapter_qml.contains("function version_at(index)"));
     }
 
     fn json_array(payload: &str) -> Vec<Value> {

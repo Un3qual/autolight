@@ -26,6 +26,21 @@ uv run python main.py
 
 ## Completion Update
 
+- 2026-06-04: Cleaned up the Rust QML adapter after review follow-through.
+- Changes made: removed the embedded `rustAdapterSource` QML string from `UI/Main.qml`, moved the Rust/CXX-Qt adapter bridge into `UI/RustAdapter.qml`, kept the main UI on a file-backed synchronous adapter component, and extended the QML structure test to prevent regressions to string-generated adapter code.
+- Next batch: none. PR review-bot refresh remains the next external gate after this push.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_rust_adapter_uses_controller_models_and_actions`: passed.
+  - `cargo fmt --all`: applied rustfmt changes.
+  - `cargo fmt --all -- --check`: passed.
+  - `git diff --check`: passed.
+  - `rg -n "readonly property string rustAdapterSource|Qt\.createQmlObject\(" UI`: passed, no matches.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 39 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 20 `autolight-analysis` tests, 2 `autolight-app` tests, 37 `autolight-core` tests, 17 `autolight-jobs` tests, and 39 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt printed non-fatal audio-device and existing missing `Sans Serif` font alias warnings.
+  - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: first failed inside the sandbox because `uv` could not access `/Users/admin/.cache/uv`; rerun outside the sandbox passed. Qt multimedia channel warnings were non-fatal.
+
 - 2026-06-04: Addressed a fresh review-bot follow-through pass on PR #13 after commit `97c50c8`.
 - Changes made: fixed job terminal failure/cancel descendant staleness, rejected negative produced marker timestamps, blocked job submission when inputs are not complete, refreshed/marked dirty when `run_next` errors after mutating project state, encoded local playback paths with URL-safe path segments, bounded Rust `markers.fixed_interval` generation to the Python reference marker cap, disabled reruns for incomplete inputs, invalidated snapshot undo after structural non-history project mutations, finalized persisted active jobs on open, validated cache artifact files during open, restored source/dependent tracks when offline audio comes back online, tolerated JSON roundtrip noise in audio duration comparisons, cleaned up DeepSource-flagged empty `JobRegistry::new()` test initializers, and fixed outside-diff Rust clippy findings that were not exposed as GitHub inline comments.
 - Next batch: none. Final post-push GitHub refresh after replies/resolutions showed no unresolved bot review threads.
