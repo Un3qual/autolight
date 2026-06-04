@@ -31,10 +31,12 @@ pub enum JobQueueError {
     JobNotFound(String),
     #[error("runtime transform params cannot change cached identity")]
     RuntimeParamsChangeIdentity,
-    #[error("marker timestamp must be finite")]
+    #[error("marker timestamp must be finite and non-negative")]
     NonFiniteMarkerTimestamp,
     #[error("marker duration must be finite and non-negative")]
     InvalidMarkerDuration,
+    #[error("input track is not complete: {0}")]
+    InputTrackNotComplete(String),
     #[error(transparent)]
     Transform(#[from] TransformError),
     #[error(transparent)]
@@ -502,6 +504,7 @@ impl LocalJobQueue {
             .ok_or_else(|| JobQueueError::TrackNotFound(track_id.clone()))?;
         track.result_state = state;
         track.error = error.to_string();
+        mark_dependents_stale(project, &track_id, "");
         Ok(())
     }
 
@@ -595,6 +598,9 @@ fn dependency_hash_for_track(
     for input_track_id in input_track_ids {
         let input_track = find_track(project, input_track_id)
             .ok_or_else(|| JobQueueError::TrackNotFound(input_track_id.clone()))?;
+        if input_track.result_state != ResultState::Complete {
+            return Err(JobQueueError::InputTrackNotComplete(input_track_id.clone()));
+        }
         input_cache_refs.extend(track_dependency_inputs(project, input_track)?);
     }
     Ok(track_dependency_hash(
@@ -653,7 +659,7 @@ fn build_markers(
         .into_iter()
         .enumerate()
         .map(|(index, marker)| {
-            if !marker.timestamp.is_finite() {
+            if !marker.timestamp.is_finite() || marker.timestamp < 0.0 {
                 return Err(JobQueueError::NonFiniteMarkerTimestamp);
             }
             if marker
@@ -717,7 +723,7 @@ mod tests {
 
     #[test]
     fn jobs_submit_then_run_completes_markers_and_artifact_cache_refs() {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(
                 test_spec("test.markers_and_artifact"),
@@ -791,7 +797,7 @@ mod tests {
 
     #[test]
     fn jobs_failed_transform_records_error_without_partial_markers() {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(test_spec("test.fail"), |_context, _params| {
                 Err(TransformRunError::Failed("old job failed".to_string()))
@@ -818,8 +824,63 @@ mod tests {
     }
 
     #[test]
+    fn jobs_failed_rerun_marks_generated_and_editable_dependents_stale() {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(test_spec("test.fail"), |_context, _params| {
+                Err(TransformRunError::Failed("old job failed".to_string()))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.fail");
+        project.tracks.extend([
+            generated_child("track_downstream", "track_generated"),
+            editable_child("track_edit", "track_generated"),
+        ]);
+        let mut queue = LocalJobQueue::with_clock(registry, deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(job_state(&project, &job_id), ResultState::Failed);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Failed
+        );
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Stale
+        );
+        assert_eq!(track_state(&project, "track_edit"), ResultState::Stale);
+    }
+
+    #[test]
+    fn jobs_cancelled_rerun_marks_generated_and_editable_dependents_stale() {
+        let mut project = project_with_generated_track("test.noop");
+        project.tracks.extend([
+            generated_child("track_downstream", "track_generated"),
+            editable_child("track_edit", "track_generated"),
+        ]);
+        let mut queue = LocalJobQueue::new(registry_with_noop("test.noop"));
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        queue.cancel(&job_id).unwrap();
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(job_state(&project, &job_id), ResultState::Cancelled);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Cancelled
+        );
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Stale
+        );
+        assert_eq!(track_state(&project, "track_edit"), ResultState::Stale);
+    }
+
+    #[test]
     fn jobs_malformed_marker_output_leaves_no_partial_markers() {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(test_spec("test.bad_marker"), |_context, _params| {
                 Ok(TransformResult::markers(vec![
@@ -848,8 +909,38 @@ mod tests {
     }
 
     #[test]
+    fn jobs_negative_marker_timestamp_leaves_no_partial_markers() {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(test_spec("test.negative_marker"), |_context, _params| {
+                Ok(TransformResult::markers(vec![
+                    ProducedMarker::new(0.0, "valid"),
+                    ProducedMarker::new(-0.1, "invalid"),
+                ]))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.negative_marker");
+        let mut queue = LocalJobQueue::with_clock(registry, deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        let error = queue.run_next(&mut project).unwrap_err();
+
+        assert!(error.to_string().contains("non-negative"));
+        assert_eq!(job_state(&project, &job_id), ResultState::Failed);
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Failed
+        );
+        assert!(track_by_id(&project, "track_generated")
+            .error
+            .contains("non-negative"));
+        assert!(project.markers.is_empty());
+        assert!(queue.submit(&mut project, "track_generated").is_ok());
+    }
+
+    #[test]
     fn jobs_invalid_artifact_failure_does_not_leave_track_running() {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(test_spec("test.bad_artifact"), |_context, _params| {
                 Ok(TransformResult::artifact("../bad", b"bad artifact"))
@@ -1002,7 +1093,7 @@ mod tests {
 
     #[test]
     fn jobs_runtime_only_params_reach_runner_without_changing_saved_params() {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(test_spec("test.runtime_param"), |_context, params| {
                 let label = params
@@ -1041,8 +1132,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn jobs_reject_rerun_when_input_track_is_stale() {
+        let mut project = project_with_generated_track("test.noop");
+        track_by_id_mut(&mut project, "track_source").result_state = ResultState::Stale;
+        track_by_id_mut(&mut project, "track_source").error =
+            "input audio asset offline: source.wav".to_string();
+        let mut queue = LocalJobQueue::new(registry_with_noop("test.noop"));
+
+        let error = queue.submit(&mut project, "track_generated").unwrap_err();
+
+        assert!(error.to_string().contains("input track is not complete"));
+        assert!(project.job_runs.is_empty());
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Complete
+        );
+    }
+
     fn registry_with_noop(transform_id: &str) -> JobRegistry {
-        let mut registry = JobRegistry::new();
+        let mut registry = JobRegistry::default();
         registry
             .register(test_spec(transform_id), |_context, _params| {
                 Ok(TransformResult::default())

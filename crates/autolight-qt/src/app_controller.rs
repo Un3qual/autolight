@@ -39,6 +39,7 @@ const TIMELINE_MAX_PIXELS_PER_SECOND: f64 = 240.0;
 const TIMELINE_DEFAULT_VISIBLE_SECONDS: f64 = 8.0;
 const TIMELINE_MIN_VISIBLE_SECONDS: f64 = 0.01;
 const SNAP_THRESHOLD_PIXELS: f64 = 10.0;
+const MAX_FIXED_INTERVAL_MARKERS: usize = 100_000;
 const DEFAULT_MARKER_COLOR: &str = "cyan";
 const MARKER_COLOR_OPTIONS: &[(&str, &str, &str)] = &[
     ("cyan", "Cyan", "#67e8f9"),
@@ -250,7 +251,7 @@ impl AppControllerState {
         self.expand_parent_for_new_child(parent_track_id);
         self.selected_track_id = QString::from(&track_id);
         self.selected_marker_ids.clear();
-        self.mark_non_history_dirty();
+        self.mark_project_mutation_dirty();
         self.last_error = QString::default();
         self.refresh_view_state();
         track_id
@@ -260,10 +261,12 @@ impl AppControllerState {
         match self.job_queue.submit(&mut self.project, track_id) {
             Ok(job_id) => {
                 if let Err(error) = self.job_queue.run_next(&mut self.project) {
+                    self.mark_project_mutation_dirty();
                     self.set_error(error.to_string());
+                    self.refresh_view_state();
                     return String::new();
                 }
-                self.mark_non_history_dirty();
+                self.mark_project_mutation_dirty();
                 self.last_error = QString::default();
                 self.refresh_view_state();
                 job_id
@@ -289,28 +292,33 @@ impl AppControllerState {
             return;
         }
         if let Err(error) = self.job_queue.run_next(&mut self.project) {
+            self.mark_project_mutation_dirty();
             self.set_error(error.to_string());
+            self.refresh_view_state();
             return;
         }
-        self.mark_non_history_dirty();
+        self.mark_project_mutation_dirty();
         self.refresh_view_state();
     }
 
     fn refresh_cache_status_state(&mut self) -> Vec<String> {
-        let project_dir = current_project_dir(&self.project_path.to_string());
-        let invalid_refs = self
-            .job_queue
-            .refresh_cache_validity(&mut self.project, |entry| {
-                cache_entry_is_valid(entry, project_dir.as_deref())
-            });
+        let invalid_refs = self.validate_cache_artifact_state();
         if invalid_refs.is_empty() {
             self.last_error = QString::default();
         } else {
             self.set_error(format!("invalid cache artifacts: {}", invalid_refs.len()));
-            self.mark_non_history_dirty();
+            self.mark_project_mutation_dirty();
         }
         self.refresh_view_state();
         invalid_refs
+    }
+
+    fn validate_cache_artifact_state(&mut self) -> Vec<String> {
+        let project_dir = current_project_dir(&self.project_path.to_string());
+        self.job_queue
+            .refresh_cache_validity(&mut self.project, |entry| {
+                cache_entry_is_valid(entry, project_dir.as_deref())
+            })
     }
 
     fn open_project_state(&mut self, path: &str) -> bool {
@@ -326,6 +334,8 @@ impl AppControllerState {
         self.project_name = QString::from(&self.project.name);
         self.project_path = QString::from(project_path.to_string_lossy().to_string());
         let refreshed_audio_assets = self.refresh_loaded_audio_assets();
+        let finalized_active_jobs = self.finalize_loaded_active_jobs();
+        let invalid_cache_refs = self.validate_cache_artifact_state();
         self.expanded_track_ids = expanded_track_ids_from_project(&self.project)
             .unwrap_or_else(|| default_expanded_track_ids(&self.project));
         self.selected_track_id = QString::from(&selected_track_id_from_project(&self.project));
@@ -333,8 +343,9 @@ impl AppControllerState {
         self.selected_marker_ids.clear();
         self.unload_playback();
         self.mark_clean();
-        if refreshed_audio_assets > 0 {
-            self.mark_non_history_dirty();
+        if refreshed_audio_assets > 0 || finalized_active_jobs > 0 || !invalid_cache_refs.is_empty()
+        {
+            self.mark_project_mutation_dirty();
         }
         self.last_error = QString::default();
         self.refresh_view_state();
@@ -411,7 +422,7 @@ impl AppControllerState {
         });
         self.selected_track_id = QString::from(&track_id);
         self.selected_marker_ids.clear();
-        self.mark_non_history_dirty();
+        self.mark_project_mutation_dirty();
         self.last_error = QString::default();
         self.refresh_view_state();
         track_id
@@ -444,10 +455,8 @@ impl AppControllerState {
             affected_assets.push((asset.id.clone(), error));
         }
 
+        let mut restored_audio_dependency_tracks = 0;
         for (asset_id, error) in &affected_assets {
-            if error.is_empty() {
-                continue;
-            }
             let source_track_ids = self
                 .project
                 .tracks
@@ -460,20 +469,62 @@ impl AppControllerState {
                 .map(|track| track.id.clone())
                 .collect::<Vec<_>>();
             for track_id in source_track_ids {
-                if let Some(track) = self
-                    .project
-                    .tracks
-                    .iter_mut()
-                    .find(|track| track.id == track_id)
-                {
-                    track.result_state = ResultState::Stale;
-                    track.error = error.clone();
+                if error.is_empty() {
+                    if let Some(track) = self.project.tracks.iter_mut().find(|track| {
+                        track.id == track_id && is_audio_dependency_error(&track.error)
+                    }) {
+                        track.result_state = ResultState::Complete;
+                        track.error.clear();
+                    }
+                } else {
+                    if let Some(track) = self
+                        .project
+                        .tracks
+                        .iter_mut()
+                        .find(|track| track.id == track_id)
+                    {
+                        track.result_state = ResultState::Stale;
+                        track.error = error.clone();
+                    }
+                    mark_dependents_stale(&mut self.project, &track_id, error);
                 }
-                mark_dependents_stale(&mut self.project, &track_id, error);
+            }
+        }
+        if affected_assets.iter().any(|(_, error)| error.is_empty()) {
+            restored_audio_dependency_tracks =
+                restore_audio_dependency_dependents(&mut self.project);
+        }
+
+        affected_assets.len() + restored_audio_dependency_tracks
+    }
+
+    fn finalize_loaded_active_jobs(&mut self) -> usize {
+        let mut affected_track_ids = BTreeSet::new();
+        let error = "job was active when project was opened";
+        let mut finalized = 0;
+        for run in &mut self.project.job_runs {
+            if matches!(run.state, ResultState::Pending | ResultState::Running) {
+                run.state = ResultState::Stale;
+                run.error = error.to_string();
+                affected_track_ids.insert(run.track_id.clone());
+                finalized += 1;
             }
         }
 
-        affected_assets.len()
+        for track_id in affected_track_ids {
+            if let Some(track) = self
+                .project
+                .tracks
+                .iter_mut()
+                .find(|track| track.id == track_id)
+            {
+                track.result_state = ResultState::Stale;
+                track.error = error.to_string();
+            }
+            mark_dependents_stale(&mut self.project, &track_id, error);
+        }
+
+        finalized
     }
 
     fn play_selected_track_state(&mut self) -> bool {
@@ -644,7 +695,10 @@ impl AppControllerState {
         let selected_track_id = self.selected_track_id.to_string();
         let selected_track = find_track(&self.project, &selected_track_id);
         self.selected_track_can_rerun = selected_track.is_some_and(|track| {
-            track.track_type == TrackType::Generated && track.result_state != ResultState::Running
+            track.track_type == TrackType::Generated
+                && track.result_state != ResultState::Running
+                && latest_active_job_id(&self.project, &selected_track_id).is_none()
+                && track_inputs_are_complete(&self.project, track)
         });
         self.selected_track_has_running_job =
             latest_active_job_id(&self.project, &selected_track_id).is_some();
@@ -1126,6 +1180,13 @@ impl AppControllerState {
 
     fn mark_non_history_dirty(&mut self) {
         self.non_history_dirty = true;
+        self.sync_dirty_from_history();
+    }
+
+    fn mark_project_mutation_dirty(&mut self) {
+        self.non_history_dirty = true;
+        self.edit_history.clear();
+        self.edit_history.mark_clean();
         self.sync_dirty_from_history();
     }
 
@@ -2169,8 +2230,15 @@ fn fixed_interval_runner(
             "interval must be greater than zero".to_string(),
         ));
     }
+    let marker_count = ((duration + 1e-9) / interval).floor() + 1.0;
+    if !marker_count.is_finite() || marker_count > MAX_FIXED_INTERVAL_MARKERS as f64 {
+        return Err(TransformRunError::Failed(format!(
+            "too many markers requested: {}",
+            marker_count
+        )));
+    }
 
-    let mut markers = Vec::new();
+    let mut markers = Vec::with_capacity(marker_count as usize);
     let mut current = 0.0;
     while current <= duration + 1e-9 {
         if context.cancel_requested() {
@@ -2228,6 +2296,45 @@ fn parent_compatibility_error(parent: &Track, spec: &TransformSpec) -> String {
     }
 }
 
+fn track_inputs_are_complete(project: &ProjectDocument, track: &Track) -> bool {
+    track.input_track_ids.iter().all(|input_id| {
+        find_track(project, input_id)
+            .is_some_and(|input| input.result_state == ResultState::Complete)
+    })
+}
+
+fn restore_audio_dependency_dependents(project: &mut ProjectDocument) -> usize {
+    let mut restored = 0;
+    loop {
+        let restorable_ids = project
+            .tracks
+            .iter()
+            .filter(|track| track.track_type != TrackType::Source)
+            .filter(|track| {
+                track.result_state == ResultState::Stale && is_audio_dependency_error(&track.error)
+            })
+            .filter(|track| track_inputs_are_complete(project, track))
+            .map(|track| track.id.clone())
+            .collect::<Vec<_>>();
+        if restorable_ids.is_empty() {
+            break;
+        }
+        for track_id in restorable_ids {
+            if let Some(track) = project.tracks.iter_mut().find(|track| track.id == track_id) {
+                track.result_state = ResultState::Complete;
+                track.error.clear();
+                restored += 1;
+            }
+        }
+    }
+    restored
+}
+
+fn is_audio_dependency_error(error: &str) -> bool {
+    error.starts_with("input audio asset offline:")
+        || error.starts_with("input audio asset modified:")
+}
+
 fn latest_active_job_id(project: &ProjectDocument, track_id: &str) -> Option<String> {
     project
         .job_runs
@@ -2261,7 +2368,7 @@ fn audio_asset_load_error(asset: &AudioAsset) -> Option<String> {
     let path = Path::new(&asset.path);
     match inspect_wav_file(path) {
         Ok(inspection) => {
-            let metadata_changed = asset.duration != inspection.metadata.duration
+            let metadata_changed = (asset.duration - inspection.metadata.duration).abs() > 1e-9
                 || asset.sample_rate != inspection.metadata.sample_rate
                 || asset.channels != inspection.metadata.channels;
             if (!asset.fingerprint.is_empty() && asset.fingerprint != inspection.fingerprint)
@@ -2577,6 +2684,8 @@ mod tests {
     use super::{AppControllerState, SMOKE_PROJECT_NAME};
     use autolight_core::cache::cache_entry_for_bytes;
     use autolight_core::project::{ResultState, TrackType};
+    use autolight_core::transforms::TransformSpec;
+    use autolight_jobs::queue::{JobRegistry, LocalJobQueue, ProducedMarker, TransformResult};
 
     #[test]
     fn default_state_exposes_smoke_contract_and_transform_specs() {
@@ -2708,6 +2817,151 @@ mod tests {
             .job_runs
             .iter()
             .any(|run| run.id == job_id && run.state == ResultState::Failed));
+    }
+
+    #[test]
+    fn controller_run_completion_error_refreshes_failed_state() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let spec = TransformSpec::new(
+            "test.bad_marker",
+            "1",
+            "Bad Marker",
+            "audio-or-markers.v1",
+            "markers.v1",
+            "light",
+        );
+        state.transform_registry.register(spec.clone()).unwrap();
+        let mut registry = JobRegistry::new();
+        registry
+            .register(spec, |_context, _params| {
+                Ok(TransformResult::markers(vec![
+                    ProducedMarker::new(0.0, "valid"),
+                    ProducedMarker::new(-0.1, "invalid"),
+                ]))
+            })
+            .unwrap();
+        state.job_queue = LocalJobQueue::new(registry);
+        let track_id =
+            state.add_transform_track_state("track_source", "test.bad_marker", "1", "{}");
+        state.mark_clean();
+
+        let job_id = state.run_track_state(&track_id);
+
+        assert!(job_id.is_empty());
+        assert!(state.is_dirty);
+        let track = state
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap();
+        assert_eq!(track.result_state, ResultState::Failed);
+        assert!(track.error.contains("non-negative"));
+        assert!(state
+            .timeline_rows_json
+            .to_string()
+            .contains("\"resultState\":\"failed\""));
+        assert!(state
+            .project
+            .job_runs
+            .iter()
+            .any(|run| run.track_id == track_id && run.state == ResultState::Failed));
+    }
+
+    #[test]
+    fn controller_fixed_interval_rejects_unbounded_marker_generation() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let track_id = state.add_transform_track_state(
+            "track_source",
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1000000.0, "interval": 0.001}"#,
+        );
+
+        let job_id = state.run_track_state(&track_id);
+
+        assert!(!job_id.is_empty());
+        let track = state
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap();
+        assert_eq!(track.result_state, ResultState::Failed);
+        assert!(track.error.contains("too many markers"));
+        assert!(state
+            .project
+            .markers
+            .iter()
+            .all(|marker| marker.track_id != track_id));
+    }
+
+    #[test]
+    fn controller_rerun_requires_complete_input_tracks() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let track_id = state.add_transform_track_state(
+            "track_source",
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1.0, "interval": 0.5}"#,
+        );
+        state.run_track_state(&track_id);
+        state.select_track_state(&track_id);
+        assert!(state.selected_track_can_rerun);
+
+        let source = state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_source")
+            .unwrap();
+        source.result_state = ResultState::Stale;
+        source.error = "input audio asset offline: song.wav".to_string();
+        state.refresh_view_state();
+        assert!(!state.selected_track_can_rerun);
+
+        let source = state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_source")
+            .unwrap();
+        source.result_state = ResultState::Complete;
+        source.error.clear();
+        state.refresh_view_state();
+        assert!(state.selected_track_can_rerun);
+    }
+
+    #[test]
+    fn controller_non_history_mutation_invalidates_snapshot_undo() {
+        let root = test_dir("undo-non-history");
+        let audio_path = root.join("song.wav");
+        write_test_wav(&audio_path, 8_000, 1, 8_000);
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+        let marker_id =
+            state.add_marker_to_selected_track_with_duration_state(1.25, 0.5, "Cue", "cue", "cyan");
+        assert!(state.can_undo);
+
+        let imported_track_id = state.import_audio_state(audio_path.to_str().unwrap());
+
+        assert!(!imported_track_id.is_empty());
+        assert!(!state.can_undo);
+        assert!(!state.undo_state());
+        assert!(state
+            .project
+            .tracks
+            .iter()
+            .any(|track| track.id == imported_track_id));
+        assert!(state
+            .project
+            .markers
+            .iter()
+            .any(|marker| marker.id == marker_id));
     }
 
     #[test]
@@ -3096,6 +3350,158 @@ mod tests {
     }
 
     #[test]
+    fn controller_open_project_finalizes_persisted_active_jobs() {
+        let root = test_dir("open-active-job");
+        let project_path = root.join("show.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let track_id = state.add_transform_track_state(
+            "track_source",
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1.0, "interval": 0.5}"#,
+        );
+        let job_id = state
+            .job_queue
+            .submit(&mut state.project, &track_id)
+            .unwrap();
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+
+        let mut opened = AppControllerState::default();
+        assert!(opened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(opened.is_dirty);
+        assert!(!opened
+            .project
+            .job_runs
+            .iter()
+            .any(|run| matches!(run.state, ResultState::Pending | ResultState::Running)));
+        assert_eq!(
+            opened
+                .project
+                .job_runs
+                .iter()
+                .find(|run| run.id == job_id)
+                .unwrap()
+                .state,
+            ResultState::Stale
+        );
+        assert_eq!(
+            opened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id)
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+        opened.select_track_state(&track_id);
+        assert!(!opened.selected_track_has_running_job);
+    }
+
+    #[test]
+    fn controller_open_project_validates_cache_artifact_files() {
+        let root = test_dir("open-cache-validation");
+        let project_path = root.join("show.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.project_path = cxx_qt_lib::QString::from(project_path.to_string_lossy().to_string());
+        let entry = cache_entry_for_bytes("stem", "dep_drums", b"valid stem", "1", "now").unwrap();
+        let artifact_path = root.join(&entry.path);
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, b"valid stem").unwrap();
+        state
+            .project
+            .cache_entries
+            .retain(|candidate| candidate.id != "cache_drums");
+        state.project.cache_entries.push(entry.clone());
+        state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drums")
+            .unwrap()
+            .cache_refs = vec![entry.id.clone()];
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::write(&artifact_path, b"corrupt stem").unwrap();
+
+        let mut opened = AppControllerState::default();
+        assert!(opened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(opened.is_dirty);
+        assert_eq!(
+            opened
+                .project
+                .cache_entries
+                .iter()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap()
+                .validation_status,
+            "invalid"
+        );
+        assert_eq!(
+            opened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == "track_drums")
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+    }
+
+    #[test]
+    fn controller_open_project_restores_source_track_when_audio_returns() {
+        let root = test_dir("open-restored-audio");
+        let audio_path = root.join("song.wav");
+        let project_path = root.join("show.autolight");
+        write_test_wav(&audio_path, 44_100, 2, 16);
+        let mut state = AppControllerState::default();
+        let source_id = state.import_audio_state(audio_path.to_str().unwrap());
+        let generated_id = state.add_transform_track_state(
+            &source_id,
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1.0, "interval": 0.5}"#,
+        );
+        state.run_track_state(&generated_id);
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::remove_file(&audio_path).unwrap();
+
+        let mut offline = AppControllerState::default();
+        assert!(offline.open_project_state(project_path.to_str().unwrap()));
+        assert_eq!(offline.project.audio_assets[0].import_status, "offline");
+        assert!(offline.save_project_state(project_path.to_str().unwrap()));
+        write_test_wav(&audio_path, 44_100, 2, 16);
+
+        let mut reopened = AppControllerState::default();
+        assert!(reopened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(reopened.is_dirty);
+        assert_eq!(reopened.project.audio_assets[0].import_status, "online");
+        let source = reopened
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == source_id)
+            .unwrap();
+        assert_eq!(source.result_state, ResultState::Complete);
+        assert!(source.error.is_empty());
+        let generated = reopened
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == generated_id)
+            .unwrap();
+        assert_eq!(generated.result_state, ResultState::Complete);
+        assert!(generated.error.is_empty());
+        reopened.select_track_state(&source_id);
+        assert!(reopened.selected_track_can_play);
+    }
+
+    #[test]
     fn controller_playback_state_transitions_from_selected_track() {
         let root = test_dir("playback");
         let audio_path = root.join("song.wav");
@@ -3254,6 +3660,8 @@ mod tests {
         assert!(qml.contains("MediaPlayer.PlayingState"));
         assert!(qml.contains("AudioOutput"));
         assert!(qml.contains("mediaPlayer.play()"));
+        assert!(qml.contains("encodeURIComponent(segment)"));
+        assert!(!qml.contains("encodeURI(path)"));
         assert!(qml.contains("rustController.timelinePixelsPerSecond"));
         assert!(qml.contains("rustController.timelineScrollSeconds"));
         assert!(qml.contains("rustController.timelineVisibleSeconds"));
