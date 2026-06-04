@@ -15,7 +15,7 @@ Row {
     required property real jobProgress
     required property string activeJobId
     required property var markerSpans
-    required property var visibleWaveformSamples
+    required property var waveformLevels
     required property var visibleEnergySamples
     required property var visibleHarmonicColorSamples
     required property real waveformDurationSeconds
@@ -25,6 +25,7 @@ Row {
     required property string visibleChildStateSummary
     required property string treeError
     property var appController
+    readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId
     property real timelineLeftPadding: 24
     property real timelineLabelWidth: 280
     property int timelineRowHeight: 76
@@ -47,8 +48,20 @@ Row {
     Rectangle {
         width: root.timelineLabelWidth
         height: parent.height
-        color: root.index % 2 === 0 ? root.panelBackground : root.laneBackground
-        border.color: root.appController.selectedTrackId === root.trackId ? root.focusAccent : root.borderSubtle
+        color: root.rowSelected ? "#242934" : root.index % 2 === 0 ? root.panelBackground : root.laneBackground
+        border.color: root.rowSelected ? root.focusAccent : root.borderSubtle
+        border.width: root.rowSelected ? 2 : 1
+
+        Rectangle {
+            id: selectedTrackStripe
+            width: 4
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            color: root.focusAccent
+            visible: root.rowSelected
+            z: 2
+        }
 
         MouseArea {
             anchors.fill: parent
@@ -137,7 +150,7 @@ Row {
         rowIndex: root.index
         trackId: root.trackId
         markerSpans: root.markerSpans
-        visibleWaveformSamples: root.visibleWaveformSamples
+        waveformLevels: root.waveformLevels
         visibleEnergySamples: root.visibleEnergySamples
         visibleHarmonicColorSamples: root.visibleHarmonicColorSamples
         waveformDurationSeconds: root.waveformDurationSeconds

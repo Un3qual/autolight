@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
+use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph::{find_track, source_track_id_for_context};
-use crate::project::{ProjectDocument, ResultState, Track, TrackType};
+use crate::project::{
+    CacheValidationStatus, ImportStatus, ProjectDocument, ResultState, Track, TrackType,
+};
 
 #[derive(Debug, Error)]
 pub enum TransformError {
@@ -21,13 +25,50 @@ pub enum TransformError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SchemaId(String);
+
+impl SchemaId {
+    pub const AUDIO: &'static str = "audio.v1";
+    pub const AUDIO_OR_MARKERS: &'static str = "audio-or-markers.v1";
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for SchemaId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for SchemaId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for SchemaId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl PartialEq<&str> for SchemaId {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransformSpec {
     pub id: String,
     pub version: String,
     pub name: String,
-    pub input_schema: String,
-    pub output_schema: String,
+    pub input_schema: SchemaId,
+    pub output_schema: SchemaId,
     pub estimated_cost: String,
 }
 
@@ -36,8 +77,8 @@ impl TransformSpec {
         id: impl Into<String>,
         version: impl Into<String>,
         name: impl Into<String>,
-        input_schema: impl Into<String>,
-        output_schema: impl Into<String>,
+        input_schema: impl Into<SchemaId>,
+        output_schema: impl Into<SchemaId>,
         estimated_cost: impl Into<String>,
     ) -> Self {
         Self {
@@ -51,15 +92,15 @@ impl TransformSpec {
     }
 
     pub fn is_audio_input(&self) -> bool {
-        self.input_schema == "audio.v1"
+        self.input_schema == SchemaId::AUDIO
     }
 
     pub fn is_compatible_parent(&self, project: &ProjectDocument, parent_track_id: &str) -> bool {
         match self.input_schema.as_str() {
-            "audio.v1" => parent_has_audio_context(project, parent_track_id),
-            "audio-or-markers.v1" => find_track(project, parent_track_id)
+            SchemaId::AUDIO => parent_has_audio_context(project, parent_track_id),
+            SchemaId::AUDIO_OR_MARKERS => find_track(project, parent_track_id)
                 .is_some_and(|track| track.result_state == ResultState::Complete),
-            _ => find_track(project, parent_track_id).is_some(),
+            _ => false,
         }
     }
 }
@@ -252,7 +293,9 @@ fn source_track_has_online_asset(project: &ProjectDocument, source_track_id: &st
         return false;
     };
     project.audio_assets.iter().any(|asset| {
-        asset.id == asset_id && asset.import_status == "online" && !asset.path.is_empty()
+        asset.id == asset_id
+            && asset.import_status == ImportStatus::Online
+            && !asset.path.is_empty()
     })
 }
 
@@ -263,7 +306,7 @@ fn track_has_valid_audio_artifact(project: &ProjectDocument, track: &Track) -> b
     track.cache_refs.iter().any(|cache_ref| {
         project.cache_entries.iter().any(|entry| {
             entry.id == *cache_ref
-                && entry.validation_status == "valid"
+                && entry.validation_status == CacheValidationStatus::Valid
                 && matches!(entry.artifact_kind.as_str(), "audio" | "stem")
         })
     })
@@ -277,7 +320,8 @@ mod tests {
         builtin_transform_specs, parent_has_audio_context, TransformRegistry, TransformSpec,
     };
     use crate::project::{
-        AudioAsset, CacheEntry, JsonObject, ProjectDocument, ResultState, Track, TrackType,
+        AudioAsset, CacheEntry, CacheValidationStatus, ImportStatus, JsonObject, ProjectDocument,
+        ResultState, Track, TrackType,
     };
 
     #[test]
@@ -406,7 +450,7 @@ mod tests {
         assert!(parent_has_audio_context(&project, "track_stem"));
         assert!(!parent_has_audio_context(&project, "track_markers"));
 
-        project.audio_assets[0].import_status = "offline".to_string();
+        project.audio_assets[0].import_status = ImportStatus::Offline;
         assert!(!parent_has_audio_context(&project, "track_markers"));
         assert!(parent_has_audio_context(&project, "track_stem"));
     }
@@ -448,7 +492,7 @@ mod tests {
             sample_rate: 44_100,
             channels: 2,
             fingerprint: "fingerprint".to_string(),
-            import_status: "online".to_string(),
+            import_status: ImportStatus::Online,
             relink_hint: String::default(),
         });
         project.tracks.push(Track {
@@ -502,7 +546,7 @@ mod tests {
             transform_version: "1".to_string(),
             size_bytes: 0,
             payload_digest: String::default(),
-            validation_status: "valid".to_string(),
+            validation_status: CacheValidationStatus::Valid,
         }
     }
 

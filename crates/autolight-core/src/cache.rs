@@ -5,7 +5,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::graph::mark_dependents_stale;
-use crate::project::{CacheEntry, JsonObject, ProjectDocument, ResultState, Track, TrackType};
+use crate::project::{
+    CacheEntry, CacheValidationStatus, JsonObject, ProjectDocument, ResultState, Track, TrackType,
+};
 
 #[derive(Debug, Error)]
 pub enum CacheError {
@@ -72,7 +74,7 @@ pub fn cache_entry_for_bytes(
         transform_version: transform_version.to_string(),
         size_bytes: payload.len() as u64,
         payload_digest,
-        validation_status: "valid".to_string(),
+        validation_status: CacheValidationStatus::Valid,
     })
 }
 
@@ -253,7 +255,8 @@ mod tests {
         track_dependency_inputs, validate_artifact_kind,
     };
     use crate::project::{
-        CacheEntry, JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType,
+        CacheEntry, CacheValidationStatus, JsonObject, Marker, ProjectDocument, ResultState, Track,
+        TrackType,
     };
 
     #[test]
@@ -414,7 +417,7 @@ mod tests {
             transform_version: "1".to_string(),
             size_bytes: 0,
             payload_digest: String::default(),
-            validation_status: "valid".to_string(),
+            validation_status: CacheValidationStatus::Valid,
         }
     }
 

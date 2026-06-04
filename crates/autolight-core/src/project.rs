@@ -181,7 +181,7 @@ pub struct AudioAsset {
     pub sample_rate: u32,
     pub channels: u32,
     pub fingerprint: String,
-    pub import_status: String,
+    pub import_status: ImportStatus,
     pub relink_hint: String,
 }
 
@@ -254,7 +254,53 @@ pub struct CacheEntry {
     pub transform_version: String,
     pub size_bytes: u64,
     pub payload_digest: String,
-    pub validation_status: String,
+    pub validation_status: CacheValidationStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportStatus {
+    Online,
+    Offline,
+    Modified,
+}
+
+impl ImportStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::Offline => "offline",
+            Self::Modified => "modified",
+        }
+    }
+}
+
+impl std::fmt::Display for ImportStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheValidationStatus {
+    Valid,
+    Invalid,
+}
+
+impl CacheValidationStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+impl std::fmt::Display for CacheValidationStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

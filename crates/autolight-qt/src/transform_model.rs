@@ -9,6 +9,7 @@ pub struct TransformSpecRow {
     pub name: String,
     pub estimated_cost: String,
     pub output_schema: String,
+    pub runnable: bool,
 }
 
 pub fn builtin_transform_spec_rows() -> Vec<TransformSpecRow> {
@@ -29,7 +30,11 @@ fn spec_row(spec: &TransformSpec) -> TransformSpecRow {
         version: spec.version.clone(),
         name: spec.name.clone(),
         estimated_cost: spec.estimated_cost.clone(),
-        output_schema: spec.output_schema.clone(),
+        output_schema: spec.output_schema.to_string(),
+        runnable: matches!(
+            spec.id.as_str(),
+            "markers.fixed_interval" | "waveform.summary"
+        ),
     }
 }
 
@@ -47,27 +52,19 @@ mod tests {
         let rows: Value = serde_json::from_str(&payload).unwrap();
         let first = &rows[0];
 
+        let rows = builtin_transform_spec_rows();
         assert_eq!(
-            builtin_transform_spec_rows()
-                .iter()
+            rows.iter()
+                .filter(|row| row.runnable)
                 .map(|row| row.transform_id.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "audio.drums_stand_in",
-                "markers.fixed_interval",
-                "music.beat_grid",
-                "music.energy_profile",
-                "music.harmonic_color",
-                "stems.vocals_stand_in",
-                "timing.beats",
-                "timing.onsets",
-                "waveform.summary",
-            ]
+            ["markers.fixed_interval", "waveform.summary"]
         );
         assert!(first.get("transformId").is_some());
         assert!(first.get("version").is_some());
         assert!(first.get("name").is_some());
         assert!(first.get("estimatedCost").is_some());
         assert!(first.get("outputSchema").is_some());
+        assert!(first.get("runnable").is_some());
     }
 }

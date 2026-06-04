@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+autolight-analysis = { path = "../autolight-analysis" }
 autolight-core = { path = "../autolight-core" }
 autolight-jobs = { path = "../autolight-jobs" }
 cxx.workspace = true

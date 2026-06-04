@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use autolight_core::cache::artifact_kinds_for_track;
 use autolight_core::graph::{
     default_expanded_track_ids, project_tree, source_track_id_for_context,
 };
 use autolight_core::project::{
-    AudioAsset, CacheEntry, JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType,
+    AudioAsset, CacheEntry, CacheValidationStatus, ImportStatus, JobRun, JsonObject, Marker,
+    ProjectDocument, ResultState, Track, TrackType,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -25,13 +25,11 @@ pub struct TimelineRow {
     pub active_job_id: String,
     pub job_state: String,
     pub job_progress: f64,
-    pub waveform_samples: Vec<Value>,
     pub cache_ref_count: usize,
     pub artifact_kinds: String,
     pub waveform_duration_seconds: f64,
+    pub waveform_levels: Vec<TimelineWaveformLevel>,
     pub editable: bool,
-    pub visible_waveform_samples: Vec<Value>,
-    pub waveform_level_bucket_count: usize,
     pub parent_track_id: String,
     pub depth: usize,
     pub has_children: bool,
@@ -41,6 +39,13 @@ pub struct TimelineRow {
     pub tree_error: String,
     pub visible_energy_samples: Vec<Value>,
     pub visible_harmonic_color_samples: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineWaveformLevel {
+    pub bucket_count: usize,
+    pub samples: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +59,118 @@ pub struct MarkerSpan {
     pub selected: bool,
 }
 
+struct TimelineProjectionContext<'a> {
+    project: &'a ProjectDocument,
+    tracks_by_id: BTreeMap<&'a str, &'a Track>,
+    markers_by_track: BTreeMap<&'a str, Vec<&'a Marker>>,
+    latest_job_by_track: BTreeMap<&'a str, &'a JobRun>,
+    cache_entries_by_id: BTreeMap<&'a str, &'a CacheEntry>,
+    audio_assets_by_id: BTreeMap<&'a str, &'a AudioAsset>,
+}
+
+impl<'a> TimelineProjectionContext<'a> {
+    fn new(project: &'a ProjectDocument) -> Self {
+        let tracks_by_id = project
+            .tracks
+            .iter()
+            .map(|track| (track.id.as_str(), track))
+            .collect();
+        let mut markers_by_track: BTreeMap<&str, Vec<&Marker>> = BTreeMap::new();
+        for marker in &project.markers {
+            markers_by_track
+                .entry(marker.track_id.as_str())
+                .or_default()
+                .push(marker);
+        }
+        for markers in markers_by_track.values_mut() {
+            markers.sort_by(|left, right| {
+                left.timestamp
+                    .total_cmp(&right.timestamp)
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+        }
+        let mut latest_job_by_track = BTreeMap::new();
+        for run in &project.job_runs {
+            latest_job_by_track.insert(run.track_id.as_str(), run);
+        }
+        let cache_entries_by_id = project
+            .cache_entries
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+        let audio_assets_by_id = project
+            .audio_assets
+            .iter()
+            .map(|asset| (asset.id.as_str(), asset))
+            .collect();
+        Self {
+            project,
+            tracks_by_id,
+            markers_by_track,
+            latest_job_by_track,
+            cache_entries_by_id,
+            audio_assets_by_id,
+        }
+    }
+
+    fn track(&self, track_id: &str) -> Option<&'a Track> {
+        self.tracks_by_id.get(track_id).copied()
+    }
+
+    fn markers_for_track(&self, track_id: &str) -> &[&'a Marker] {
+        self.markers_by_track
+            .get(track_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    fn latest_job_for_track(&self, track_id: &str) -> Option<&'a JobRun> {
+        self.latest_job_by_track.get(track_id).copied()
+    }
+
+    fn artifact_kinds_for_track(&self, track: &Track) -> Vec<String> {
+        track
+            .cache_refs
+            .iter()
+            .filter_map(|cache_ref| self.cache_entries_by_id.get(cache_ref.as_str()))
+            .map(|entry| entry.artifact_kind.clone())
+            .collect()
+    }
+
+    fn track_has_valid_complete_artifact(&self, track: &Track, expected_kind: &str) -> bool {
+        track.result_state == ResultState::Complete
+            && !track.cache_refs.is_empty()
+            && track.cache_refs.iter().any(|cache_ref| {
+                self.cache_entries_by_id
+                    .get(cache_ref.as_str())
+                    .is_some_and(|entry| {
+                        entry.artifact_kind == expected_kind
+                            && entry.validation_status == CacheValidationStatus::Valid
+                    })
+            })
+    }
+
+    fn source_audio_duration_seconds(&self, track: &Track) -> f64 {
+        let Some(source_track_id) = source_track_id_for_context(self.project, &track.id) else {
+            return 0.0;
+        };
+        let Some(source_track) = self.track(&source_track_id) else {
+            return 0.0;
+        };
+        let Some(asset_id) = source_track
+            .provenance
+            .get("asset_id")
+            .and_then(Value::as_str)
+        else {
+            return 0.0;
+        };
+        self.audio_assets_by_id
+            .get(asset_id)
+            .map(|asset| asset.duration)
+            .unwrap_or(0.0)
+    }
+}
+
 pub fn rust_demo_project() -> ProjectDocument {
     let mut project = ProjectDocument::new("project_rust_demo", RUST_DEMO_PROJECT_NAME);
     project.audio_assets.push(AudioAsset {
@@ -63,7 +180,7 @@ pub fn rust_demo_project() -> ProjectDocument {
         sample_rate: 44_100,
         channels: 2,
         fingerprint: "rust-demo-fingerprint".to_string(),
-        import_status: "offline".to_string(),
+        import_status: ImportStatus::Offline,
         relink_hint: "rust-demo.wav".to_string(),
     });
     project.cache_entries.extend([
@@ -98,17 +215,20 @@ pub fn rust_demo_project() -> ProjectDocument {
             "dep_waveform",
             ResultState::Complete,
             vec!["cache_waveform".to_string()],
-            json_object([(
-                "visible_waveform",
-                json!({
-                    "duration_seconds": 2.0,
-                    "level_bucket_count": 64,
-                    "samples": [
-                        {"min": -0.1, "max": 0.2},
-                        {"min": -0.3, "max": 0.4}
-                    ]
-                }),
-            )]),
+            json_object([
+                ("waveform_payload", demo_waveform_payload()),
+                (
+                    "visible_waveform",
+                    json!({
+                        "duration_seconds": 2.0,
+                        "level_bucket_count": 64,
+                        "samples": [
+                            {"min": -0.1, "max": 0.2},
+                            {"min": -0.3, "max": 0.4}
+                        ]
+                    }),
+                ),
+            ]),
         ),
         generated_track(
             "track_drums",
@@ -205,32 +325,20 @@ pub fn timeline_rows_for_project_with_state(
     selected_marker_ids: &BTreeSet<String>,
 ) -> Vec<TimelineRow> {
     let tree_rows = project_tree(project, expanded);
-    let tracks_by_id: BTreeMap<&str, &Track> = project
-        .tracks
-        .iter()
-        .map(|track| (track.id.as_str(), track))
-        .collect();
+    let context = TimelineProjectionContext::new(project);
 
     tree_rows
         .into_iter()
         .filter_map(|tree_row| {
-            let track = tracks_by_id.get(tree_row.track_id.as_str())?;
-            let latest_job = project
-                .job_runs
-                .iter()
-                .rev()
-                .find(|run| run.track_id == track.id);
+            let track = context.track(tree_row.track_id.as_str())?;
+            let latest_job = context.latest_job_for_track(&track.id);
             Some(TimelineRow {
                 track_id: track.id.clone(),
                 name: track.name.clone(),
                 track_type: track.track_type.as_str().to_string(),
                 result_state: track.result_state.as_str().to_string(),
-                marker_count: project
-                    .markers
-                    .iter()
-                    .filter(|marker| marker.track_id == track.id)
-                    .count(),
-                marker_spans: marker_spans_for_track(project, &track.id, selected_marker_ids),
+                marker_count: context.markers_for_track(&track.id).len(),
+                marker_spans: marker_spans_for_track(&context, &track.id, selected_marker_ids),
                 error: track.error.clone(),
                 active_job_id: latest_job
                     .filter(|job| job.state == ResultState::Running)
@@ -240,13 +348,11 @@ pub fn timeline_rows_for_project_with_state(
                     .map(|job| job.state.as_str().to_string())
                     .unwrap_or_default(),
                 job_progress: latest_job.map_or(0.0, |job| job.progress),
-                waveform_samples: Vec::default(),
                 cache_ref_count: track.cache_refs.len(),
-                artifact_kinds: artifact_kinds_for_track(project, track).join(", "),
+                artifact_kinds: context.artifact_kinds_for_track(track).join(", "),
                 waveform_duration_seconds: waveform_duration_seconds(track),
+                waveform_levels: waveform_levels(&context, track),
                 editable: track.track_type == TrackType::Editable,
-                visible_waveform_samples: visible_waveform_samples(project, track),
-                waveform_level_bucket_count: waveform_level_bucket_count(project, track),
                 parent_track_id: tree_row.parent_track_id,
                 depth: tree_row.depth,
                 has_children: tree_row.has_children,
@@ -254,13 +360,28 @@ pub fn timeline_rows_for_project_with_state(
                 child_count: tree_row.child_count,
                 visible_child_state_summary: tree_row.visible_child_state_summary,
                 tree_error: tree_row.tree_error,
-                visible_energy_samples: visible_analysis_samples(project, track, "visible_energy"),
+                visible_energy_samples: visible_analysis_samples(&context, track, "visible_energy"),
                 visible_harmonic_color_samples: visible_analysis_samples(
-                    project,
+                    &context,
                     track,
                     "visible_harmonic_color",
                 ),
             })
+        })
+        .collect()
+}
+
+pub fn timeline_track_ids_for_project_with_state(
+    project: &ProjectDocument,
+    expanded: &BTreeSet<String>,
+) -> Vec<String> {
+    let context = TimelineProjectionContext::new(project);
+    project_tree(project, expanded)
+        .into_iter()
+        .filter_map(|tree_row| {
+            context
+                .track(tree_row.track_id.as_str())
+                .map(|track| track.id.clone())
         })
         .collect()
 }
@@ -388,27 +509,42 @@ fn cache_entry(id: &str, artifact_kind: &str, path: &str) -> CacheEntry {
         transform_version: "1".to_string(),
         size_bytes: 0,
         payload_digest: String::default(),
-        validation_status: "valid".to_string(),
+        validation_status: CacheValidationStatus::Valid,
     }
 }
 
+fn demo_waveform_payload() -> Value {
+    let samples = (0..64)
+        .map(|index| {
+            let peak = 0.18 + (index % 8) as f64 * 0.08;
+            json!({
+                "peak": peak.min(0.86),
+                "rms": (peak * 0.55).min(0.5)
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "version": 2,
+        "sample_rate": 32,
+        "duration": 2.0,
+        "samples": samples,
+        "levels": [
+            {
+                "bucket_count": 64,
+                "samples": samples
+            }
+        ]
+    })
+}
+
 fn marker_spans_for_track(
-    project: &ProjectDocument,
+    context: &TimelineProjectionContext<'_>,
     track_id: &str,
     selected_marker_ids: &BTreeSet<String>,
 ) -> Vec<MarkerSpan> {
-    let mut markers = project
-        .markers
+    context
+        .markers_for_track(track_id)
         .iter()
-        .filter(|marker| marker.track_id == track_id)
-        .collect::<Vec<_>>();
-    markers.sort_by(|left, right| {
-        left.timestamp
-            .total_cmp(&right.timestamp)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    markers
-        .into_iter()
         .map(|marker| MarkerSpan {
             id: marker.id.clone(),
             timestamp: marker.timestamp,
@@ -422,6 +558,21 @@ fn marker_spans_for_track(
 }
 
 fn waveform_duration_seconds(track: &Track) -> f64 {
+    if let Some(duration) = track
+        .provenance
+        .get("waveform_payload")
+        .and_then(|value| value.get("duration"))
+        .and_then(Value::as_f64)
+    {
+        return duration;
+    }
+    if let Some(duration) = track
+        .provenance
+        .get("waveform_duration_seconds")
+        .and_then(Value::as_f64)
+    {
+        return duration;
+    }
     track
         .provenance
         .get("visible_waveform")
@@ -434,20 +585,100 @@ fn waveform_duration_seconds(track: &Track) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn visible_waveform_samples(project: &ProjectDocument, track: &Track) -> Vec<Value> {
-    if !track_has_valid_complete_artifact(project, track, "waveform") {
+fn waveform_levels(
+    context: &TimelineProjectionContext<'_>,
+    track: &Track,
+) -> Vec<TimelineWaveformLevel> {
+    if !context.track_has_valid_complete_artifact(track, "waveform") {
         return Vec::default();
+    }
+    let duration = waveform_duration_seconds(track)
+        .max(context.source_audio_duration_seconds(track))
+        .max(0.0);
+    if let Some(levels) = track
+        .provenance
+        .get("waveform_payload")
+        .map(|value| waveform_payload_levels(value, duration))
+        .filter(|levels| !levels.is_empty())
+    {
+        return levels;
     }
     let Some(value) = track.provenance.get("visible_waveform") else {
         return Vec::default();
     };
-    let duration = waveform_duration_seconds(track)
-        .max(source_audio_duration_seconds(project, track))
-        .max(0.0);
-    if let Some(samples) = value.get("samples").and_then(Value::as_array) {
-        return normalize_waveform_samples(samples, duration);
+    let samples = value
+        .get("samples")
+        .and_then(Value::as_array)
+        .map(|samples| normalize_waveform_samples(samples, duration))
+        .unwrap_or_else(|| normalize_waveform_min_max_arrays(value, duration));
+    if samples.is_empty() {
+        return Vec::default();
     }
-    normalize_waveform_min_max_arrays(value, duration)
+    vec![TimelineWaveformLevel {
+        bucket_count: visible_waveform_bucket_count(value, samples.len()),
+        samples,
+    }]
+}
+
+fn waveform_payload_levels(value: &Value, duration: f64) -> Vec<TimelineWaveformLevel> {
+    let mut levels = value
+        .get("levels")
+        .and_then(Value::as_array)
+        .map(|levels| {
+            levels
+                .iter()
+                .filter_map(|level| {
+                    let samples = level.get("samples").and_then(Value::as_array)?;
+                    let samples = normalize_waveform_samples(samples, duration);
+                    if samples.is_empty() {
+                        return None;
+                    }
+                    Some(TimelineWaveformLevel {
+                        bucket_count: normalized_waveform_bucket_count(
+                            level
+                                .get("bucket_count")
+                                .or_else(|| level.get("bucketCount"))
+                                .and_then(Value::as_u64)
+                                .and_then(|value| usize::try_from(value).ok()),
+                            samples.len(),
+                        ),
+                        samples,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if levels.is_empty() {
+        if let Some(samples) = value.get("samples").and_then(Value::as_array) {
+            let samples = normalize_waveform_samples(samples, duration);
+            if !samples.is_empty() {
+                levels.push(TimelineWaveformLevel {
+                    bucket_count: samples.len(),
+                    samples,
+                });
+            }
+        }
+    }
+    levels.sort_by_key(|level| level.bucket_count);
+    levels
+}
+
+fn visible_waveform_bucket_count(value: &Value, sample_count: usize) -> usize {
+    normalized_waveform_bucket_count(
+        value
+            .get("level_bucket_count")
+            .or_else(|| value.get("levelBucketCount"))
+            .or_else(|| value.get("buckets"))
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok()),
+        sample_count,
+    )
+}
+
+fn normalized_waveform_bucket_count(raw_count: Option<usize>, sample_count: usize) -> usize {
+    raw_count
+        .filter(|bucket_count| *bucket_count > 0 && *bucket_count == sample_count)
+        .unwrap_or(sample_count)
 }
 
 fn normalize_waveform_samples(samples: &[Value], duration: f64) -> Vec<Value> {
@@ -541,63 +772,23 @@ fn clamped_unit(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
-fn source_audio_duration_seconds(project: &ProjectDocument, track: &Track) -> f64 {
-    let Some(source_track_id) = source_track_id_for_context(project, &track.id) else {
-        return 0.0;
-    };
-    let Some(source_track) = project
-        .tracks
-        .iter()
-        .find(|candidate| candidate.id == source_track_id)
-    else {
-        return 0.0;
-    };
-    let Some(asset_id) = source_track
-        .provenance
-        .get("asset_id")
-        .and_then(Value::as_str)
-    else {
-        return 0.0;
-    };
-    project
-        .audio_assets
-        .iter()
-        .find(|asset| asset.id == asset_id)
-        .map(|asset| asset.duration)
-        .unwrap_or(0.0)
-}
-
-fn waveform_level_bucket_count(project: &ProjectDocument, track: &Track) -> usize {
-    if !track_has_valid_complete_artifact(project, track, "waveform") {
-        return 0;
-    }
-    track
-        .provenance
-        .get("visible_waveform")
-        .and_then(|value| {
-            value
-                .get("level_bucket_count")
-                .or_else(|| value.get("levelBucketCount"))
-                .or_else(|| value.get("buckets"))
-        })
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-        .unwrap_or(0)
-}
-
-fn visible_analysis_samples(project: &ProjectDocument, track: &Track, key: &str) -> Vec<Value> {
+fn visible_analysis_samples(
+    context: &TimelineProjectionContext<'_>,
+    track: &Track,
+    key: &str,
+) -> Vec<Value> {
     let expected_kind = match key {
         "visible_energy" => "energy",
         "visible_harmonic_color" => "harmonic-color",
         _ => return Vec::default(),
     };
-    if !track_has_valid_complete_artifact(project, track, expected_kind) {
+    if !context.track_has_valid_complete_artifact(track, expected_kind) {
         return Vec::default();
     }
     let Some(value) = track.provenance.get(key) else {
         return Vec::default();
     };
-    let duration = source_audio_duration_seconds(project, track);
+    let duration = context.source_audio_duration_seconds(track);
     match key {
         "visible_energy" => normalize_energy_samples(value, duration),
         "visible_harmonic_color" => normalize_harmonic_color_samples(value, duration),
@@ -681,26 +872,6 @@ fn provenance_frames(value: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn track_has_valid_complete_artifact(
-    project: &ProjectDocument,
-    track: &Track,
-    expected_kind: &str,
-) -> bool {
-    if track.result_state != ResultState::Complete {
-        return false;
-    }
-    if track.cache_refs.is_empty() {
-        return false;
-    }
-    track.cache_refs.iter().any(|cache_ref| {
-        project.cache_entries.iter().any(|entry| {
-            entry.id == *cache_ref
-                && entry.artifact_kind == expected_kind
-                && entry.validation_status == "valid"
-        })
-    })
-}
-
 fn marker_display_color(marker: &Marker) -> String {
     match marker.metadata.get("color").and_then(Value::as_str) {
         Some("green") => "#a7f3d0",
@@ -732,7 +903,9 @@ mod tests {
         timeline_rows_for_project_with_state, timeline_rows_json, timeline_rows_json_with_state,
     };
     use autolight_core::graph::default_expanded_track_ids;
-    use autolight_core::project::{ProjectDocument, ResultState};
+    use autolight_core::project::{
+        CacheValidationStatus, ImportStatus, ProjectDocument, ResultState,
+    };
 
     fn fixture_path(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -771,7 +944,7 @@ mod tests {
         let project = rust_demo_project();
 
         assert!(project.job_runs.is_empty());
-        assert_eq!(project.audio_assets[0].import_status, "offline");
+        assert_eq!(project.audio_assets[0].import_status, ImportStatus::Offline);
         assert_eq!(project.audio_assets[0].relink_hint, "rust-demo.wav");
 
         let rows = timeline_rows_for_project(&project);
@@ -805,6 +978,15 @@ mod tests {
         assert!(editable.editable);
         assert_eq!(editable.marker_spans.len(), 2);
         assert_eq!(editable.marker_spans[0].label, "Cue");
+    }
+
+    #[test]
+    fn timeline_rows_json_omits_unused_legacy_waveform_samples_field() {
+        let project = rust_demo_project();
+        let rows: Vec<Value> =
+            serde_json::from_str(&timeline_rows_json(&project).unwrap()).unwrap();
+
+        assert!(rows.iter().all(|row| row.get("waveformSamples").is_none()));
     }
 
     #[test]
@@ -856,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_rows_expose_waveform_bucket_count() {
+    fn timeline_rows_expose_waveform_levels() {
         let project = rust_demo_project();
         let rows = timeline_rows_for_project(&project);
         let waveform = rows
@@ -864,11 +1046,131 @@ mod tests {
             .find(|row| row.track_id == "track_waveform")
             .unwrap();
 
-        assert_eq!(waveform.waveform_level_bucket_count, 64);
-        assert_eq!(waveform.visible_waveform_samples.len(), 2);
-        assert_eq!(waveform.visible_waveform_samples[0]["time"], json!(0.0));
-        assert_eq!(waveform.visible_waveform_samples[0]["peak"], json!(0.2));
-        assert!(waveform.visible_waveform_samples[0].get("rms").is_some());
+        assert_eq!(waveform.waveform_levels[0].bucket_count, 64);
+        assert_eq!(waveform.waveform_levels[0].samples.len(), 64);
+        assert_eq!(waveform.waveform_levels[0].samples[0]["time"], json!(0.0));
+        assert_eq!(waveform.waveform_levels[0].samples[0]["peak"], json!(0.18));
+        assert!(waveform.waveform_levels[0].samples[0].get("rms").is_some());
+    }
+
+    #[test]
+    fn timeline_rows_prefer_full_waveform_payload_over_stale_visible_slice() {
+        let mut project = rust_demo_project();
+        let waveform = project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_waveform")
+            .unwrap();
+        waveform.provenance.insert(
+            "waveform_payload".to_string(),
+            json!({
+                "version": 2,
+                "sample_rate": 4,
+                "duration": 4.0,
+                "samples": [
+                    {"peak": 0.1, "rms": 0.05},
+                    {"peak": 0.3, "rms": 0.15},
+                    {"peak": 0.5, "rms": 0.25},
+                    {"peak": 0.7, "rms": 0.35}
+                ],
+                "levels": [
+                    {
+                        "bucket_count": 4,
+                        "samples": [
+                            {"peak": 0.1, "rms": 0.05},
+                            {"peak": 0.3, "rms": 0.15},
+                            {"peak": 0.5, "rms": 0.25},
+                            {"peak": 0.7, "rms": 0.35}
+                        ]
+                    }
+                ]
+            }),
+        );
+        waveform.provenance.insert(
+            "visible_waveform".to_string(),
+            json!({
+                "duration_seconds": 1.0,
+                "level_bucket_count": 1,
+                "samples": [{"time": 0.0, "peak": 0.1, "rms": 0.05}]
+            }),
+        );
+
+        let rows = timeline_rows_for_project(&project);
+        let waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+
+        assert_eq!(waveform.waveform_duration_seconds, 4.0);
+        assert_eq!(waveform.waveform_levels.len(), 1);
+        assert_eq!(waveform.waveform_levels[0].bucket_count, 4);
+        assert_eq!(waveform.waveform_levels[0].samples.len(), 4);
+        assert_eq!(waveform.waveform_levels[0].samples[3]["time"], json!(3.0));
+        assert_eq!(waveform.waveform_levels[0].samples[3]["peak"], json!(0.7));
+    }
+
+    #[test]
+    fn timeline_rows_expose_all_waveform_lod_levels_for_zoom_painting() {
+        let mut project = rust_demo_project();
+        let waveform = project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_waveform")
+            .unwrap();
+        waveform.provenance.insert(
+            "waveform_payload".to_string(),
+            json!({
+                "version": 2,
+                "sample_rate": 64,
+                "duration": 8.0,
+                "samples": [
+                    {"peak": 0.1, "rms": 0.05},
+                    {"peak": 0.2, "rms": 0.10}
+                ],
+                "levels": [
+                    {
+                        "bucket_count": 2,
+                        "samples": [
+                            {"peak": 0.1, "rms": 0.05},
+                            {"peak": 0.2, "rms": 0.10}
+                        ]
+                    },
+                    {
+                        "bucket_count": 8,
+                        "samples": [
+                            {"peak": 0.1, "rms": 0.05},
+                            {"peak": 0.2, "rms": 0.10},
+                            {"peak": 0.3, "rms": 0.15},
+                            {"peak": 0.4, "rms": 0.20},
+                            {"peak": 0.5, "rms": 0.25},
+                            {"peak": 0.6, "rms": 0.30},
+                            {"peak": 0.7, "rms": 0.35},
+                            {"peak": 0.8, "rms": 0.40}
+                        ]
+                    }
+                ]
+            }),
+        );
+
+        let payload: Value = serde_json::from_str(&timeline_rows_json(&project).unwrap()).unwrap();
+        let waveform = payload
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["trackId"] == json!("track_waveform"))
+            .unwrap();
+
+        assert_eq!(waveform["waveformLevels"].as_array().unwrap().len(), 2);
+        assert_eq!(waveform["waveformLevels"][0]["bucketCount"], json!(2));
+        assert_eq!(waveform["waveformLevels"][1]["bucketCount"], json!(8));
+        assert_eq!(
+            waveform["waveformLevels"][1]["samples"][7]["time"],
+            json!(7.0)
+        );
+        assert_eq!(
+            waveform["waveformLevels"][1]["samples"][7]["peak"],
+            json!(0.8)
+        );
     }
 
     #[test]
@@ -884,11 +1186,11 @@ mod tests {
             .find(|row| row.track_id == "track_energy")
             .unwrap();
 
-        assert_eq!(waveform.waveform_level_bucket_count, 3);
-        assert_eq!(waveform.visible_waveform_samples.len(), 3);
-        assert_eq!(waveform.visible_waveform_samples[1]["time"], json!(10.0));
-        assert_eq!(waveform.visible_waveform_samples[1]["peak"], json!(0.5));
-        assert!(waveform.visible_waveform_samples[1].get("rms").is_some());
+        assert_eq!(waveform.waveform_levels[0].bucket_count, 3);
+        assert_eq!(waveform.waveform_levels[0].samples.len(), 3);
+        assert_eq!(waveform.waveform_levels[0].samples[1]["time"], json!(10.0));
+        assert_eq!(waveform.waveform_levels[0].samples[1]["peak"], json!(0.5));
+        assert!(waveform.waveform_levels[0].samples[1].get("rms").is_some());
         assert_eq!(energy.visible_energy_samples.len(), 3);
         assert_eq!(energy.visible_energy_samples[1]["time"], json!(0.1));
         assert_eq!(energy.visible_energy_samples[1]["intensity"], json!(0.8));
@@ -988,7 +1290,7 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.id == "cache_energy")
             .unwrap()
-            .validation_status = "invalid".to_string();
+            .validation_status = CacheValidationStatus::Invalid;
 
         let rows = timeline_rows_for_project(&project);
         let invalid_energy = rows
@@ -1002,13 +1304,12 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.id == "cache_waveform")
             .unwrap()
-            .validation_status = "invalid".to_string();
+            .validation_status = CacheValidationStatus::Invalid;
         let rows = timeline_rows_for_project(&project);
         let invalid_waveform = rows
             .iter()
             .find(|row| row.track_id == "track_waveform")
             .unwrap();
-        assert!(invalid_waveform.visible_waveform_samples.is_empty());
-        assert_eq!(invalid_waveform.waveform_level_bucket_count, 0);
+        assert!(invalid_waveform.waveform_levels.is_empty());
     }
 }

@@ -2,11 +2,45 @@
 
 Updated: 2026-06-04
 
-## Active Batch: None
+## Active Batch: Rust Port Review Hardening
 
 **Status:** complete
 
-**Goal:** The Rust/CXX-Qt runtime cutover is complete for the current roadmap. No unblocked Rust-port batch remains in `docs/ROADMAP.md`.
+**Goal:** Fix every issue from the 2026-06-04 Rust-port expert review: async job execution, targeted bridge updates, packaged QML assets, supported transform availability, controller/service boundaries, waveform fallback semantics, typed contracts, cache path policy, and brittle test/lint posture.
+
+## Batch Plan
+
+1. Add failing tests for the concrete review regressions.
+2. Package or embed QML assets so the app is not tied to the source checkout.
+3. Hide unsupported transforms from the primary Rust UI and remove the vocals shortcut.
+4. Align cache-artifact read validation with the relative-only write policy.
+5. Remove legacy fallback waveform slices from QML painting and keep a single level representation.
+6. Split playback/viewport qproperty updates away from full model JSON updates.
+7. Add a real background job worker/polling path so `runTrack` returns after submission.
+8. Introduce typed schema/status/artifact contracts where they replace raw string decisions.
+9. Replace brittle source-shape tests with behavior/contract tests, add crate docs and workspace lint posture.
+10. Run focused tests, workspace tests, clippy, formatting, smoke, and `git diff --check`.
+
+## Completion Update
+
+- 2026-06-04: Completed the Rust-port expert-review hardening batch.
+- Root cause: the Rust runtime still had several transition-era seams after the port: QML assets loaded from the source checkout, unsupported built-in transform specs were exposed as runnable UI, cache artifact read validation accepted absolute paths while writes rejected them, waveform rows still serialized a legacy visible-slice fallback, playback/viewport invokables reapplied the full bridge payload, transform compatibility was driven by raw schema strings with a permissive unknown-schema fallback, audio/cache statuses were raw strings, and architecture tests still asserted file shape instead of behavior.
+- Changes made: embedded the QML asset bundle in `autolight-app` and materialized it at runtime for self-contained smoke/release loading; filtered transform rows to runnable specs and blocked track creation when the active job queue has no runner; removed the vocals placeholder action; aligned cache validation with relative-only normal artifact paths; removed `visibleWaveformSamples` from Rust/QML waveform drawing and kept `waveformLevels` as the single drawable contract; added targeted viewport/selection/playback bridge snapshots for high-frequency invokables; added a background job worker with cooperative cancellation/progress and QML polling so `runTrack` submits without blocking the controller path; introduced typed `SchemaId`, `ImportStatus`, and `CacheValidationStatus`; replaced line-count architecture tests with behavior tests for row-payload preservation; added crate docs plus workspace rustdoc lint posture.
+- Next batch: none for this review set. Remaining larger polish would be a deeper typed artifact-kind/newtype pass and engine-backed QML behavior tests, but the concrete issues listed in the review are addressed in code.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-app --locked embedded_qml_bundle_contains_runtime_and_components`: first failed because `embedded_qml_assets` did not exist; passed after embedding the QML asset manifest.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_rejects_unrunnable_builtin_transform_before_track_creation`: first failed because `timing.beats` still created a generated track; passed after gating by job-runner availability.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_rejects_absolute_cache_entry_paths_during_validation`: first failed because absolute cache paths were treated as safe; passed after matching the writer's relative-only policy.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_waveform_summary_completes_with_visible_waveform`: first failed because `visibleWaveformSamples` was still serialized; passed after removing the legacy fallback row role.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_submit_track_returns_before_worker_poll_commits_job`: passed after adding async submit plus worker polling.
+  - `cargo test -p autolight-core --locked`: passed, 44 tests.
+  - `cargo test -p autolight-jobs --locked`: passed, 22 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 72 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 3 `autolight-app` tests, 44 `autolight-core` tests, 22 `autolight-jobs` tests, and 72 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt emitted non-fatal host audio/font warnings.
+  - `git diff --check`: passed.
 
 ## Current State
 
@@ -25,6 +59,155 @@ uv run python main.py
 ```
 
 ## Completion Update
+
+- 2026-06-04: Addressed the Rust-port review quality cleanup batch for playback viewport mirroring, marker undo payload size, timeline projection cost, cooperative job cancellation, and low-level Rust perf nits.
+- Root cause: playback position ticks updated Rust playback state without refreshing QML viewport mirrors; Qt marker edits used full `ProjectDocument` undo snapshots even though core has marker/dependent snapshot commands; timeline row projection rebuilt marker/job/cache lookups repeatedly and still emitted a dead legacy `waveformSamples` JSON role; job cancellation only represented pending cancellation, not a token a running transform could observe; the WAV reader and fixed-interval runner still had clippy/perf anti-patterns.
+- Changes made: `UI/AppRuntime.qml` now calls `reloadViewportState()` after media-player position ticks without rebuilding full models; marker add/update/bulk/move/resize/delete in the Rust Qt controller now record `MarkerSnapshotCommand` entries with affected-marker IDs plus recursive `DependentTrackSnapshot`s so undo avoids cloning/restoring the whole project; timeline projection now builds an indexed context for tracks, markers, latest jobs, cache entries, and audio assets, visible-track calculations use ordered projected track IDs without full row payloads, and the unused `waveformSamples` row field is no longer serialized; `LocalJobQueue` now exposes cloneable cancellation tokens that running transforms can observe cooperatively; empty WAV data chunks no longer call `read_exact` on a zero-length buffer and fixed-interval markers are generated with an index loop.
+- Next batch: a true nonblocking transform worker path can be designed later around CXX-Qt async/thread ownership and progress delivery. This pass intentionally keeps the current synchronous controller ABI while making the queue cancellation primitive real and testable.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_marker_undo_preserves_unrelated_state_and_dependent_track_snapshot`: first failed because full-project undo restored an unrelated project rename; passed after marker/dependent snapshots.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime_uses_controller_models_and_actions`: first failed because playback ticks did not refresh viewport mirrors; passed after adding `reloadViewportState()`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_json_omits_unused_legacy_waveform_samples_field`: first failed because `waveformSamples` was still emitted; passed after removing the field.
+  - `cargo test -p autolight-jobs --locked jobs_running_transform_observes_external_cancellation_token`: first failed because `LocalJobQueue::cancellation_token` did not exist; passed after adding cooperative cancellation tokens.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 70 tests.
+  - `cargo test -p autolight-jobs --locked`: passed, 22 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`: passed.
+  - `cargo clippy -p autolight-jobs --all-targets --all-features --locked -- -D warnings`: passed.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 22 `autolight-jobs` tests, and 70 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt emitted non-fatal host audio/font warnings.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -W clippy::perf -W clippy::nursery`: ran as advisory; remaining warnings are broader style suggestions, while the targeted zero-byte read and floating-loop warnings were addressed.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Deepened the Rust Qt controller split into an internal root/child controller hierarchy.
+- Root cause: the first split removed helper/test weight from the generated bridge file, but `AppControllerState` still owned timeline viewport behavior and playback behavior as a flat set of methods and fields. Splitting those directly into QML-visible QObjects would churn the CXX-Qt ABI and QObject lifetime model, so the safer next step is internal child state with the existing flat qproperties kept as bridge mirrors.
+- Changes made: added `TimelineControllerState` in `crates/autolight-qt/src/app_controller/timeline_controller.rs` for duration, zoom, scroll, visible-window, visible-track filtering, timeline refresh, snap filtering, and viewport persistence; added `PlaybackControllerState` in `crates/autolight-qt/src/app_controller/playback_controller.rs` for source path, position, duration, play/pause/stop/seek, volume, load/unload, and playback errors; kept `AppController` as the single QML-facing root with explicit `sync_timeline_bridge_state` and `sync_playback_bridge_state` mirror updates for CXX-Qt qproperties. The bridge shell is now 2,135 lines, with playback and timeline behavior moved into focused modules.
+- Next batch: none. A later pass can split more root-owned domains, likely project I/O/open-save/import, editable marker commands, and job orchestration, but this pass intentionally avoids exposing multiple QObject controllers until the QML surface has a concrete need for them.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_runtime_refactor_has_internal_controller_hierarchy`: first failed because `timeline_controller.rs` did not exist; passed after adding timeline/playback child controller modules and root ownership fields.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_`: first failed because restored timeline scroll was clamped before project duration was known; passed after preserving restored scroll until `refresh_view_state` computes duration.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: passed.
+  - `cargo fmt --all`: ran.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 68 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 21 `autolight-jobs` tests, and 68 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `cargo fmt --all -- --check`: passed.
+  - `git diff --check`: passed.
+  - `rg -n "RustAdapter|rustAdapter|createRustAdapter|rustAdapterSource" UI crates/autolight-qt/build.rs crates/autolight-qt/src --glob '!crates/autolight-qt/src/app_controller/tests.rs'`: passed, no matches.
+
+- 2026-06-04: Split the Rust Qt controller bridge and renamed the QML runtime wrapper away from Rust-specific transitional naming.
+- Root cause: `crates/autolight-qt/src/app_controller.rs` had grown past 5,100 lines and mixed the generated CXX-Qt bridge, runtime state, job runners, WAV parsing, project/cache/path helpers, marker display helpers, and tests in one compilation unit. That hurt code quality and made routine edits touch the same large file as the generated bridge. `UI/RustAdapter.qml` was also a stale transition-era name now that the Rust/CXX-Qt runtime is the forward app path.
+- Changes made: moved the CXX-Qt bridge shell to `crates/autolight-qt/src/app_controller/mod.rs`, updated `crates/autolight-qt/build.rs` to generate from that file, and extracted helpers into `audio.rs`, `jobs.rs`, `markers.rs`, `project_io.rs`, `project_state.rs`, and `tests.rs`. Renamed `UI/RustAdapter.qml` to `UI/AppRuntime.qml`, renamed `createRustAdapter`/`rustAdapter` to `createAppRuntime`/`appRuntime`, and renamed the wrapped native object handle from `rustController` to `nativeController` while preserving the exported `AppController` QML type.
+- Next batch: none. A deeper follow-up could move more `_state` methods into focused `impl AppControllerState` modules, but this pass keeps the QML ABI and generated bridge shell stable while removing the biggest helper/test weight from the bridge file.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_runtime_refactor_keeps_bridge_small_and_domain_modules_split`: first failed because `app_controller/mod.rs` did not exist; passed after the split.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime_uses_controller_models_and_actions`: first failed because `UI/AppRuntime.qml` did not exist; passed after the rename and QML/test updates.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_waveform_summary_completes_with_visible_waveform`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 67 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 21 `autolight-jobs` tests, and 67 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `cargo fmt --all -- --check`: passed.
+  - `git diff --check`: passed.
+  - `test -f UI/AppRuntime.qml && test ! -e UI/RustAdapter.qml`: passed.
+
+- 2026-06-04: Improved Rust waveform quality across zoom levels with smooth LOD transitions.
+- Root cause: the waveform artifact pipeline already produced versioned LOD levels, and the analysis crate already had zoom-aware level-selection logic, but Rust timeline rows flattened `waveform_payload` to the finest level before QML saw it. Zoom changes intentionally avoid row-model reloads for smooth viewport motion, so the canvas kept repainting the same detail level at every zoom. That made zoomed-out waveforms dense/noisy, zoomed-in waveforms blocky, and level changes unavailable during live zoom.
+- Changes made: added camelCase `waveformLevels` to timeline rows while keeping `visibleWaveformSamples` as the legacy fallback; normalized payload levels into `{bucketCount, samples}` rows from coarse to fine; threaded `waveformLevels` through `TimelineView`, `TrackRow`, and `TimelineLane`; changed `WaveformStrip` to choose the target bucket count from `duration * pixelsPerSecond / 8`, compute bucket width from explicit `bucketCount`, repaint on level/duration/viewport changes, and crossfade adjacent LOD levels during zoom instead of popping or rebuilding rows.
+- Next batch: none. If the next manual pass still finds visual artifacts, inspect actual generated payload level counts and consider raising `DEFAULT_WAVEFORM_BUCKETS` or adding a release-mode canvas performance pass; the current QML path can now consume all existing LOD levels without breaking the no-model-reload zoom behavior.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_expose_all_waveform_lod_levels_for_zoom_painting`: first failed because `waveformLevels` was absent from row JSON; passed after exposing normalized payload levels.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_waveform_strip_selects_and_blends_lod_levels_during_zoom`: first failed because QML did not pass levels to the canvas or select/blend LODs; passed after the QML threading and renderer changes.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_expose_waveform_bucket_count`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_prefer_full_waveform_payload_over_stale_visible_slice`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_normalize_legacy_waveform_and_energy_payloads`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 66 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 21 `autolight-jobs` tests, and 66 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `cargo fmt --all -- --check`: passed.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Fixed follow-up Rust waveform rendering coverage and shape issues from manual testing.
+- Root cause: timeline rows were still deriving drawable waveform data from the legacy `visible_waveform` slice, which can be stale or viewport-sized, even when a full persisted `waveform_payload` is available. The QML waveform canvas also rendered each bucket as a one-pixel vertical stroke, so a full-song bucket payload looked sparse and visually distorted.
+- Changes made: added versioned full-payload waveform data to the Rust demo, made timeline duration/sample/bucket extraction prefer `waveform_payload` levels before falling back to legacy visible-waveform fields, and changed `WaveformStrip` to render clipped bucket-width filled peak/RMS spans instead of isolated vertical strokes.
+- Next batch: none. If another real imported file still truncates, inspect the saved waveform artifact payload and cache ref for that file; the timeline now consumes the full payload when it is present and valid.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_prefer_full_waveform_payload_over_stale_visible_slice`: first failed with the timeline row duration stuck at the stale one-second visible slice; passed after preferring `waveform_payload`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_waveform_strip_renders_contiguous_bucket_spans`: first failed because `WaveformStrip` did not compute bucket spans or call `fillRect`; passed after the canvas renderer change.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows_normalize_legacy_waveform_and_energy_payloads`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_waveform_summary_completes_with_visible_waveform`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 64 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 21 `autolight-jobs` tests, and 64 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Fixed follow-up Rust timeline zoom/scroll and playhead visibility issues from manual testing.
+- Root cause: after the smooth timeline pass removed full model reloads for viewport-only changes, the adapter still exposed timeline viewport values as direct wrapper bindings and did not explicitly mirror them after imperative zoom/scroll invocations; sliders and wheel handlers could call Rust successfully while the QML surface kept using stale wrapper values. The lane playhead was also gated on `playback.sourcePath`, so it stayed hidden until audio was loaded instead of showing on a populated timeline.
+- Changes made: added `RustAdapter.reloadViewportState()` and writable viewport mirror properties for pixels-per-second, scroll seconds, visible seconds, and duration; `set_timeline_zoom`, `set_timeline_scroll_seconds`, and `set_timeline_visible_seconds` now update those mirrors without rebuilding track rows; the lane playhead is visible whenever the timeline has duration and the computed playhead x is in view.
+- Next batch: none. Zoom/scroll now update the ruler, lanes, waveform/cue positioning, and sliders through mirrored viewport state while keeping the no-model-rebuild behavior.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: first failed on missing `reloadViewportState`; passed after adding viewport mirroring and the playhead visibility change.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_rust_adapter_uses_controller_models_and_actions`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 62 tests.
+  - `cargo fmt --all -- --check`: passed after running `cargo fmt --all`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Fixed follow-up Rust timeline model/selection issues from manual testing.
+- Root cause: the Rust adapter was copying parsed timeline rows through a QML `ListModel`, which is a poor fit for nested JS arrays such as `markerSpans` and `visibleWaveformSamples`; the inspector bypassed that path, so cue markers could appear there while disappearing from the timeline. Selection action state also depended on direct wrapper bindings after `select_track`, so the selected-row affordance and rerun buttons could lag the Rust controller state.
+- Changes made: changed the timeline model bridge to keep parsed rows as plain JS objects and made `TimelineView` read row data directly by index, preserving marker and waveform arrays; mirrored selected-track id/action flags explicitly in `RustAdapter.reloadSelectionModels()` and refreshed rows on selection so selected-track borders/stripe and rerun eligibility update immediately; aligned the Rust demo with the Python reference by creating a temporary silent WAV for the demo source and using the demo temp directory for unsaved demo waveform artifact reruns, with unique temp dirs under parallel tests and cleanup via a guard.
+- Next batch: none. Built-in demo waveform reruns now have real audio backing; imported/saved projects continue to use their project directory for artifacts.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_rust_adapter_uses_controller_models_and_actions`: first failed on missing `trackRows`; passed after switching away from `trackModel.append(rows[i])`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_demo_waveform_can_be_selected_and_rerun`: first failed because the demo source was offline; passed after adding temp demo WAV/artifact backing.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_track_rows_show_track_selection_and_allow_lane_selection`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 62 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 62 `autolight-qt` tests.
+  - `cargo fmt --all -- --check`: passed after running `cargo fmt --all`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Fixed follow-up Rust timeline track selection regression.
+- Root cause: the smoother timeline pass added a high-z full-cover `MouseArea` in `TimelineView.qml` for wheel events; that sat above row delegates and could intercept clicks before `TrackRow`/`TimelineLane` selection handlers saw them.
+- Changes made: replaced the full-cover wheel `MouseArea` with a `WheelHandler` on the `ListView`, preserving horizontal wheel/trackpad scroll and Ctrl/Meta-wheel anchor zoom without overlaying track click targets; tightened the QML regression so wheel handling cannot reintroduce a click-blocking `acceptedButtons: Qt.NoButton`/`z: 100` overlay.
+- Next batch: none. If any click target still feels wrong in manual testing, inspect the specific child target next, but the global event-eater has been removed.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: first failed on the new `WheelHandler` expectation; passed after replacing the overlay `MouseArea`.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_track_rows_show_track_selection_and_allow_lane_selection`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 61 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`: passed.
+  - `git diff --check`: passed.
+
+- 2026-06-04: Addressed four Rust-port usability issues from manual testing.
+- Changes made: strengthened selected-track affordance with an accent stripe, selected background, and thicker selected borders across the track label and lane while preserving source/audio track selection logic; confirmed source/audio tracks were already selectable and covered the visibility issue instead of changing selection semantics; kept the import dialog WAV-focused because the Rust importer currently validates/decodes WAV content only, so advertising MP3/M4A/FLAC would route users to unsupported imports; added a real Rust `waveform.summary` runner for imported WAV sources, runtime-only `audio_path` resolution, cache-backed waveform artifact persistence, and visible waveform provenance for timeline rendering; made timeline scroll/zoom smoother by avoiding full QML model reloads for viewport-only changes and adding horizontal wheel/trackpad scrolling plus Ctrl/Meta-wheel anchor zoom.
+- Next batch: none. Future non-WAV import support should start with a Rust decoder/prober change before broadening the file picker; deeper timeline smoothness can move toward a true horizontal Flickable/Qt model if needed after this incremental pass.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_track_rows_show_track_selection_and_allow_lane_selection`: first failed because only `border.color` changed on selection; passed after adding explicit row selection affordances.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload`: first failed because no wheel signals/handlers existed and viewport setters reloaded models; passed after the QML/adapter changes.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_waveform_summary_completes_with_visible_waveform`: first failed with the waveform track in `Failed` state under the unsupported Rust transform runner; passed after adding runtime audio-path resolution and the WAV waveform runner.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_rust_adapter_uses_controller_models_and_actions`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_run_unimplemented_builtin_transform_fails_without_empty_completion`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_import_audio`: passed, 5 tests.
+  - `cargo test -p autolight-analysis --locked waveform`: passed, 13 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 61 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, 150 tests across unit and doctest targets.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed after folding two new test `project_path` assignments into their default initializers.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed; Qt emitted host audio/font warnings, then loaded `UI/Main.qml` with the Rust `AppController`.
+  - `git diff --check`: passed.
 
 - 2026-06-04: Addressed three new unresolved Codex bot review threads on PR #13 after commit `6dbd91f` and analyzed diffray's summary risk areas.
 - Changes made: clamped snapped single-marker drags at the timeline start before Rust marker movement validation; restored the inspector's no-selection `Apply To Track` behavior by expanding the Rust controller bulk update to all selected-track markers while keeping the lower-level core bulk API empty-selection-safe; verified the cache-artifact overwrite comment does not need a code change because the queue writes same-directory temp artifacts and Rust `fs::rename` already replaces existing files on supported platforms. Diffray's risk list was triaged as either already mitigated by current code/tests or future work for the async/heavy-transform batch, with no PR-blocking code change recommended.

@@ -56,6 +56,7 @@ dependencies = [
 name = "autolight-qt"
 version = "0.1.0"
 dependencies = [
+ "autolight-analysis",
  "autolight-core",
  "autolight-jobs",
  "cxx",

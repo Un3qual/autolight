@@ -6,11 +6,12 @@ Rectangle {
     property int rowIndex: 0
     property string trackId: ""
     property var markerSpans: []
-    property var visibleWaveformSamples: []
+    property var waveformLevels: []
     property var visibleEnergySamples: []
     property var visibleHarmonicColorSamples: []
     property real waveformDurationSeconds: 0
     property bool editable: false
+    readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId
     property real timelineLeftPadding: 24
     property color laneBackground: "#171a20"
     property color laneBackgroundAlt: "#14171d"
@@ -32,7 +33,8 @@ Rectangle {
     }
 
     color: root.rowIndex % 2 === 0 ? root.laneBackground : root.laneBackgroundAlt
-    border.color: root.appController.selectedTrackId === root.trackId ? root.focusAccent : root.borderSubtle
+    border.color: root.rowSelected ? root.focusAccent : root.borderSubtle
+    border.width: root.rowSelected ? 2 : 1
     clip: true
 
     MouseArea {
@@ -45,12 +47,12 @@ Rectangle {
 
     WaveformStrip {
         anchors.fill: parent
-        samples: root.listOrEmpty(root.visibleWaveformSamples)
+        levels: root.listOrEmpty(root.waveformLevels)
         durationSeconds: root.waveformDurationSeconds
         scrollSeconds: root.appController.timelineScrollSeconds
         pixelsPerSecond: root.appController.timelinePixelsPerSecond
         leftPadding: root.timelineLeftPadding
-        visible: root.listOrEmpty(root.visibleWaveformSamples).length > 0
+        visible: root.listOrEmpty(root.waveformLevels).length > 0
     }
 
     AnalysisStrip {
@@ -110,7 +112,7 @@ Rectangle {
         height: parent.height
         x: root.timelineX(root.appController.playback.positionSeconds)
         color: root.focusAccent
-        visible: root.appController.playback.sourcePath.length > 0
+        visible: root.appController.timelineDurationSeconds > 0
             && x >= root.timelineLeftPadding
             && x <= parent.width
         z: 10

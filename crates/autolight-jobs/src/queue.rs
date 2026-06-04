@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolight_core::cache::{
@@ -10,7 +12,8 @@ use autolight_core::cache::{
 };
 use autolight_core::graph::{find_track, mark_dependents_stale};
 use autolight_core::project::{
-    CacheEntry, JobRun, JsonObject, Marker, ProjectDocument, ResultState, TrackType,
+    CacheEntry, CacheValidationStatus, JobRun, JsonObject, Marker, ProjectDocument, ResultState,
+    TrackType,
 };
 use autolight_core::transforms::{TransformError, TransformRegistry, TransformSpec};
 use thiserror::Error;
@@ -19,6 +22,7 @@ const RUNTIME_ONLY_TRANSFORM_PARAM_KEYS: &[&str] = &["audio_path"];
 
 type RunnerFn =
     dyn FnMut(&mut TransformContext, &JsonObject) -> Result<TransformResult, TransformRunError>;
+pub type ProgressReporter = Arc<dyn Fn(&str, &str, f64) + Send + Sync>;
 
 #[derive(Debug, Error)]
 pub enum JobQueueError {
@@ -60,22 +64,52 @@ pub enum TransformRunError {
     Failed(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default)]
+pub struct TransformCancellationToken {
+    cancel_requested: Arc<AtomicBool>,
+}
+
+impl TransformCancellationToken {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn request_cancel(&self) {
+        self.cancel_requested.store(true, Ordering::Relaxed);
+    }
+
+    pub fn cancel_requested(&self) -> bool {
+        self.cancel_requested.load(Ordering::Relaxed)
+    }
+}
+
+#[derive(Clone)]
 pub struct TransformContext {
     job_id: String,
     track_id: String,
     progress: f64,
-    cancel_requested: bool,
+    cancellation_token: TransformCancellationToken,
+    progress_reporter: Option<ProgressReporter>,
 }
 
 impl TransformContext {
-    fn new(job_id: String, track_id: String, cancel_requested: bool) -> Self {
+    fn new(
+        job_id: String,
+        track_id: String,
+        cancellation_token: TransformCancellationToken,
+    ) -> Self {
         Self {
             job_id,
             track_id,
             progress: 0.0,
-            cancel_requested,
+            cancellation_token,
+            progress_reporter: None,
         }
+    }
+
+    fn with_progress_reporter(mut self, progress_reporter: Option<ProgressReporter>) -> Self {
+        self.progress_reporter = progress_reporter;
+        self
     }
 
     pub fn job_id(&self) -> &str {
@@ -93,15 +127,18 @@ impl TransformContext {
     pub fn report_progress(&mut self, progress: f64) {
         if progress.is_finite() {
             self.progress = progress.clamp(0.0, 1.0);
+            if let Some(reporter) = &self.progress_reporter {
+                reporter(&self.job_id, &self.track_id, self.progress);
+            }
         }
     }
 
     pub fn cancel_requested(&self) -> bool {
-        self.cancel_requested
+        self.cancellation_token.cancel_requested()
     }
 
     pub fn request_cancel(&mut self) {
-        self.cancel_requested = true;
+        self.cancellation_token.request_cancel();
     }
 }
 
@@ -197,12 +234,17 @@ impl JobRegistry {
             .get_mut(&(transform_id.to_string(), version.to_string()))
             .ok_or_else(|| TransformError::UnknownTransform(transform_id.to_string()))
     }
+
+    pub fn has_runner(&self, transform_id: &str, version: &str) -> bool {
+        self.runners
+            .contains_key(&(transform_id.to_string(), version.to_string()))
+    }
 }
 
 pub struct LocalJobQueue {
     registry: JobRegistry,
     pending_job_ids: VecDeque<String>,
-    cancel_requests: BTreeSet<String>,
+    cancel_tokens: BTreeMap<String, TransformCancellationToken>,
     next_job_number: u64,
     now: Box<dyn FnMut() -> String>,
 }
@@ -212,7 +254,7 @@ impl LocalJobQueue {
         Self {
             registry,
             pending_job_ids: VecDeque::new(),
-            cancel_requests: BTreeSet::new(),
+            cancel_tokens: BTreeMap::new(),
             next_job_number: 1,
             now: Box::new(default_timestamp),
         }
@@ -222,7 +264,7 @@ impl LocalJobQueue {
         Self {
             registry,
             pending_job_ids: VecDeque::new(),
-            cancel_requests: BTreeSet::new(),
+            cancel_tokens: BTreeMap::new(),
             next_job_number: 1,
             now: Box::new(now),
         }
@@ -287,6 +329,8 @@ impl LocalJobQueue {
             error: String::default(),
             produced_cache_refs: Vec::default(),
         });
+        self.cancel_tokens
+            .insert(job_id.clone(), TransformCancellationToken::new());
         self.pending_job_ids.push_back(job_id.clone());
         Ok(job_id)
     }
@@ -300,15 +344,40 @@ impl LocalJobQueue {
     }
 
     pub fn cancel(&mut self, job_id: &str) -> Result<(), JobQueueError> {
-        if self
-            .pending_job_ids
-            .iter()
-            .any(|pending_id| pending_id == job_id)
-        {
-            self.cancel_requests.insert(job_id.to_string());
+        if let Some(token) = self.cancel_tokens.get(job_id) {
+            token.request_cancel();
             return Ok(());
         }
         Err(JobQueueError::JobNotFound(job_id.to_string()))
+    }
+
+    pub fn cancellation_token(&self, job_id: &str) -> Option<TransformCancellationToken> {
+        self.cancel_tokens.get(job_id).cloned()
+    }
+
+    pub fn has_runner(&self, transform_id: &str, version: &str) -> bool {
+        self.registry.has_runner(transform_id, version)
+    }
+
+    pub fn detach_pending_job(
+        &mut self,
+        job_id: &str,
+    ) -> Result<TransformCancellationToken, JobQueueError> {
+        let Some(token) = self.cancel_tokens.get(job_id).cloned() else {
+            return Err(JobQueueError::JobNotFound(job_id.to_string()));
+        };
+        if let Some(index) = self
+            .pending_job_ids
+            .iter()
+            .position(|pending| pending == job_id)
+        {
+            self.pending_job_ids.remove(index);
+        }
+        Ok(token)
+    }
+
+    pub fn forget_cancellation_token(&mut self, job_id: &str) {
+        self.cancel_tokens.remove(job_id);
     }
 
     pub fn run_next(
@@ -326,52 +395,67 @@ impl LocalJobQueue {
         let Some(job_id) = self.pending_job_ids.pop_front() else {
             return Ok(None);
         };
-        if pending_track_is_stale(project, &job_id)? {
-            self.cancel_requests.remove(&job_id);
-            self.complete_stale_run(project, &job_id, "track changed before job started")?;
-            return Ok(Some(job_id));
+        let token = self
+            .cancel_tokens
+            .get(&job_id)
+            .cloned()
+            .unwrap_or_else(TransformCancellationToken::new);
+        let result =
+            self.run_detached_job_with_artifact_dir(project, &job_id, artifact_dir, token, None);
+        self.cancel_tokens.remove(&job_id);
+        result
+    }
+
+    pub fn run_detached_job_with_artifact_dir(
+        &mut self,
+        project: &mut ProjectDocument,
+        job_id: &str,
+        artifact_dir: Option<&Path>,
+        token: TransformCancellationToken,
+        progress_reporter: Option<ProgressReporter>,
+    ) -> Result<Option<String>, JobQueueError> {
+        if pending_track_is_stale(project, job_id)? {
+            self.complete_stale_run(project, job_id, "track changed before job started")?;
+            return Ok(Some(job_id.to_string()));
         }
-        self.start_job(project, &job_id)?;
-        if self.cancel_requests.remove(&job_id) {
-            self.complete_cancelled(project, &job_id, "cancelled")?;
-            return Ok(Some(job_id));
+        self.start_job(project, job_id)?;
+        if token.cancel_requested() {
+            self.complete_cancelled(project, job_id, "cancelled")?;
+            return Ok(Some(job_id.to_string()));
         }
 
-        let run_snapshot = run_snapshot(project, &job_id)?;
+        let run_snapshot = run_snapshot(project, job_id)?;
         let mut context =
-            TransformContext::new(job_id.clone(), run_snapshot.track_id.clone(), false);
+            TransformContext::new(job_id.to_string(), run_snapshot.track_id.clone(), token)
+                .with_progress_reporter(progress_reporter);
         let runner = self
             .registry
             .runner_mut(&run_snapshot.transform_id, &run_snapshot.transform_version)?;
         let result = runner(&mut context, &run_snapshot.params);
 
         if context.cancel_requested() {
-            self.complete_cancelled(project, &job_id, "cancelled")?;
-            return Ok(Some(job_id));
+            self.complete_cancelled(project, job_id, "cancelled")?;
+            return Ok(Some(job_id.to_string()));
         }
 
         match result {
             Ok(result) => {
-                if let Err(error) = self.complete_success(
-                    project,
-                    &job_id,
-                    context.progress(),
-                    result,
-                    artifact_dir,
-                ) {
+                if let Err(error) =
+                    self.complete_success(project, job_id, context.progress(), result, artifact_dir)
+                {
                     let message = error.to_string();
-                    self.complete_failed(project, &job_id, &message)?;
+                    self.complete_failed(project, job_id, &message)?;
                     return Err(error);
                 }
             }
             Err(TransformRunError::Cancelled) => {
-                self.complete_cancelled(project, &job_id, "cancelled")?;
+                self.complete_cancelled(project, job_id, "cancelled")?;
             }
             Err(TransformRunError::Failed(error)) => {
-                self.complete_failed(project, &job_id, &error)?;
+                self.complete_failed(project, job_id, &error)?;
             }
         }
-        Ok(Some(job_id))
+        Ok(Some(job_id.to_string()))
     }
 
     pub fn refresh_cache_validity(
@@ -383,7 +467,7 @@ impl LocalJobQueue {
         let invalid_ids = invalid.iter().collect::<BTreeSet<_>>();
         for entry in &mut project.cache_entries {
             if invalid_ids.contains(&entry.id) {
-                entry.validation_status = "invalid".to_string();
+                entry.validation_status = CacheValidationStatus::Invalid;
             }
         }
         mark_invalid_cache_refs_stale(project, &invalid);
@@ -827,7 +911,9 @@ fn cache_artifact_temp_path(path: &Path) -> PathBuf {
 mod tests {
     use autolight_core::cache::track_dependency_hash;
     use autolight_core::graph::mark_dependents_stale;
-    use autolight_core::project::{AudioAsset, CacheEntry, Track};
+    use autolight_core::project::{
+        AudioAsset, CacheEntry, CacheValidationStatus, ImportStatus, Track,
+    };
     use serde_json::{json, Value};
 
     use super::{JobRegistry, LocalJobQueue, ProducedMarker, TransformResult, TransformRunError};
@@ -967,6 +1053,43 @@ mod tests {
         );
         assert_eq!(job_state(&project, &job_id), ResultState::Cancelled);
         assert!(project.markers.is_empty());
+    }
+
+    #[test]
+    fn jobs_running_transform_observes_external_cancellation_token() {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let mut registry = JobRegistry::default();
+        registry
+            .register(test_spec("test.slow_cancel"), move |context, _params| {
+                started_tx.send(()).unwrap();
+                while !context.cancel_requested() {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Ok(TransformResult::markers(vec![ProducedMarker::new(
+                    0.0,
+                    "should not commit",
+                )]))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.slow_cancel");
+        let mut queue = LocalJobQueue::with_clock(registry, deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        let token = queue.cancellation_token(&job_id).unwrap();
+        let canceller = std::thread::spawn(move || {
+            started_rx.recv().unwrap();
+            token.request_cancel();
+        });
+        queue.run_next(&mut project).unwrap();
+        canceller.join().unwrap();
+
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Cancelled
+        );
+        assert_eq!(job_state(&project, &job_id), ResultState::Cancelled);
+        assert!(project.markers.is_empty());
+        assert!(queue.cancellation_token(&job_id).is_none());
     }
 
     #[test]
@@ -1193,7 +1316,10 @@ mod tests {
         let invalid = queue.refresh_cache_validity(&mut project, |_| false);
 
         assert_eq!(invalid, ["cache_missing"]);
-        assert_eq!(project.cache_entries[0].validation_status, "invalid");
+        assert_eq!(
+            project.cache_entries[0].validation_status,
+            CacheValidationStatus::Invalid
+        );
         assert_eq!(track_state(&project, "track_generated"), ResultState::Stale);
         assert_eq!(
             track_state(&project, "track_downstream"),
@@ -1421,7 +1547,7 @@ mod tests {
             sample_rate: 44_100,
             channels: 2,
             fingerprint: "fingerprint".to_string(),
-            import_status: "online".to_string(),
+            import_status: ImportStatus::Online,
             relink_hint: String::default(),
         });
         project.tracks.extend([
@@ -1521,7 +1647,7 @@ mod tests {
             transform_version: "1".to_string(),
             size_bytes: 0,
             payload_digest: String::default(),
-            validation_status: "valid".to_string(),
+            validation_status: CacheValidationStatus::Valid,
         }
     }
 

@@ -34,27 +34,27 @@ Window {
     readonly property color footerBackground: "#111318"
     readonly property color controlTextColor: root.textPrimary
     readonly property color controlMutedTextColor: root.textMuted
-    function createRustAdapter() {
-        var component = Qt.createComponent(Qt.resolvedUrl("RustAdapter.qml"))
+    function createAppRuntime() {
+        var component = Qt.createComponent(Qt.resolvedUrl("AppRuntime.qml"))
         if (component.status !== Component.Ready) {
             var loadError = component.errorString()
             console.error(loadError)
-            throw new Error("Failed to load RustAdapter.qml: " + loadError)
+            throw new Error("Failed to load AppRuntime.qml: " + loadError)
         }
         var adapter = component.createObject(root)
         if (adapter === null) {
             var createError = component.errorString()
-            console.error(createError.length > 0 ? createError : "Failed to create RustAdapter.qml")
-            throw new Error("Failed to create RustAdapter.qml: " + createError)
+            console.error(createError.length > 0 ? createError : "Failed to create AppRuntime.qml")
+            throw new Error("Failed to create AppRuntime.qml: " + createError)
         }
         return adapter
     }
 
-    readonly property var rustAdapter: typeof appController === "undefined"
-        ? root.createRustAdapter()
+    readonly property var appRuntime: typeof appController === "undefined"
+        ? root.createAppRuntime()
         : null
     readonly property var controller: typeof appController === "undefined"
-        ? root.rustAdapter
+        ? root.appRuntime
         : appController
     readonly property string statusError: root.controller.lastError.length > 0 ? root.controller.lastError : root.controller.playback.lastError
     readonly property var markerColorOptions: root.controller.markerColorOptions
@@ -68,6 +68,31 @@ Window {
     function updateTimelineVisibleSeconds() {
         var laneWidth = Math.max(0, timelineView.rowsWidth - root.timelineLabelWidth - root.timelineLeftPadding)
         root.controller.set_timeline_visible_seconds(laneWidth / root.controller.timelinePixelsPerSecond)
+    }
+
+    function scrollTimelineByPixels(pixelDelta) {
+        var pixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
+        var nextScroll = root.controller.timelineScrollSeconds + pixelDelta / pixelsPerSecond
+        root.controller.set_timeline_scroll_seconds(nextScroll)
+    }
+
+    function zoomTimelineAtX(xValue, wheelDelta) {
+        var delta = Number(wheelDelta)
+        if (!isFinite(delta) || delta === 0) {
+            return
+        }
+        var currentPixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
+        var laneX = Math.max(root.timelineLeftPadding, xValue - root.timelineLabelWidth)
+        var anchorOffsetPixels = Math.max(0, laneX - root.timelineLeftPadding)
+        var anchorSeconds = root.controller.timelineScrollSeconds
+            + anchorOffsetPixels / currentPixelsPerSecond
+        var nextPixelsPerSecond = currentPixelsPerSecond * Math.pow(1.0015, delta)
+        root.controller.set_timeline_zoom(nextPixelsPerSecond)
+        var appliedPixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
+        root.controller.set_timeline_scroll_seconds(
+            anchorSeconds - anchorOffsetPixels / appliedPixelsPerSecond
+        )
+        root.updateTimelineVisibleSeconds()
     }
 
     function formatSeconds(seconds) {
@@ -221,7 +246,6 @@ Window {
             onAddTransformRequested: function(transformId, transformVersion, params) {
                 root.controller.add_transform_track(root.controller.selectedTrackId, transformId, transformVersion, params)
             }
-            onAddVocalsStemRequested: root.controller.add_vocals_stem_track(root.controller.selectedTrackId)
             onRefreshCacheRequested: root.controller.refresh_cache_status()
             onDeriveEditableRequested: root.controller.create_editable_track_from_track(root.controller.selectedTrackId)
         }
@@ -308,6 +332,8 @@ Window {
                 onLayoutWidthChanged: root.updateTimelineVisibleSeconds()
                 onTrackSelected: function(trackId) { root.controller.select_track(trackId) }
                 onSeekRequested: function(x) { root.seekTimelineAtX(x) }
+                onScrollPixelsRequested: function(pixels) { root.scrollTimelineByPixels(pixels) }
+                onZoomRequested: function(x, wheelDelta) { root.zoomTimelineAtX(x, wheelDelta) }
             }
 
             MarkerInspector {

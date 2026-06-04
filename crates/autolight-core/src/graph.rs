@@ -540,8 +540,8 @@ mod tests {
         source_track_id_for_context, validate_graph,
     };
     use crate::project::{
-        AudioAsset, CacheEntry, JobRun, JsonObject, Marker, ProjectDocument, ResultState, Track,
-        TrackType,
+        AudioAsset, CacheEntry, CacheValidationStatus, ImportStatus, JobRun, JsonObject, Marker,
+        ProjectDocument, ResultState, Track, TrackType,
     };
 
     fn fixture_path(name: &str) -> PathBuf {
@@ -737,7 +737,7 @@ mod tests {
             sample_rate: 44_100,
             channels: 2,
             fingerprint: "fingerprint".to_string(),
-            import_status: "online".to_string(),
+            import_status: ImportStatus::Online,
             relink_hint: String::default(),
         });
         project.tracks.push(source_track());
@@ -838,7 +838,7 @@ mod tests {
             transform_version: "1".to_string(),
             size_bytes: 0,
             payload_digest: String::default(),
-            validation_status: "valid".to_string(),
+            validation_status: CacheValidationStatus::Valid,
         }
     }
 

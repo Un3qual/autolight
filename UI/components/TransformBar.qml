@@ -15,7 +15,6 @@ ColumnLayout {
     signal rerunRequested()
     signal cancelRequested()
     signal addTransformRequested(var transformId, var transformVersion, string params)
-    signal addVocalsStemRequested()
     signal refreshCacheRequested()
     signal deriveEditableRequested()
 
@@ -97,13 +96,6 @@ ColumnLayout {
                 root.appController.transformModel.version_at(transformPicker.currentIndex),
                 transformParamsField.text
             )
-        }
-
-        Button {
-            text: "Add Vocals Stem"
-            palette.buttonText: root.controlTextColor
-            enabled: root.appController.selectedTrackId.length > 0
-            onClicked: root.addVocalsStemRequested()
         }
 
         Button {

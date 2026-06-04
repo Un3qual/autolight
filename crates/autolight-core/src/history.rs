@@ -569,7 +569,7 @@ mod tests {
             sample_rate: 44_100,
             channels: 2,
             fingerprint: "fingerprint".to_string(),
-            import_status: "online".to_string(),
+            import_status: crate::project::ImportStatus::Online,
             relink_hint: String::default(),
         });
         project.tracks.push(Track {
