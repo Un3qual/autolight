@@ -80,6 +80,7 @@ Transform output schemas remain stable:
 
 - `artifact.waveform.v1`
 - `artifact.audio.v1`
+- `artifact.stem.v1`
 - `artifact.beat-grid.v1`
 - `artifact.energy.v1`
 - `artifact.harmonic-color.v1`
