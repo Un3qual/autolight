@@ -48,10 +48,11 @@ pub fn analyze_rhythm_fixture(
 ) -> Result<MusicAnalysisResult, MusicError> {
     validate_positive(max_markers, "max_markers")?;
     raise_if_cancelled(&mut cancel_requested)?;
+    let duration = finite_non_negative(duration);
     let beat_times = beat_times
         .iter()
         .copied()
-        .filter(|timestamp| timestamp.is_finite() && *timestamp >= 0.0)
+        .filter(|timestamp| timestamp.is_finite() && *timestamp >= 0.0 && *timestamp <= duration)
         .take(max_markers)
         .map(round6)
         .collect::<Vec<_>>();
@@ -79,7 +80,7 @@ pub fn analyze_rhythm_fixture(
         payload: json!({
             "version": 1,
             "kind": "beat-grid",
-            "duration": finite_non_negative(duration),
+            "duration": duration,
             "tempo": tempo,
             "beat_times": beat_times,
             "settings": {"max_markers": max_markers},
@@ -487,10 +488,11 @@ mod tests {
     #[test]
     fn music_beat_grid_tempo_uses_emitted_filtered_beats() {
         let result =
-            analyze_rhythm_fixture(4.0, &[-1.0, 0.0, 0.5, f64::NAN, 9.0], 2, || false).unwrap();
+            analyze_rhythm_fixture(4.0, &[9.0, 0.0, 0.5, f64::NAN, 1.0], 2, || false).unwrap();
 
         assert_eq!(result.payload["beat_times"], json!([0.0, 0.5]));
         assert_eq!(result.payload["tempo"], json!(120.0));
+        assert!(result.markers.iter().all(|marker| marker.timestamp <= 4.0));
         assert_eq!(result.markers[0].metadata["tempo"], json!(120.0));
     }
 

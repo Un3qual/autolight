@@ -115,10 +115,9 @@ impl ProjectDocument {
                     source,
                 })?;
             }
-            fs::rename(&tmp_path, path).map_err(|source| ProjectError::Write {
-                path: path.to_path_buf(),
-                source,
-            })
+            replace_project_file(&tmp_path, path)?;
+            sync_parent_directory(path)?;
+            Ok(())
         })();
         if write_result.is_err() {
             let _ = fs::remove_file(&tmp_path);
@@ -144,6 +143,34 @@ fn atomic_save_temp_path(path: &Path) -> PathBuf {
         .unwrap_or_default()
         .as_nanos();
     path.with_file_name(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()))
+}
+
+fn replace_project_file(tmp_path: &Path, path: &Path) -> Result<(), ProjectError> {
+    fs::rename(tmp_path, path).map_err(|source| ProjectError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+#[cfg(not(windows))]
+fn sync_parent_directory(path: &Path) -> Result<(), ProjectError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|source| ProjectError::Write {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn sync_parent_directory(_path: &Path) -> Result<(), ProjectError> {
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -203,6 +230,8 @@ pub struct JobRun {
     pub id: String,
     pub track_id: String,
     pub transform_id: String,
+    #[serde(default)]
+    pub transform_version: String,
     pub parameters_hash: String,
     #[serde(default)]
     pub parameters: JsonObject,
@@ -384,6 +413,19 @@ mod tests {
             .to_string()
             .contains("missing input track: missing_track"));
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn project_save_path_replaces_existing_file_contents() {
+        let project = ProjectDocument::load_path(fixture_path("basic_graph.autolight")).unwrap();
+        let path = round_trip_path("replace-existing");
+        fs::write(&path, "old contents").unwrap();
+
+        project.save_path(&path).unwrap();
+        let reloaded = ProjectDocument::load_path(&path).unwrap();
+
+        assert_eq!(reloaded, project);
         fs::remove_file(&path).unwrap();
     }
 

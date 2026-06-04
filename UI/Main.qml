@@ -37,10 +37,17 @@ Window {
     function createRustAdapter() {
         var component = Qt.createComponent(Qt.resolvedUrl("RustAdapter.qml"))
         if (component.status !== Component.Ready) {
-            console.error(component.errorString())
-            return null
+            var loadError = component.errorString()
+            console.error(loadError)
+            throw new Error("Failed to load RustAdapter.qml: " + loadError)
         }
-        return component.createObject(root)
+        var adapter = component.createObject(root)
+        if (adapter === null) {
+            var createError = component.errorString()
+            console.error(createError.length > 0 ? createError : "Failed to create RustAdapter.qml")
+            throw new Error("Failed to create RustAdapter.qml: " + createError)
+        }
+        return adapter
     }
 
     readonly property var rustAdapter: typeof appController === "undefined"

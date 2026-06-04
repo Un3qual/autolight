@@ -277,6 +277,7 @@ impl LocalJobQueue {
             id: job_id.clone(),
             track_id: track_id.to_string(),
             transform_id: snapshot.transform_id,
+            transform_version: snapshot.transform_version,
             parameters_hash: dependency_hash,
             parameters: run_params,
             state: ResultState::Pending,
@@ -612,13 +613,13 @@ fn run_snapshot(project: &ProjectDocument, job_id: &str) -> Result<RunSnapshot, 
     Ok(RunSnapshot {
         track_id: run.track_id.clone(),
         transform_id: run.transform_id.clone(),
-        transform_version: track.transform_version.clone(),
-        parameters_hash: run.parameters_hash.clone(),
-        params: if run.parameters.is_empty() {
-            track.transform_params.clone()
+        transform_version: if run.transform_version.is_empty() {
+            track.transform_version.clone()
         } else {
-            run.parameters.clone()
+            run.transform_version.clone()
         },
+        parameters_hash: run.parameters_hash.clone(),
+        params: run.parameters.clone(),
     })
 }
 
@@ -1306,6 +1307,69 @@ mod tests {
     }
 
     #[test]
+    fn jobs_empty_submit_params_do_not_reload_track_params_before_run() {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(test_spec("test.empty_params"), |_context, params| {
+                Ok(TransformResult::markers(vec![ProducedMarker::new(
+                    0.0,
+                    if params.is_empty() {
+                        "empty"
+                    } else {
+                        "mutated"
+                    },
+                )]))
+            })
+            .unwrap();
+        let mut project = project_with_generated_track("test.empty_params");
+        let mut queue = LocalJobQueue::new(registry);
+
+        queue.submit(&mut project, "track_generated").unwrap();
+        track_by_id_mut(&mut project, "track_generated")
+            .transform_params
+            .insert("after_submit".to_string(), json!(true));
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(project.markers[0].label, "empty");
+    }
+
+    #[test]
+    fn jobs_transform_version_is_frozen_at_submit() {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(
+                test_spec_with_version("test.versioned", "1"),
+                |_context, _params| {
+                    Ok(TransformResult::markers(vec![ProducedMarker::new(
+                        0.0,
+                        "version-1",
+                    )]))
+                },
+            )
+            .unwrap();
+        registry
+            .register(
+                test_spec_with_version("test.versioned", "2"),
+                |_context, _params| {
+                    Ok(TransformResult::markers(vec![ProducedMarker::new(
+                        0.0,
+                        "version-2",
+                    )]))
+                },
+            )
+            .unwrap();
+        let mut project = project_with_generated_track("test.versioned");
+        let mut queue = LocalJobQueue::new(registry);
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        track_by_id_mut(&mut project, "track_generated").transform_version = "2".to_string();
+        queue.run_next(&mut project).unwrap();
+
+        assert_eq!(project.markers[0].label, "version-1");
+        assert_eq!(run_by_id(&project, &job_id).transform_version, "1");
+    }
+
+    #[test]
     fn jobs_reject_rerun_when_input_track_is_stale() {
         let mut project = project_with_generated_track("test.noop");
         track_by_id_mut(&mut project, "track_source").result_state = ResultState::Stale;
@@ -1334,9 +1398,13 @@ mod tests {
     }
 
     fn test_spec(transform_id: &str) -> TransformSpec {
+        test_spec_with_version(transform_id, "1")
+    }
+
+    fn test_spec_with_version(transform_id: &str, version: &str) -> TransformSpec {
         TransformSpec::new(
             transform_id,
-            "1",
+            version,
             "Test Transform",
             "audio-or-markers.v1",
             "markers.v1",

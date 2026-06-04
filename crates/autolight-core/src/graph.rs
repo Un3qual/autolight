@@ -427,7 +427,9 @@ fn validate_source_track(
     }
     let asset_id = track.provenance.get("asset_id").and_then(Value::as_str);
     if !asset_id.is_some_and(|id| audio_asset_ids.contains(id)) {
-        return Err(GraphError::SourceTrackMissingAudioAsset(track.id.clone()));
+        return Err(GraphError::SourceTrackMissingAudioAsset(
+            asset_id.unwrap_or("<missing asset_id>").to_string(),
+        ));
     }
     Ok(())
 }
@@ -547,6 +549,18 @@ mod tests {
         assert!(err
             .to_string()
             .contains("missing input track: track_not_here"));
+    }
+
+    #[test]
+    fn graph_validate_reports_missing_source_audio_asset_reference() {
+        let mut project = project_with_source();
+        project.tracks[0].provenance = object(json!({"asset_id": "asset_missing"}));
+
+        let err = validate_graph(&project).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("source track references missing audio asset: asset_missing"));
     }
 
     #[test]
@@ -783,6 +797,7 @@ mod tests {
             id: id.to_string(),
             track_id: track_id.to_string(),
             transform_id: "markers.fixed_interval".to_string(),
+            transform_version: "1".to_string(),
             parameters_hash: "dep".to_string(),
             parameters: JsonObject::new(),
             state: ResultState::Complete,

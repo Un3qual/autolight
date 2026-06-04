@@ -767,8 +767,12 @@ impl AppControllerState {
     }
 
     fn create_editable_track_from_track_state(&mut self, source_track_id: &str) -> String {
-        if find_track(&self.project, source_track_id).is_none() {
+        let Some(source_track) = find_track(&self.project, source_track_id) else {
             self.set_error(format!("track not found: {source_track_id}"));
+            return String::new();
+        };
+        if source_track.result_state != ResultState::Complete {
+            self.set_error(format!("source track is not complete: {source_track_id}"));
             return String::new();
         }
         let mut source_markers = self
@@ -3366,6 +3370,29 @@ mod tests {
     }
 
     #[test]
+    fn controller_rejects_deriving_editable_track_from_stale_marker_track() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let initial_track_count = state.project.tracks.len();
+        let initial_marker_count = state.project.markers.len();
+        state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_beats")
+            .unwrap()
+            .result_state = ResultState::Stale;
+
+        let track_id = state.create_editable_track_from_track_state("track_beats");
+
+        assert!(track_id.is_empty());
+        assert_eq!(state.project.tracks.len(), initial_track_count);
+        assert_eq!(state.project.markers.len(), initial_marker_count);
+        assert!(!state.can_undo);
+        assert!(state.last_error.to_string().contains("not complete"));
+    }
+
+    #[test]
     fn controller_undo_redo_reconciles_dirty_and_selection_state() {
         let mut state = AppControllerState::default();
         state.load_demo_project_state();
@@ -3992,12 +4019,18 @@ mod tests {
         .unwrap();
 
         assert!(main_qml.contains("Qt.createComponent(Qt.resolvedUrl(\"RustAdapter.qml\"))"));
+        assert!(main_qml.contains("throw new Error"));
+        assert!(main_qml.contains("adapter === null"));
+        assert!(!main_qml.contains("return null"));
         assert!(!main_qml.contains("rustAdapterSource"));
         assert!(!main_qml.contains("Qt.createQmlObject"));
         assert!(main_qml.contains("WAV audio files (*.wav)"));
         assert!(!main_qml.contains("*.mp3"));
 
         assert!(adapter_qml.contains("rustController.transformSpecsJson"));
+        assert!(adapter_qml.contains("Failed to parse timelineRowsJson"));
+        assert!(adapter_qml.contains("Failed to parse transformSpecsJson"));
+        assert!(adapter_qml.contains("function reloadModels() {\n        reloadTrackModel()"));
         assert!(adapter_qml.contains("rustController.selectedTrackId"));
         assert!(adapter_qml.contains("rustController.addTransformTrack"));
         assert!(adapter_qml.contains("rustController.runTrack"));

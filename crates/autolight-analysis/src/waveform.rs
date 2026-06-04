@@ -191,9 +191,7 @@ pub fn visible_samples(
     }
 
     let start_seconds = scroll_seconds.max(0.0).min(duration);
-    let stop_seconds = (scroll_seconds + visible_seconds.max(0.0))
-        .max(start_seconds)
-        .min(duration);
+    let stop_seconds = (start_seconds + visible_seconds.max(0.0)).min(duration);
     let start_index = ((start_seconds / duration) * level_bucket_count as f64).floor() as usize;
     let mut stop_index = ((stop_seconds / duration) * level_bucket_count as f64).ceil() as usize;
     if stop_index <= start_index {
@@ -545,6 +543,33 @@ mod tests {
         assert_eq!(visible.level_bucket_count, 10);
         assert_eq!(visible.samples.last().unwrap().peak, 0.9);
         assert_eq!(visible.samples.last().unwrap().time, 9.0);
+    }
+
+    #[test]
+    fn waveform_visible_samples_uses_clamped_scroll_origin_for_stop() {
+        let payload = WaveformPayload {
+            version: 2,
+            sample_rate: 0,
+            duration: 10.0,
+            samples: Vec::new(),
+            levels: vec![super::WaveformLevel {
+                bucket_count: 10,
+                samples: (0..10)
+                    .map(|index| sample(index as f64 / 10.0, 0.05, 1, 0.0))
+                    .collect(),
+            }],
+        };
+
+        let visible = visible_samples(&payload, -5.0, 2.0, 48.0);
+
+        assert_eq!(
+            visible
+                .samples
+                .iter()
+                .map(|sample| sample.time)
+                .collect::<Vec<_>>(),
+            [0.0, 1.0]
+        );
     }
 
     #[test]

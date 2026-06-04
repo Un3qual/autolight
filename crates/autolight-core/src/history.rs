@@ -42,6 +42,12 @@ impl MarkerSnapshotCommand {
         snapshots: &[Marker],
         dependent_snapshots: &[DependentTrackSnapshot],
     ) -> Result<(), HistoryError> {
+        if find_track(project, &self.track_id).is_none() {
+            return Err(HistoryError::Obsolete(format!(
+                "cannot restore markers for missing track: {}",
+                self.track_id
+            )));
+        }
         let affected_ids: BTreeSet<&str> = self
             .before
             .iter()
@@ -52,9 +58,7 @@ impl MarkerSnapshotCommand {
             !(marker.track_id == self.track_id && affected_ids.contains(marker.id.as_str()))
         });
         project.markers.extend(snapshots.iter().cloned());
-        if find_track(project, &self.track_id).is_some() {
-            mark_dependents_stale(project, &self.track_id, "");
-        }
+        mark_dependents_stale(project, &self.track_id, "");
         if !dependent_snapshots.is_empty() {
             restore_dependent_states(project, dependent_snapshots);
         }
@@ -400,6 +404,39 @@ mod tests {
             marker_by_id(&project, &marker.id).metadata["color"],
             json!("amber")
         );
+    }
+
+    #[test]
+    fn history_marker_snapshot_restore_rejects_missing_track() {
+        let mut project = project_with_editable_track();
+        project.tracks.retain(|track| track.id != "track_edit");
+        let command = MarkerSnapshotCommand {
+            track_id: "track_edit".to_string(),
+            before: Vec::new(),
+            after: vec![Marker {
+                id: "marker_orphan".to_string(),
+                track_id: "track_edit".to_string(),
+                timestamp: 1.0,
+                duration: None,
+                label: "Cue".to_string(),
+                category: "cue".to_string(),
+                confidence: None,
+                tags: Vec::new(),
+                source_transform: String::new(),
+                source_marker_ids: Vec::new(),
+                metadata: JsonObject::new(),
+            }],
+            before_dependents: Vec::new(),
+            after_dependents: Vec::new(),
+        };
+
+        let error = command.redo(&mut project).unwrap_err();
+
+        assert!(error.to_string().contains("missing track"));
+        assert!(project
+            .markers
+            .iter()
+            .all(|marker| marker.id != "marker_orphan"));
     }
 
     #[test]

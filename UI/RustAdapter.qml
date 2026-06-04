@@ -86,7 +86,12 @@ QtObject {
     function reloadTrackModel() {
         trackModel.clear()
         var rows = []
-        try { rows = JSON.parse(rustController.timelineRowsJson) } catch (error) { return }
+        try {
+            rows = JSON.parse(rustController.timelineRowsJson)
+        } catch (error) {
+            console.error("Failed to parse timelineRowsJson:", error, rustController.timelineRowsJson)
+            return
+        }
         for (var i = 0; i < rows.length; i++) {
             trackModel.append(rows[i])
         }
@@ -104,7 +109,12 @@ QtObject {
     function reloadTransformModel() {
         transformModel.clear()
         var rows = []
-        try { rows = JSON.parse(rustController.transformSpecsJson) } catch (error) { return }
+        try {
+            rows = JSON.parse(rustController.transformSpecsJson)
+        } catch (error) {
+            console.error("Failed to parse transformSpecsJson:", error, rustController.transformSpecsJson)
+            return
+        }
         for (var i = 0; i < rows.length; i++) {
             transformModel.append(rows[i])
         }
@@ -116,7 +126,13 @@ QtObject {
         markerColorOptions = parseJsonArray(rustController.markerColorOptionsJson)
     }
 
-    function reloadModels() { reloadTrackModel(); reloadTransformModel(); reloadSelectionModels(); syncPlaybackSource(); audioOutput.volume = rustController.playbackVolume }
+    function reloadModels() {
+        reloadTrackModel()
+        reloadTransformModel()
+        reloadSelectionModels()
+        syncPlaybackSource()
+        audioOutput.volume = rustController.playbackVolume
+    }
     function new_project() { rustController.newProject(); reloadModels() }
     function open_project(path) { var opened = rustController.openProject(path); reloadModels(); return opened }
     function save_project(path) { var saved = rustController.saveProject(path || ""); reloadModels(); return saved }

@@ -177,6 +177,9 @@ pub fn bulk_update_editable_markers(
     update: BulkMarkerUpdate,
 ) -> Result<usize, MarkerError> {
     editable_track_or_raise(project, track_id)?;
+    if marker_ids.is_empty() {
+        return Ok(0);
+    }
     let selected_ids: BTreeSet<&str> = marker_ids.iter().map(String::as_str).collect();
     let category = normalize_marker_category(&update.category);
     let color = normalize_marker_color(&update.color)?;
@@ -786,6 +789,45 @@ mod tests {
         assert_eq!(
             marker_by_id(&project, &second.id).metadata["color"],
             json!("blue")
+        );
+    }
+
+    #[test]
+    fn markers_bulk_update_empty_selection_is_noop() {
+        let mut project = project_with_editable_track();
+        let marker = add_editable_marker(
+            &mut project,
+            "track_edit",
+            EditableMarkerInput::cue(1.0, "Cue"),
+        )
+        .unwrap();
+        project.tracks.push(generated_track(
+            "track_downstream",
+            "track_edit",
+            ResultState::Complete,
+        ));
+
+        let updated = bulk_update_editable_markers(
+            &mut project,
+            "track_edit",
+            &[],
+            BulkMarkerUpdate {
+                label: "Scene".to_string(),
+                category: "scene".to_string(),
+                color: "blue".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated, 0);
+        assert_eq!(marker_by_id(&project, &marker.id).label, "Cue");
+        assert_eq!(
+            marker_by_id(&project, &marker.id).metadata["color"],
+            json!("cyan")
+        );
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Complete
         );
     }
 
