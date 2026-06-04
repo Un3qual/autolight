@@ -350,9 +350,11 @@ impl AppControllerState {
         self.project = project;
         self.project_name = QString::from(&self.project.name);
         self.project_path = QString::from(project_path.to_string_lossy().to_string());
-        let refreshed_audio_assets = self.refresh_loaded_audio_assets();
-        let finalized_active_jobs = self.finalize_loaded_active_jobs();
-        let invalid_cache_refs = self.validate_cache_artifact_state();
+        let project_before_load_refresh = self.project.clone();
+        self.refresh_loaded_audio_assets();
+        self.finalize_loaded_active_jobs();
+        self.validate_cache_artifact_state();
+        let load_refresh_changed_project = self.project != project_before_load_refresh;
         self.expanded_track_ids = expanded_track_ids_from_project(&self.project)
             .unwrap_or_else(|| default_expanded_track_ids(&self.project));
         self.selected_track_id = QString::from(&selected_track_id_from_project(&self.project));
@@ -360,8 +362,7 @@ impl AppControllerState {
         self.selected_marker_ids.clear();
         self.unload_playback();
         self.reset_history_clean();
-        if refreshed_audio_assets > 0 || finalized_active_jobs > 0 || !invalid_cache_refs.is_empty()
-        {
+        if load_refresh_changed_project {
             self.mark_project_mutation_dirty();
         }
         self.last_error = QString::default();
@@ -2272,14 +2273,8 @@ fn fixed_interval_runner(
     if context.cancel_requested() {
         return Err(TransformRunError::Cancelled);
     }
-    let duration = params
-        .get("duration")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
-    let interval = params
-        .get("interval")
-        .and_then(Value::as_f64)
-        .unwrap_or(1.0);
+    let duration = fixed_interval_number_param(params, "duration", 0.0)?;
+    let interval = fixed_interval_number_param(params, "interval", 1.0)?;
     if !duration.is_finite() || duration < 0.0 {
         return Err(TransformRunError::Failed(
             "duration must be greater than or equal to zero".to_string(),
@@ -2318,6 +2313,19 @@ fn fixed_interval_runner(
     }
     context.report_progress(1.0);
     Ok(TransformResult::markers(markers))
+}
+
+fn fixed_interval_number_param(
+    params: &JsonObject,
+    key: &str,
+    default: f64,
+) -> Result<f64, TransformRunError> {
+    match params.get(key) {
+        Some(value) => value
+            .as_f64()
+            .ok_or_else(|| TransformRunError::Failed(format!("{key} must be a number"))),
+        None => Ok(default),
+    }
 }
 
 fn parse_params(params_json: &str) -> Result<JsonObject, String> {
@@ -3094,6 +3102,46 @@ mod tests {
     }
 
     #[test]
+    fn controller_fixed_interval_rejects_nonnumeric_params() {
+        for (params, expected_error) in [
+            (
+                r#"{"duration": "8", "interval": 0.5}"#,
+                "duration must be a number",
+            ),
+            (
+                r#"{"duration": 1.0, "interval": "0.5"}"#,
+                "interval must be a number",
+            ),
+        ] {
+            let mut state = AppControllerState::default();
+            state.load_demo_project_state();
+            let track_id = state.add_transform_track_state(
+                "track_source",
+                "markers.fixed_interval",
+                "1",
+                params,
+            );
+
+            let job_id = state.run_track_state(&track_id);
+
+            assert!(!job_id.is_empty());
+            let track = state
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id)
+                .unwrap();
+            assert_eq!(track.result_state, ResultState::Failed);
+            assert!(track.error.contains(expected_error));
+            assert!(state
+                .project
+                .markers
+                .iter()
+                .all(|marker| marker.track_id != track_id));
+        }
+    }
+
+    #[test]
     fn controller_rerun_requires_complete_input_tracks() {
         let mut state = AppControllerState::default();
         state.load_demo_project_state();
@@ -3649,6 +3697,111 @@ mod tests {
     }
 
     #[test]
+    fn controller_open_project_keeps_persisted_offline_audio_clean() {
+        let root = test_dir("open-persisted-offline-audio");
+        let audio_path = root.join("song.wav");
+        let project_path = root.join("show.autolight");
+        write_test_wav(&audio_path, 44_100, 2, 16);
+        let mut state = AppControllerState::default();
+        let source_id = state.import_audio_state(audio_path.to_str().unwrap());
+        let generated_id = state.add_transform_track_state(
+            &source_id,
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1.0, "interval": 0.5}"#,
+        );
+        state.run_track_state(&generated_id);
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::remove_file(&audio_path).unwrap();
+        let mut offline = AppControllerState::default();
+        assert!(offline.open_project_state(project_path.to_str().unwrap()));
+        assert!(offline.is_dirty);
+        assert!(offline.save_project_state(project_path.to_str().unwrap()));
+
+        let mut reopened = AppControllerState::default();
+        assert!(reopened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(!reopened.is_dirty);
+        assert_eq!(reopened.project.audio_assets[0].import_status, "offline");
+        assert_eq!(
+            reopened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == source_id)
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+        assert_eq!(
+            reopened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == generated_id)
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+    }
+
+    #[test]
+    fn controller_open_project_keeps_persisted_invalid_cache_clean() {
+        let root = test_dir("open-persisted-invalid-cache");
+        let project_path = root.join("show.autolight");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.project_path = cxx_qt_lib::QString::from(project_path.to_string_lossy().to_string());
+        let entry = cache_entry_for_bytes("stem", "dep_drums", b"valid stem", "1", "now").unwrap();
+        let artifact_path = root.join(&entry.path);
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, b"valid stem").unwrap();
+        state
+            .project
+            .cache_entries
+            .retain(|candidate| candidate.id != "cache_drums");
+        state.project.cache_entries.push(entry.clone());
+        state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drums")
+            .unwrap()
+            .cache_refs = vec![entry.id.clone()];
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::write(&artifact_path, b"corrupt stem").unwrap();
+        let mut invalid = AppControllerState::default();
+        assert!(invalid.open_project_state(project_path.to_str().unwrap()));
+        assert!(invalid.is_dirty);
+        assert!(invalid.save_project_state(project_path.to_str().unwrap()));
+
+        let mut reopened = AppControllerState::default();
+        assert!(reopened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(!reopened.is_dirty);
+        assert_eq!(
+            reopened
+                .project
+                .cache_entries
+                .iter()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap()
+                .validation_status,
+            "invalid"
+        );
+        assert_eq!(
+            reopened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == "track_drums")
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+    }
+
+    #[test]
     fn controller_open_project_finalizes_persisted_active_jobs() {
         let root = test_dir("open-active-job");
         let project_path = root.join("show.autolight");
@@ -4062,6 +4215,11 @@ mod tests {
         assert!(adapter_qml.contains("MediaPlayer.PlayingState"));
         assert!(adapter_qml.contains("AudioOutput"));
         assert!(adapter_qml.contains("mediaPlayer.play()"));
+        assert!(adapter_qml.contains("onPositionChanged:"));
+        assert!(adapter_qml.contains("rustController.seekPlayback(position / 1000.0)"));
+        assert!(!adapter_qml.contains(
+            "onPositionChanged: { rustController.seekPlayback(position / 1000.0); reloadModels() }"
+        ));
         assert!(adapter_qml.contains("encodeURIComponent(segment)"));
         assert!(!adapter_qml.contains("encodeURI(path)"));
         assert!(adapter_qml.contains("rustController.timelinePixelsPerSecond"));

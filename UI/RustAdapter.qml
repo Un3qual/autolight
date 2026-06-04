@@ -41,6 +41,9 @@ QtObject {
     property var audioOutput: AudioOutput { volume: rustController.playbackVolume }
     property var mediaPlayer: MediaPlayer {
         audioOutput: rustAdapter.audioOutput
+        onPositionChanged: {
+            if (source.toString().length > 0) rustController.seekPlayback(position / 1000.0)
+        }
     }
     property var playback: QtObject {
         readonly property string lastError: rustController.playbackLastError.length > 0 ? rustController.playbackLastError : rustAdapter.mediaPlayer.errorString
