@@ -1,6 +1,6 @@
 //! Autolight desktop application entry point.
 
-use std::fs::OpenOptions;
+use std::fs::{DirBuilder, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -132,7 +132,7 @@ fn create_unique_qml_asset_dir() -> Result<PathBuf, String> {
             "autolight-qml-assets-{}-{nonce}-{sequence}",
             env!("CARGO_PKG_VERSION")
         ));
-        match std::fs::create_dir(&root) {
+        match DirBuilder::new().create(&root) {
             Ok(()) => return Ok(root),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
