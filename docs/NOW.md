@@ -26,6 +26,20 @@ uv run python main.py
 
 ## Completion Update
 
+- 2026-06-04: Addressed three new unresolved Codex bot review threads on PR #13 after commit `6dbd91f` and analyzed diffray's summary risk areas.
+- Changes made: clamped snapped single-marker drags at the timeline start before Rust marker movement validation; restored the inspector's no-selection `Apply To Track` behavior by expanding the Rust controller bulk update to all selected-track markers while keeping the lower-level core bulk API empty-selection-safe; verified the cache-artifact overwrite comment does not need a code change because the queue writes same-directory temp artifacts and Rust `fs::rename` already replaces existing files on supported platforms. Diffray's risk list was triaged as either already mitigated by current code/tests or future work for the async/heavy-transform batch, with no PR-blocking code change recommended.
+- Next batch: none. Push this final review cleanup, refresh GitHub review threads/checks, reply to the two fixed Codex threads and the cache-artifact evidence thread, and resolve the current threads if no new bot findings appear.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_bulk_update_without_marker_selection_updates_track_markers`: first failed with `left: 0 right: 2`; passed after expanding empty UI selection to selected-track marker IDs.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_snapped_single_marker_move_clamps_at_timeline_start`: first failed because `move_selected_markers_state` returned `false`; passed after clamping no-candidate snapped times to `0.0`.
+  - `cargo fmt --all`: ran.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: passed, 58 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 44 `autolight-core` tests, 21 `autolight-jobs` tests, and 58 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt printed non-fatal audio-device and missing `Sans Serif` font alias warnings.
+  - `git diff --check`: passed.
+
 - 2026-06-04: Addressed the follow-up DeepSource Rust dashboard report for PR #13 at commit range `f5342af...c9c936b`.
 - Changes made: replaced remaining empty `new()` calls in test setup with `EditHistory::default()` and `TransformRegistry::default()` where `Default` is equivalent and already preserves the intended empty state.
 - Next batch: none. Push this final DeepSource cleanup and refresh PR checks/review threads.

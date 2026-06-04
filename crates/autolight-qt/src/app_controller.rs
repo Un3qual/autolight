@@ -690,7 +690,7 @@ impl AppControllerState {
             })
             .min_by(|left, right| left.0.total_cmp(&right.0))
             .map(|(_, timestamp)| timestamp)
-            .unwrap_or(seconds)
+            .map_or_else(|| finite_non_negative(seconds), finite_non_negative)
     }
 
     fn refresh_view_state(&mut self) {
@@ -972,11 +972,21 @@ impl AppControllerState {
         color: &str,
     ) -> i32 {
         let track_id = self.selected_track_id.to_string();
+        let marker_ids = if self.selected_marker_ids.is_empty() {
+            self.project
+                .markers
+                .iter()
+                .filter(|marker| marker.track_id == track_id)
+                .map(|marker| marker.id.clone())
+                .collect()
+        } else {
+            self.selected_marker_ids.clone()
+        };
         let before = self.project.clone();
         let updated = match bulk_update_editable_markers(
             &mut self.project,
             &track_id,
-            &self.selected_marker_ids,
+            &marker_ids,
             BulkMarkerUpdate {
                 label: label.to_string(),
                 category: category.to_string(),
@@ -3447,6 +3457,30 @@ mod tests {
     }
 
     #[test]
+    fn controller_bulk_update_without_marker_selection_updates_track_markers() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+
+        assert!(state.selected_marker_ids.is_empty());
+        assert_eq!(
+            state.bulk_update_selected_markers_state("Scene", "scene", "blue"),
+            2
+        );
+
+        let markers: Vec<_> = state
+            .project
+            .markers
+            .iter()
+            .filter(|marker| marker.track_id == "track_edit")
+            .collect();
+        assert!(markers.iter().all(|marker| marker.label == "Scene"));
+        assert!(markers
+            .iter()
+            .all(|marker| marker.metadata["color"] == serde_json::json!("blue")));
+    }
+
+    #[test]
     fn controller_derives_editable_track_from_marker_track() {
         let mut state = AppControllerState::default();
         state.load_demo_project_state();
@@ -4224,6 +4258,24 @@ mod tests {
             .find(|marker| marker.id == "marker_edit_2")
             .unwrap();
         assert_eq!(marker.timestamp, 0.53);
+    }
+
+    #[test]
+    fn controller_snapped_single_marker_move_clamps_at_timeline_start() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.select_track_state("track_edit");
+        state.set_timeline_visible_track_range_state(2, 1);
+        state.toggle_marker_selection_state("marker_edit_2", false);
+
+        assert!(state.move_selected_markers_state(-0.75, false));
+        let marker = state
+            .project
+            .markers
+            .iter()
+            .find(|marker| marker.id == "marker_edit_2")
+            .unwrap();
+        assert_eq!(marker.timestamp, 0.0);
     }
 
     #[test]
