@@ -94,11 +94,14 @@ git commit -m "Spike CXX-Qt app shell"
 - Create: `crates/autolight-core/src/project.rs`
 - Create: `fixtures/projects/basic_graph.autolight`
 - Create: `fixtures/projects/tree_analysis.autolight`
+- Modify: `Cargo.toml`
 - Modify: `crates/autolight-qt/Cargo.toml`
 
 - [ ] **Step 1: Add project document structs**
 
 Implement Rust structs for `ProjectDocument`, `AudioAsset`, `Track`, `Marker`, `JobRun`, and `CacheEntry` using serde. Field names must match the current JSON keys.
+
+Update the root `Cargo.toml` workspace members so `crates/autolight-core` is included before any `cargo test -p autolight-core ...` command is documented or run.
 
 - [ ] **Step 2: Add fixture round-trip tests**
 
@@ -113,7 +116,7 @@ Represent metadata, provenance, transform params, and UI state as serde JSON map
 Run:
 
 ```bash
-cargo test -p autolight-core project --locked
+cargo test -p autolight-core --locked project
 ```
 
 Expected: fixture load and round-trip tests pass.
@@ -121,7 +124,7 @@ Expected: fixture load and round-trip tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/autolight-core fixtures/projects
+git add Cargo.toml crates/autolight-core fixtures/projects
 git commit -m "Port project schema to Rust"
 ```
 
@@ -154,9 +157,9 @@ Cover generated-track immutability, manual track provenance, atomic multi-marker
 Run:
 
 ```bash
-cargo test -p autolight-core graph --locked
-cargo test -p autolight-core markers --locked
-cargo test -p autolight-core history --locked
+cargo test -p autolight-core --locked graph
+cargo test -p autolight-core --locked markers
+cargo test -p autolight-core --locked history
 ```
 
 Expected: graph, marker, and history tests pass.
@@ -200,7 +203,8 @@ Cover progress updates, cancellation before and during work, failed transforms p
 Run:
 
 ```bash
-cargo test -p autolight-core cache transforms --locked
+cargo test -p autolight-core --locked cache
+cargo test -p autolight-core --locked transforms
 cargo test -p autolight-jobs --locked
 ```
 
@@ -245,7 +249,7 @@ Run:
 
 ```bash
 cargo test -p autolight-analysis --locked
-cargo test -p autolight-core transforms --locked
+cargo test -p autolight-core --locked transforms
 ```
 
 Expected: analysis and transform tests pass.

@@ -18,6 +18,8 @@ Use `docs/ROADMAP.md` only when `docs/NOW.md` is complete, blocked, or stale. Us
 
 ## Legacy Python App
 
+The Python/PySide6 app is the current runnable implementation and the parity reference for the Rust/CXX-Qt port. Use the commands below to run or verify that reference app while the Rust version is being built.
+
 ## Run
 
 ```bash

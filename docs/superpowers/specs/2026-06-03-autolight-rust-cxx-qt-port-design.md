@@ -76,7 +76,7 @@ Each slice should include tests that compare Rust behavior to explicit expected 
 
 Rust must read existing `.autolight` JSON files with schema version 1. It should preserve unknown optional `ui_state`, `metadata`, and provenance keys when saving. Cache references remain paths recorded in project documents plus artifact payloads on disk.
 
-Artifact kinds remain stable:
+Transform output schemas remain stable:
 
 - `artifact.waveform.v1`
 - `artifact.audio.v1`
@@ -84,6 +84,16 @@ Artifact kinds remain stable:
 - `artifact.energy.v1`
 - `artifact.harmonic-color.v1`
 - generated marker outputs using `markers.v1`
+
+Cache artifact kinds remain stable and separate from output schemas:
+
+- `waveform`
+- `audio`
+- `stem`
+- `beat-grid`
+- `energy`
+- `harmonic-color`
+- `markers`
 
 Cache corruption handling remains recoverable: missing or invalid artifacts mark affected generated tracks stale and preserve visible markers plus editable descendants.
 

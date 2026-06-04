@@ -19,6 +19,7 @@ Updated: 2026-06-03
 - `crates/autolight-qt/src/app_controller.rs`
 - `crates/autolight-app/Cargo.toml`
 - `crates/autolight-app/src/main.rs`
+- `Cargo.lock`
 - `UI/Main.qml` only if a minimal import or context adapter is required
 - `README.md` only for new Rust smoke/run commands if the spike works
 
@@ -37,9 +38,11 @@ Build the smallest useful spike:
 - A Cargo workspace exists.
 - `autolight-app` starts a Qt application.
 - `autolight-qt` registers or exposes a minimal Rust-backed controller.
-- The controller exposes at least `projectName`, `lastError`, and `newProject()`.
+- The controller exposes `projectName`, `lastError`, and `newProject()`.
+- Any other controller properties, child objects, or models read during `UI/Main.qml` startup are stubbed with inert values so the existing QML shell can load without runtime binding errors.
 - The Rust binary supports `--smoke`.
 - Offscreen smoke proves the QML root loads and can observe at least one Rust controller value.
+- `Cargo.lock` is created and committed before locked Cargo verification is required.
 
 Do not port project schema, jobs, transforms, timeline models, or analysis in this batch.
 
@@ -49,6 +52,7 @@ Run the commands that exist after the spike is implemented:
 
 ```bash
 cargo fmt --all -- --check
+cargo generate-lockfile
 cargo test --workspace --locked
 QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
 git diff --check
