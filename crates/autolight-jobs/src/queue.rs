@@ -325,6 +325,11 @@ impl LocalJobQueue {
         let Some(job_id) = self.pending_job_ids.pop_front() else {
             return Ok(None);
         };
+        if pending_track_is_stale(project, &job_id)? {
+            self.cancel_requests.remove(&job_id);
+            self.complete_stale_run(project, &job_id, "track changed before job started")?;
+            return Ok(Some(job_id));
+        }
         self.start_job(project, &job_id)?;
         if self.cancel_requests.remove(&job_id) {
             self.complete_cancelled(project, &job_id, "cancelled")?;
@@ -725,6 +730,13 @@ fn track_changed_since_submit(
     Ok(track.dependency_hash != parameters_hash || track.result_state == ResultState::Stale)
 }
 
+fn pending_track_is_stale(project: &ProjectDocument, job_id: &str) -> Result<bool, JobQueueError> {
+    let run = run_snapshot(project, job_id)?;
+    let track = find_track(project, &run.track_id)
+        .ok_or_else(|| JobQueueError::TrackNotFound(run.track_id.clone()))?;
+    Ok(track.result_state == ResultState::Stale)
+}
+
 fn job_run_index(project: &ProjectDocument, job_id: &str) -> Result<usize, JobQueueError> {
     project
         .job_runs
@@ -812,6 +824,7 @@ fn cache_artifact_temp_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use autolight_core::cache::track_dependency_hash;
+    use autolight_core::graph::mark_dependents_stale;
     use autolight_core::project::{AudioAsset, CacheEntry, Track};
     use serde_json::{json, Value};
 
@@ -898,6 +911,28 @@ mod tests {
             ResultState::Failed
         );
         assert!(project.cache_entries.is_empty());
+        assert!(track_by_id(&project, "track_generated")
+            .cache_refs
+            .is_empty());
+    }
+
+    #[test]
+    fn jobs_preserve_stale_pending_track_before_runner_starts() {
+        let mut project = project_with_generated_track("test.noop");
+        let mut queue =
+            LocalJobQueue::with_clock(registry_with_noop("test.noop"), deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_generated").unwrap();
+        mark_dependents_stale(&mut project, "track_source", "input changed");
+
+        assert_eq!(queue.run_next(&mut project).unwrap(), Some(job_id.clone()));
+
+        assert_eq!(job_state(&project, &job_id), ResultState::Stale);
+        assert_eq!(track_state(&project, "track_generated"), ResultState::Stale);
+        assert!(run_by_id(&project, &job_id)
+            .error
+            .contains("track changed before job started"));
+        assert!(project.markers.is_empty());
         assert!(track_by_id(&project, "track_generated")
             .cache_refs
             .is_empty());
