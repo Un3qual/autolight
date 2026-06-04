@@ -341,7 +341,7 @@ pub fn timeline_rows_for_project_with_state(
                 marker_spans: marker_spans_for_track(&context, &track.id, selected_marker_ids),
                 error: track.error.clone(),
                 active_job_id: latest_job
-                    .filter(|job| job.state == ResultState::Running)
+                    .filter(|job| matches!(job.state, ResultState::Pending | ResultState::Running))
                     .map(|job| job.id.clone())
                     .unwrap_or_default(),
                 job_state: latest_job
@@ -904,7 +904,7 @@ mod tests {
     };
     use autolight_core::graph::default_expanded_track_ids;
     use autolight_core::project::{
-        CacheValidationStatus, ImportStatus, ProjectDocument, ResultState,
+        CacheValidationStatus, ImportStatus, JobRun, JsonObject, ProjectDocument, ResultState,
     };
 
     fn fixture_path(name: &str) -> PathBuf {
@@ -956,6 +956,40 @@ mod tests {
         assert!(energy.active_job_id.is_empty());
         assert!(energy.job_state.is_empty());
         assert_eq!(energy.visible_energy_samples.len(), 2);
+    }
+
+    #[test]
+    fn timeline_rows_mark_pending_jobs_active_for_polling() {
+        let mut project = rust_demo_project();
+        project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_waveform")
+            .unwrap()
+            .result_state = ResultState::Pending;
+        project.job_runs.push(JobRun {
+            id: "job_pending".to_string(),
+            track_id: "track_waveform".to_string(),
+            transform_id: "waveform.summary".to_string(),
+            transform_version: "1".to_string(),
+            parameters_hash: "hash".to_string(),
+            parameters: JsonObject::default(),
+            state: ResultState::Pending,
+            progress: 0.0,
+            started_at: String::default(),
+            completed_at: String::default(),
+            error: String::default(),
+            produced_cache_refs: Vec::default(),
+        });
+
+        let rows = timeline_rows_for_project(&project);
+        let waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+
+        assert_eq!(waveform.active_job_id, "job_pending");
+        assert_eq!(waveform.job_state, "pending");
     }
 
     #[test]

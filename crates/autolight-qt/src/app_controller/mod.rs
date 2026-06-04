@@ -1,5 +1,6 @@
 use core::pin::Pin;
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,7 +51,7 @@ use markers::{
 use playback_controller::PlaybackControllerState;
 use project_io::{
     audio_asset_load_error, audio_asset_project_dir_relink_path, cache_entry_is_valid,
-    current_project_dir, path_from_qml, with_autolight_suffix,
+    cache_entry_path_is_safe, current_project_dir, path_from_qml, with_autolight_suffix,
 };
 use project_state::{
     clear_waveform_provenance, dependency_hash_for_new_track, expanded_track_ids_from_project,
@@ -288,10 +289,53 @@ impl AppControllerState {
     }
 
     fn reset_job_runtime_state(&mut self) {
-        self.job_workers.clear();
+        let active_job_ids = self
+            .job_workers
+            .iter()
+            .map(|worker| worker.job_id().to_string())
+            .collect::<Vec<_>>();
+        for job_id in &active_job_ids {
+            let _ = self.job_queue.cancel(job_id);
+        }
+        let mut join_error = None;
+        for worker in self.job_workers.drain(..) {
+            if let Err(error) = worker.join() {
+                join_error = Some(error);
+            }
+        }
+        if let Some(error) = join_error {
+            self.last_error = QString::from(error);
+        }
+        self.cancel_project_runs_for_reset(&active_job_ids);
         self.job_queue = LocalJobQueue::new(job_registry());
         if let Ok(mut progress) = self.job_progress.lock() {
             progress.clear();
+        }
+    }
+
+    fn cancel_project_runs_for_reset(&mut self, job_ids: &[String]) {
+        let error = "job cancelled because project runtime reset";
+        let mut affected_track_ids = Vec::new();
+        for run in &mut self.project.job_runs {
+            if job_ids.contains(&run.id)
+                && matches!(run.state, ResultState::Pending | ResultState::Running)
+            {
+                run.state = ResultState::Cancelled;
+                run.progress = 1.0;
+                run.error = error.to_string();
+                affected_track_ids.push(run.track_id.clone());
+            }
+        }
+        for track_id in affected_track_ids {
+            if let Some(track) = self
+                .project
+                .tracks
+                .iter_mut()
+                .find(|track| track.id == track_id)
+            {
+                track.result_state = ResultState::Cancelled;
+                track.error = error.to_string();
+            }
         }
     }
 
@@ -540,12 +584,24 @@ impl AppControllerState {
         else {
             return;
         };
-        if self.project.tracks[current_track_index].dependency_hash
+        let current_track_state = self.project.tracks[current_track_index].result_state;
+        let current_run_state = self.project.job_runs[current_run_index].state;
+        let track_changed = self.project.tracks[current_track_index].dependency_hash
             != result.job_run.parameters_hash
-        {
+            || !matches!(
+                current_track_state,
+                ResultState::Pending | ResultState::Running
+            )
+            || !matches!(
+                current_run_state,
+                ResultState::Pending | ResultState::Running
+            );
+        if track_changed {
             self.project.job_runs[current_run_index].state = ResultState::Stale;
-            self.project.job_runs[current_run_index].error =
-                "track changed before async job committed".to_string();
+            if self.project.job_runs[current_run_index].error.is_empty() {
+                self.project.job_runs[current_run_index].error =
+                    "track changed before async job committed".to_string();
+            }
             return;
         }
 
@@ -597,6 +653,12 @@ impl AppControllerState {
         if !spec.is_audio_input() {
             return Ok(JsonObject::default());
         }
+        if let Some(path) = self.audio_artifact_path_for_track_run(track)? {
+            return Ok(json_object([(
+                "audio_path",
+                json!(path.to_string_lossy().to_string()),
+            )]));
+        }
         let Some(asset) = self.source_audio_asset_for_track_id(track_id) else {
             return Err("input track has no source audio".to_string());
         };
@@ -604,6 +666,64 @@ impl AppControllerState {
             return Err(format!("source audio is {}", asset.import_status));
         }
         Ok(json_object([("audio_path", json!(asset.path.clone()))]))
+    }
+
+    fn audio_artifact_path_for_track_run(&self, track: &Track) -> Result<Option<PathBuf>, String> {
+        let Some(artifact_dir) = self.current_artifact_dir() else {
+            if track.input_track_ids.iter().any(|parent_track_id| {
+                find_track(&self.project, parent_track_id).is_some_and(|parent| {
+                    parent.cache_refs.iter().any(|cache_ref| {
+                        self.project.cache_entries.iter().any(|entry| {
+                            entry.id == *cache_ref
+                                && entry.validation_status == CacheValidationStatus::Valid
+                                && matches!(entry.artifact_kind.as_str(), "audio" | "stem")
+                        })
+                    })
+                })
+            }) {
+                return Err(
+                    "project path is required before running audio artifact transform".to_string(),
+                );
+            }
+            return Ok(None);
+        };
+        let mut missing_artifact = None;
+        for parent_track_id in &track.input_track_ids {
+            let Some(parent) = find_track(&self.project, parent_track_id) else {
+                continue;
+            };
+            if parent.result_state != ResultState::Complete {
+                continue;
+            }
+            for cache_ref in &parent.cache_refs {
+                let Some(entry) = self
+                    .project
+                    .cache_entries
+                    .iter()
+                    .find(|entry| entry.id == *cache_ref)
+                else {
+                    continue;
+                };
+                if entry.validation_status != CacheValidationStatus::Valid
+                    || !matches!(entry.artifact_kind.as_str(), "audio" | "stem")
+                {
+                    continue;
+                }
+                if !cache_entry_path_is_safe(Path::new(&entry.path)) {
+                    missing_artifact.get_or_insert_with(|| entry.path.clone());
+                    continue;
+                }
+                let artifact_path = artifact_dir.join(&entry.path);
+                if artifact_path.is_file() {
+                    return Ok(Some(artifact_path));
+                }
+                missing_artifact.get_or_insert_with(|| artifact_path.display().to_string());
+            }
+        }
+        if let Some(path) = missing_artifact {
+            return Err(format!("audio artifact missing: {path}"));
+        }
+        Ok(None)
     }
 
     fn refresh_waveform_track_provenance(
@@ -724,9 +844,16 @@ impl AppControllerState {
 
     fn validate_cache_artifact_state(&mut self) -> Vec<String> {
         let project_dir = current_project_dir(&self.project_path.to_string());
+        self.validate_cache_artifact_state_with_dir(project_dir.as_deref())
+    }
+
+    fn validate_cache_artifact_state_with_dir(
+        &mut self,
+        project_dir: Option<&Path>,
+    ) -> Vec<String> {
         self.job_queue
             .refresh_cache_validity(&mut self.project, |entry| {
-                cache_entry_is_valid(entry, project_dir.as_deref())
+                cache_entry_is_valid(entry, project_dir)
             })
     }
 
@@ -782,6 +909,22 @@ impl AppControllerState {
         };
         let project_path = with_autolight_suffix(project_path);
         self.capture_timeline_ui_state();
+        let old_artifact_dir = self.current_artifact_dir();
+        let new_artifact_dir = project_path.parent().map(Path::to_path_buf);
+        let save_as_moves_artifacts = old_artifact_dir
+            .as_deref()
+            .zip(new_artifact_dir.as_deref())
+            .is_some_and(|(old, new)| old != new);
+        if save_as_moves_artifacts {
+            self.validate_cache_artifact_state_with_dir(old_artifact_dir.as_deref());
+            if let Err(error) = self.copy_cache_artifacts_for_save_as(
+                old_artifact_dir.as_deref(),
+                new_artifact_dir.as_deref(),
+            ) {
+                self.set_error(error);
+                return false;
+            }
+        }
         if let Err(error) = self.project.save_path(&project_path) {
             self.set_error(error.to_string());
             return false;
@@ -791,6 +934,55 @@ impl AppControllerState {
         self.last_error = QString::default();
         self.refresh_view_state();
         true
+    }
+
+    fn copy_cache_artifacts_for_save_as(
+        &self,
+        old_artifact_dir: Option<&Path>,
+        new_artifact_dir: Option<&Path>,
+    ) -> Result<(), String> {
+        let (Some(old_artifact_dir), Some(new_artifact_dir)) = (old_artifact_dir, new_artifact_dir)
+        else {
+            return Ok(());
+        };
+        if old_artifact_dir == new_artifact_dir {
+            return Ok(());
+        }
+        for entry in self
+            .project
+            .cache_entries
+            .iter()
+            .filter(|entry| entry.validation_status == CacheValidationStatus::Valid)
+        {
+            let relative_path = Path::new(&entry.path);
+            if !cache_entry_path_is_safe(relative_path) {
+                continue;
+            }
+            let source = old_artifact_dir.join(relative_path);
+            if !source.is_file() {
+                continue;
+            }
+            let destination = new_artifact_dir.join(relative_path);
+            if let Some(parent) = destination
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent).map_err(|error| {
+                    format!(
+                        "failed to create cache artifact directory {}: {error}",
+                        parent.display()
+                    )
+                })?;
+            }
+            fs::copy(&source, &destination).map_err(|error| {
+                format!(
+                    "failed to copy cache artifact {} to {}: {error}",
+                    source.display(),
+                    destination.display()
+                )
+            })?;
+        }
+        Ok(())
     }
 
     fn import_audio_state(&mut self, path: &str) -> String {

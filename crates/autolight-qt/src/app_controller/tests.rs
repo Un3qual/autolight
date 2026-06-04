@@ -1,9 +1,12 @@
 use serde_json::Value;
 
+use super::job_worker::JobWorkerResult;
 use super::project_io::cache_entry_path_is_safe;
 use super::{path_from_qml, AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
 use autolight_core::cache::cache_entry_for_bytes;
-use autolight_core::project::{CacheValidationStatus, ImportStatus, ResultState, TrackType};
+use autolight_core::project::{
+    CacheValidationStatus, ImportStatus, JobRun, ResultState, Track, TrackType,
+};
 use autolight_core::transforms::TransformSpec;
 use autolight_jobs::queue::{JobRegistry, LocalJobQueue, ProducedMarker, TransformResult};
 
@@ -184,6 +187,135 @@ fn controller_submit_track_returns_before_worker_poll_commits_job() {
 }
 
 #[test]
+fn controller_async_worker_merge_preserves_current_stale_track_with_same_dependency_hash() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let track_index = state
+        .project
+        .tracks
+        .iter()
+        .position(|track| track.id == "track_beats")
+        .unwrap();
+    state.project.tracks[track_index].dependency_hash = "same-hash".to_string();
+    state.project.tracks[track_index].result_state = ResultState::Stale;
+    state.project.tracks[track_index].error = "input changed".to_string();
+    state.project.job_runs.push(JobRun {
+        id: "job_async".to_string(),
+        track_id: "track_beats".to_string(),
+        transform_id: "markers.fixed_interval".to_string(),
+        transform_version: "1".to_string(),
+        parameters_hash: "same-hash".to_string(),
+        parameters: serde_json::Map::default(),
+        state: ResultState::Pending,
+        progress: 0.0,
+        started_at: String::default(),
+        completed_at: String::default(),
+        error: String::default(),
+        produced_cache_refs: Vec::default(),
+    });
+    let mut completed_track = state.project.tracks[track_index].clone();
+    completed_track.result_state = ResultState::Complete;
+    completed_track.error.clear();
+    let original_marker_ids = state
+        .project
+        .markers
+        .iter()
+        .filter(|marker| marker.track_id == "track_beats")
+        .map(|marker| marker.id.clone())
+        .collect::<Vec<_>>();
+
+    state.merge_job_worker_result(JobWorkerResult {
+        job_id: "job_async".to_string(),
+        track_id: "track_beats".to_string(),
+        track: completed_track,
+        job_run: JobRun {
+            id: "job_async".to_string(),
+            track_id: "track_beats".to_string(),
+            transform_id: "markers.fixed_interval".to_string(),
+            transform_version: "1".to_string(),
+            parameters_hash: "same-hash".to_string(),
+            parameters: serde_json::Map::default(),
+            state: ResultState::Complete,
+            progress: 1.0,
+            started_at: String::default(),
+            completed_at: String::default(),
+            error: String::default(),
+            produced_cache_refs: Vec::default(),
+        },
+        markers: Vec::default(),
+        cache_entries: Vec::default(),
+        artifact_dir: None,
+        error: None,
+    });
+
+    let track = state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_beats")
+        .unwrap();
+    assert_eq!(track.result_state, ResultState::Stale);
+    assert_eq!(track.error, "input changed");
+    assert_eq!(
+        state
+            .project
+            .job_runs
+            .iter()
+            .find(|run| run.id == "job_async")
+            .unwrap()
+            .state,
+        ResultState::Stale
+    );
+    assert_eq!(
+        state
+            .project
+            .markers
+            .iter()
+            .filter(|marker| marker.track_id == "track_beats")
+            .map(|marker| marker.id.clone())
+            .collect::<Vec<_>>(),
+        original_marker_ids
+    );
+}
+
+#[test]
+fn controller_reset_cancels_and_drains_running_workers() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let track_id = state.add_transform_track_state(
+        "track_source",
+        "markers.fixed_interval",
+        "1",
+        r#"{"duration": 99.0, "interval": 0.001}"#,
+    );
+    let job_id = state.submit_track_state(&track_id);
+
+    state.reset_job_runtime_state();
+
+    assert!(state.job_workers.is_empty());
+    assert_eq!(
+        state
+            .project
+            .job_runs
+            .iter()
+            .find(|run| run.id == job_id)
+            .unwrap()
+            .state,
+        ResultState::Cancelled
+    );
+    assert_eq!(
+        state
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap()
+            .result_state,
+        ResultState::Cancelled
+    );
+}
+
+#[test]
 fn controller_run_waveform_summary_completes_with_visible_waveform() {
     let root = test_dir("unsupported-transform");
     let project_path = root.join("show.autolight");
@@ -248,6 +380,61 @@ fn controller_run_waveform_summary_completes_with_visible_waveform() {
     let row = rows.iter().find(|row| row["trackId"] == track_id).unwrap();
     assert!(!row["waveformLevels"].as_array().unwrap().is_empty());
     assert!(row.get("visibleWaveformSamples").is_none());
+}
+
+#[test]
+fn controller_waveform_summary_uses_parent_audio_artifact_path_for_generated_parent() {
+    let root = test_dir("waveform-parent-audio-artifact");
+    let project_path = root.join("show.autolight");
+    let source_path = root.join("source.wav");
+    let stem_payload_path = root.join("stem-source.wav");
+    write_test_wav(&source_path, 8_000, 1, 8_000);
+    write_test_wav(&stem_payload_path, 8_000, 1, 4_000);
+    let stem_payload = std::fs::read(&stem_payload_path).unwrap();
+    let mut stem_entry =
+        cache_entry_for_bytes("stem", "stem-hash", &stem_payload, "1", "test").unwrap();
+    let stem_artifact_path = root.join(&stem_entry.path);
+    std::fs::create_dir_all(stem_artifact_path.parent().unwrap()).unwrap();
+    std::fs::write(&stem_artifact_path, &stem_payload).unwrap();
+    let mut state = AppControllerState {
+        project_path: cxx_qt_lib::QString::from(project_path.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    let source_track_id = state.import_audio_state(source_path.to_str().unwrap());
+    stem_entry.validation_status = CacheValidationStatus::Valid;
+    let stem_cache_ref = stem_entry.id.clone();
+    state.project.cache_entries.push(stem_entry);
+    state.project.tracks.push(Track {
+        id: "track_stem".to_string(),
+        track_type: TrackType::Generated,
+        name: "Stem".to_string(),
+        input_track_ids: vec![source_track_id],
+        transform_id: "test.stem".to_string(),
+        transform_params: serde_json::Map::default(),
+        transform_version: "1".to_string(),
+        output_schema: "artifact.stem.v1".to_string(),
+        dependency_hash: "stem-hash".to_string(),
+        result_state: ResultState::Complete,
+        cache_refs: vec![stem_cache_ref],
+        provenance: serde_json::Map::default(),
+        error: String::default(),
+    });
+    let waveform_track_id =
+        state.add_transform_track_state("track_stem", "waveform.summary", "1", r#"{"buckets": 4}"#);
+
+    let job_id = state.run_track_state(&waveform_track_id);
+
+    assert!(!job_id.is_empty());
+    let run = state
+        .project
+        .job_runs
+        .iter()
+        .find(|run| run.id == job_id)
+        .unwrap();
+    assert_eq!(
+        run.parameters["audio_path"].as_str(),
+        Some(stem_artifact_path.to_string_lossy().as_ref())
+    );
 }
 
 #[test]
@@ -365,6 +552,69 @@ fn controller_run_track_persists_artifact_payloads_in_project_directory() {
     assert_eq!(
         std::fs::read(root.join(&entry.path)).unwrap(),
         b"cached stem"
+    );
+}
+
+#[test]
+fn controller_save_as_copies_cache_artifacts_to_new_project_directory() {
+    let root = test_dir("controller-save-as-cache-copy");
+    let source_path = root.join("source").join("show.autolight");
+    let saved_path = root.join("copy").join("show-copy.autolight");
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state.project_path = cxx_qt_lib::QString::from(source_path.to_string_lossy().to_string());
+    let spec = TransformSpec::new(
+        "test.artifact",
+        "1",
+        "Artifact",
+        "audio-or-markers.v1",
+        "artifact.stem.v1",
+        "light",
+    );
+    state.transform_registry.register(spec.clone()).unwrap();
+    let mut registry = JobRegistry::new();
+    registry
+        .register(spec, |_context, _params| {
+            Ok(TransformResult::artifact("stem", b"cached stem"))
+        })
+        .unwrap();
+    state.job_queue = LocalJobQueue::new(registry);
+    let track_id = state.add_transform_track_state("track_source", "test.artifact", "1", "{}");
+    assert!(!state.run_track_state(&track_id).is_empty());
+    let entry_path = state
+        .project
+        .cache_entries
+        .iter()
+        .find(|entry| {
+            state
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id)
+                .unwrap()
+                .cache_refs
+                .contains(&entry.id)
+        })
+        .unwrap()
+        .path
+        .clone();
+
+    assert!(state.save_project_state(saved_path.to_str().unwrap()));
+
+    let copied_artifact = saved_path.parent().unwrap().join(&entry_path);
+    assert_eq!(std::fs::read(&copied_artifact).unwrap(), b"cached stem");
+
+    let mut reopened = AppControllerState::default();
+    assert!(reopened.open_project_state(saved_path.to_str().unwrap()));
+    assert_eq!(
+        reopened
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap()
+            .result_state,
+        ResultState::Complete
     );
 }
 
@@ -1568,6 +1818,22 @@ fn controller_snap_uses_visible_generated_timing_rows_only() {
 
     state.set_timeline_visible_track_range_state(1, 1);
     assert_eq!(state.snap_timeline_time_state(0.53, false), 0.5);
+}
+
+#[test]
+fn controller_snap_excludes_stale_generated_timing_rows() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_beats")
+        .unwrap()
+        .result_state = ResultState::Stale;
+    state.set_timeline_visible_track_range_state(1, 1);
+
+    assert_eq!(state.snap_timeline_time_state(0.53, false), 0.53);
 }
 
 #[test]

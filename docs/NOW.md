@@ -2,26 +2,35 @@
 
 Updated: 2026-06-04
 
-## Active Batch: Rust Port Review Hardening
+## Active Batch: Rust Port PR Bot Follow-through
 
 **Status:** complete
 
-**Goal:** Fix every issue from the 2026-06-04 Rust-port expert review: async job execution, targeted bridge updates, packaged QML assets, supported transform availability, controller/service boundaries, waveform fallback semantics, typed contracts, cache path policy, and brittle test/lint posture.
+**Goal:** Pull new and unresolved PR #13 code-review-bot comments, including duplicate and outside-diff threads, fix valid Rust/QML issues, push the branch, refresh review state, and reply where needed.
 
 ## Batch Plan
 
-1. Add failing tests for the concrete review regressions.
-2. Package or embed QML assets so the app is not tied to the source checkout.
-3. Hide unsupported transforms from the primary Rust UI and remove the vocals shortcut.
-4. Align cache-artifact read validation with the relative-only write policy.
-5. Remove legacy fallback waveform slices from QML painting and keep a single level representation.
-6. Split playback/viewport qproperty updates away from full model JSON updates.
-7. Add a real background job worker/polling path so `runTrack` returns after submission.
-8. Introduce typed schema/status/artifact contracts where they replace raw string decisions.
-9. Replace brittle source-shape tests with behavior/contract tests, add crate docs and workspace lint posture.
-10. Run focused tests, workspace tests, clippy, formatting, smoke, and `git diff --check`.
+1. Refresh PR #13 review-thread state with thread-aware GitHub GraphQL, not flat comments only.
+2. Triage current unresolved bot comments plus duplicate/outside-diff review summaries.
+3. Fix valid runtime issues: pending async polling, stale async merge, reset cancellation, Save As cache artifacts, generated-parent audio artifacts, stale snap guides, and small Rust nits.
+4. Leave already-fixed stale QML comments and duplicate Windows-save feedback with evidence.
+5. Run workspace tests, clippy, formatting, smoke, and `git diff --check`.
+6. Push and refresh PR thread state again, then reply in-thread where needed.
 
 ## Completion Update
+
+- 2026-06-04: Addressed new PR #13 bot-review follow-up findings from CodeRabbit, DeepSource, and Codex.
+- Root cause: the async worker path still exposed several edge cases after the hardening batch: non-selected pending worker jobs were invisible to the QML poll timer, stale current tracks could be overwritten by completed worker results with the same dependency hash, New/Open/Demo dropped worker handles without cancellation, Save As moved the project directory without copying relative cache artifacts, generated-audio parents fell back to the source WAV at runtime, stale timing tracks were still snap guides, and minor Rust review nits remained in job cancellation/project save code.
+- Changes made: timeline rows now expose pending jobs as active for polling; async worker merge now commits only into still-active current runs/tracks; runtime reset cancels and drains workers before replacing the queue; Save As validates/copies valid relative cache artifacts into the new project directory before saving; audio-input transforms prefer valid immediate-parent `audio`/`stem` artifacts and fail on missing artifact files instead of silently using the source WAV; snap guides now only use complete generated timing tracks; `TransformCancellationToken` uses `Default`, the legacy job-run version fallback is documented, and Windows project save retries rename after removing an existing destination.
+- Comments triaged without code changes: the stale `UI/RustAdapter.qml` CodeRabbit thread is already addressed because the file was replaced by `UI/AppRuntime.qml`, whose `select_track` refreshes selection and track rows; the duplicate CodeRabbit Windows-save note is addressed by the current `replace_project_file` Windows branch.
+- Next batch: none from this bot-review pass. Refresh PR comments after push and reply to the fixed/evidence threads.
+- Verification:
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked`: first failed after broadening cache validation to demo temp artifacts; passed after keeping normal refresh tied to saved project dirs and using a separate Save As validation source.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis`, 3 `autolight-app`, 44 `autolight-core`, 22 `autolight-jobs`, and 78 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `cargo fmt --all -- --check`: passed.
+  - `git diff --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt emitted non-fatal host audio/font warnings.
 
 - 2026-06-04: Completed the Rust-port expert-review hardening batch.
 - Root cause: the Rust runtime still had several transition-era seams after the port: QML assets loaded from the source checkout, unsupported built-in transform specs were exposed as runnable UI, cache artifact read validation accepted absolute paths while writes rejected them, waveform rows still serialized a legacy visible-slice fallback, playback/viewport invokables reapplied the full bridge payload, transform compatibility was driven by raw schema strings with a permissive unknown-schema fallback, audio/cache statuses were raw strings, and architecture tests still asserted file shape instead of behavior.

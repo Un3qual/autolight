@@ -146,10 +146,33 @@ fn atomic_save_temp_path(path: &Path) -> PathBuf {
 }
 
 fn replace_project_file(tmp_path: &Path, path: &Path) -> Result<(), ProjectError> {
-    fs::rename(tmp_path, path).map_err(|source| ProjectError::Write {
-        path: path.to_path_buf(),
-        source,
-    })
+    #[cfg(windows)]
+    {
+        match fs::rename(tmp_path, path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists && path.exists() => {
+                fs::remove_file(path).map_err(|source| ProjectError::Write {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                fs::rename(tmp_path, path).map_err(|source| ProjectError::Write {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+            Err(source) => Err(ProjectError::Write {
+                path: path.to_path_buf(),
+                source,
+            }),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(tmp_path, path).map_err(|source| ProjectError::Write {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
 }
 
 #[cfg(not(windows))]

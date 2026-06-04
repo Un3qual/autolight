@@ -70,10 +70,6 @@ pub struct TransformCancellationToken {
 }
 
 impl TransformCancellationToken {
-    fn new() -> Self {
-        Self::default()
-    }
-
     pub fn request_cancel(&self) {
         self.cancel_requested.store(true, Ordering::Relaxed);
     }
@@ -330,7 +326,7 @@ impl LocalJobQueue {
             produced_cache_refs: Vec::default(),
         });
         self.cancel_tokens
-            .insert(job_id.clone(), TransformCancellationToken::new());
+            .insert(job_id.clone(), TransformCancellationToken::default());
         self.pending_job_ids.push_back(job_id.clone());
         Ok(job_id)
     }
@@ -395,11 +391,7 @@ impl LocalJobQueue {
         let Some(job_id) = self.pending_job_ids.pop_front() else {
             return Ok(None);
         };
-        let token = self
-            .cancel_tokens
-            .get(&job_id)
-            .cloned()
-            .unwrap_or_else(TransformCancellationToken::new);
+        let token = self.cancel_tokens.get(&job_id).cloned().unwrap_or_default();
         let result =
             self.run_detached_job_with_artifact_dir(project, &job_id, artifact_dir, token, None);
         self.cancel_tokens.remove(&job_id);
@@ -697,6 +689,7 @@ fn run_snapshot(project: &ProjectDocument, job_id: &str) -> Result<RunSnapshot, 
     Ok(RunSnapshot {
         track_id: run.track_id.clone(),
         transform_id: run.transform_id.clone(),
+        // Legacy JobRun records did not persist this; new submissions freeze it at submit time.
         transform_version: if run.transform_version.is_empty() {
             track.transform_version.clone()
         } else {

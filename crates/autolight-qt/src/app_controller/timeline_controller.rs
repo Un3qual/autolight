@@ -316,12 +316,7 @@ impl AppControllerState {
             .iter()
             .filter(|track| visible_track_ids.contains(&track.id))
             .filter(|track| track.track_type == TrackType::Generated)
-            .filter(|track| {
-                matches!(
-                    track.result_state,
-                    ResultState::Complete | ResultState::Stale
-                )
-            })
+            .filter(|track| track.result_state == ResultState::Complete)
             .map(|track| track.id.clone())
             .collect()
     }
