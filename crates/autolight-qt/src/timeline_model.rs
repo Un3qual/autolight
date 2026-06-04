@@ -85,8 +85,8 @@ pub fn rust_demo_project() -> ProjectDocument {
             "markers.v1",
             "dep_beats",
             ResultState::Complete,
-            Vec::new(),
-            JsonObject::new(),
+            Vec::default(),
+            JsonObject::default(),
         ),
         editable_track(),
         generated_track(
@@ -148,7 +148,7 @@ pub fn rust_demo_project() -> ProjectDocument {
             "Beat",
             "timing",
             "cyan",
-            Vec::new(),
+            Vec::default(),
         ),
         marker(
             "marker_demo_2",
@@ -158,7 +158,7 @@ pub fn rust_demo_project() -> ProjectDocument {
             "Beat",
             "timing",
             "green",
-            Vec::new(),
+            Vec::default(),
         ),
         marker(
             "marker_demo_3",
@@ -168,7 +168,7 @@ pub fn rust_demo_project() -> ProjectDocument {
             "Beat",
             "timing",
             "blue",
-            Vec::new(),
+            Vec::default(),
         ),
         marker(
             "marker_edit_1",
@@ -240,7 +240,7 @@ pub fn timeline_rows_for_project_with_state(
                     .map(|job| job.state.as_str().to_string())
                     .unwrap_or_default(),
                 job_progress: latest_job.map_or(0.0, |job| job.progress),
-                waveform_samples: Vec::new(),
+                waveform_samples: Vec::default(),
                 cache_ref_count: track.cache_refs.len(),
                 artifact_kinds: artifact_kinds_for_track(project, track).join(", "),
                 waveform_duration_seconds: waveform_duration_seconds(track),
@@ -286,16 +286,16 @@ fn source_track() -> Track {
         id: "track_source".to_string(),
         track_type: TrackType::Source,
         name: "Rust Demo Source".to_string(),
-        input_track_ids: Vec::new(),
-        transform_id: String::new(),
-        transform_params: JsonObject::new(),
-        transform_version: String::new(),
-        output_schema: String::new(),
-        dependency_hash: String::new(),
+        input_track_ids: Vec::default(),
+        transform_id: String::default(),
+        transform_params: JsonObject::default(),
+        transform_version: String::default(),
+        output_schema: String::default(),
+        dependency_hash: String::default(),
         result_state: ResultState::Complete,
-        cache_refs: Vec::new(),
+        cache_refs: Vec::default(),
         provenance: json_object([("asset_id", json!("asset_demo"))]),
-        error: String::new(),
+        error: String::default(),
     }
 }
 
@@ -305,13 +305,13 @@ fn editable_track() -> Track {
         track_type: TrackType::Editable,
         name: "Editable Cues".to_string(),
         input_track_ids: vec!["track_beats".to_string()],
-        transform_id: String::new(),
-        transform_params: JsonObject::new(),
-        transform_version: String::new(),
-        output_schema: String::new(),
-        dependency_hash: String::new(),
+        transform_id: String::default(),
+        transform_params: JsonObject::default(),
+        transform_version: String::default(),
+        output_schema: String::default(),
+        dependency_hash: String::default(),
         result_state: ResultState::Complete,
-        cache_refs: Vec::new(),
+        cache_refs: Vec::default(),
         provenance: json_object([
             ("source_track_id", json!("track_beats")),
             (
@@ -319,7 +319,7 @@ fn editable_track() -> Track {
                 json!(["marker_demo_1", "marker_demo_2"]),
             ),
         ]),
-        error: String::new(),
+        error: String::default(),
     }
 }
 
@@ -341,14 +341,14 @@ fn generated_track(
         name: name.to_string(),
         input_track_ids: vec![parent_id.to_string()],
         transform_id: transform_id.to_string(),
-        transform_params: JsonObject::new(),
+        transform_params: JsonObject::default(),
         transform_version: "1".to_string(),
         output_schema: output_schema.to_string(),
         dependency_hash: dependency_hash.to_string(),
         result_state,
         cache_refs,
         provenance,
-        error: String::new(),
+        error: String::default(),
     }
 }
 
@@ -371,7 +371,7 @@ fn marker(
         label: label.to_string(),
         category: category.to_string(),
         confidence: Some(1.0),
-        tags: Vec::new(),
+        tags: Vec::default(),
         source_transform: "markers.fixed_interval".to_string(),
         source_marker_ids,
         metadata: json_object([("color", json!(color))]),
@@ -384,10 +384,10 @@ fn cache_entry(id: &str, artifact_kind: &str, path: &str) -> CacheEntry {
         dependency_hash: format!("dep_{artifact_kind}"),
         artifact_kind: artifact_kind.to_string(),
         path: path.to_string(),
-        created_at: String::new(),
+        created_at: String::default(),
         transform_version: "1".to_string(),
         size_bytes: 0,
-        payload_digest: String::new(),
+        payload_digest: String::default(),
         validation_status: "valid".to_string(),
     }
 }
@@ -436,10 +436,10 @@ fn waveform_duration_seconds(track: &Track) -> f64 {
 
 fn visible_waveform_samples(project: &ProjectDocument, track: &Track) -> Vec<Value> {
     if !track_has_valid_complete_artifact(project, track, "waveform") {
-        return Vec::new();
+        return Vec::default();
     }
     let Some(value) = track.provenance.get("visible_waveform") else {
-        return Vec::new();
+        return Vec::default();
     };
     let duration = waveform_duration_seconds(track)
         .max(source_audio_duration_seconds(project, track))
@@ -476,10 +476,10 @@ fn normalize_waveform_samples(samples: &[Value], duration: f64) -> Vec<Value> {
 
 fn normalize_waveform_min_max_arrays(value: &Value, duration: f64) -> Vec<Value> {
     let Some(min_values) = value.get("min").and_then(Value::as_array) else {
-        return Vec::new();
+        return Vec::default();
     };
     let Some(max_values) = value.get("max").and_then(Value::as_array) else {
-        return Vec::new();
+        return Vec::default();
     };
     let count = value
         .get("buckets")
@@ -589,19 +589,19 @@ fn visible_analysis_samples(project: &ProjectDocument, track: &Track, key: &str)
     let expected_kind = match key {
         "visible_energy" => "energy",
         "visible_harmonic_color" => "harmonic-color",
-        _ => return Vec::new(),
+        _ => return Vec::default(),
     };
     if !track_has_valid_complete_artifact(project, track, expected_kind) {
-        return Vec::new();
+        return Vec::default();
     }
     let Some(value) = track.provenance.get(key) else {
-        return Vec::new();
+        return Vec::default();
     };
     let duration = source_audio_duration_seconds(project, track);
     match key {
         "visible_energy" => normalize_energy_samples(value, duration),
         "visible_harmonic_color" => normalize_harmonic_color_samples(value, duration),
-        _ => Vec::new(),
+        _ => Vec::default(),
     }
 }
 
@@ -831,7 +831,9 @@ mod tests {
 
         let payload = timeline_rows_json_with_state(&project, &expanded, &selected).unwrap();
         let json_rows: Value = serde_json::from_str(&payload).unwrap();
-        assert_eq!(json_rows[2]["markerSpans"][0]["selected"], true);
+        assert!(json_rows[2]["markerSpans"][0]["selected"]
+            .as_bool()
+            .unwrap_or(false));
     }
 
     #[test]
@@ -842,7 +844,7 @@ mod tests {
         let first = &rows[0];
 
         assert_eq!(first["trackId"], "track_source");
-        assert_eq!(first["markerSpans"], Value::Array(Vec::new()));
+        assert_eq!(first["markerSpans"], Value::Array(Vec::default()));
         assert!(first.get("visibleEnergySamples").is_some());
         assert!(first.get("visibleHarmonicColorSamples").is_some());
         assert!(first.get("waveformDurationSeconds").is_some());

@@ -26,6 +26,24 @@ uv run python main.py
 
 ## Completion Update
 
+- 2026-06-04: Addressed the DeepSource Rust dashboard report for PR #13 at commit range `f5342af...e812b2a`.
+- Changes made: applied the safe `map_or`/`map_or_else`, `Default::default`, `clone_from`, and boolean assertion cleanups across the reported Rust files; refactored the Rust WAV inspector into focused header/chunk/format/metadata helpers while preserving hashed reads, odd-byte padding, supported encoding checks, and existing importer error strings; rejected the naive `f64::clamp` rewrite as non-mechanical for `NaN` scroll origins and added a regression before preserving `NaN` as a zero scroll origin.
+- Next batch: none. Push this DeepSource cleanup and refresh external PR checks; DeepSource/diffray dashboard state may lag GitHub-visible review threads.
+- Verification:
+  - `cargo test -p autolight-analysis --locked waveform_visible_samples_treats_nan_scroll_origin_as_zero`: first failed with a full-window `[0.0, ..., 9.0]` result under the naive `clamp` rewrite; passed after the explicit `NaN` guard.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_import_audio`: passed, 5 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_rows`: passed, 7 tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_open_project_relinks_audio_from_project_directory`: passed.
+  - `cargo test -p autolight-analysis --locked`: passed, 22 tests.
+  - `cargo test -p autolight-core --locked`: passed, 43 tests.
+  - `cargo test -p autolight-jobs --locked`: passed, 21 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed, including 22 `autolight-analysis` tests, 2 `autolight-app` tests, 43 `autolight-core` tests, 21 `autolight-jobs` tests, and 55 `autolight-qt` tests.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`: passed and printed `Rust smoke loaded UI/Main.qml with Autolight.Qt AppController`; Qt printed non-fatal audio-device and missing `Sans Serif` font alias warnings.
+  - `QT_QPA_PLATFORM=offscreen uv run python main.py --smoke`: first failed inside the sandbox because `uv` could not access `/Users/admin/.cache/uv`; rerun outside the sandbox passed. Qt multimedia channel warnings were non-fatal.
+  - `git diff --check`: passed.
+
 - 2026-06-04: Addressed four new unresolved Codex bot review threads on PR #13 after commit `41183f7`.
 - Changes made: forwarded QML `MediaPlayer` position ticks to the Rust controller so playback-follow keeps the playhead visible during normal playback; rejected present-but-nonnumeric `markers.fixed_interval` `duration` and `interval` params instead of silently defaulting them; marked opened projects dirty only when load-time audio/job/cache refreshes actually mutate the loaded project document; kept the existing Rust `std::fs::rename` save path unchanged after verifying the Windows replace-existing claim was incorrect.
 - Next batch: none. Push this follow-up, refresh GitHub review threads, reply/resolve the four current Codex bot comments, and report any newly surfaced bot comments or external check failures.

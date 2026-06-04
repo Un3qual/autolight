@@ -203,15 +203,15 @@ impl ProjectSnapshotCommand {
     }
 
     fn restore(project: &mut ProjectDocument, snapshot: &ProjectDocument) {
-        project.id = snapshot.id.clone();
-        project.name = snapshot.name.clone();
+        project.id.clone_from(&snapshot.id);
+        project.name.clone_from(&snapshot.name);
         project.schema_version = snapshot.schema_version;
-        project.audio_assets = snapshot.audio_assets.clone();
-        project.tracks = snapshot.tracks.clone();
-        project.markers = snapshot.markers.clone();
-        project.job_runs = snapshot.job_runs.clone();
-        project.cache_entries = snapshot.cache_entries.clone();
-        project.ui_state = snapshot.ui_state.clone();
+        project.audio_assets.clone_from(&snapshot.audio_assets);
+        project.tracks.clone_from(&snapshot.tracks);
+        project.markers.clone_from(&snapshot.markers);
+        project.job_runs.clone_from(&snapshot.job_runs);
+        project.cache_entries.clone_from(&snapshot.cache_entries);
+        project.ui_state.clone_from(&snapshot.ui_state);
     }
 }
 
@@ -234,8 +234,8 @@ pub struct EditHistory {
 impl EditHistory {
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: Vec::default(),
+            redo_stack: Vec::default(),
             clean_undo_depth: Some(0),
         }
     }
@@ -316,7 +316,11 @@ impl EditHistory {
 
 impl Default for EditHistory {
     fn default() -> Self {
-        Self::new()
+        Self {
+            undo_stack: Vec::default(),
+            redo_stack: Vec::default(),
+            clean_undo_depth: Some(0),
+        }
     }
 }
 
@@ -339,7 +343,7 @@ fn restore_dependent_states(project: &mut ProjectDocument, snapshots: &[Dependen
             .iter()
             .position(|track| track.id == snapshot.track.id)
         {
-            project.tracks[index] = snapshot.track.clone();
+            project.tracks[index].clone_from(&snapshot.track);
         } else {
             project.tracks.insert(insert_at, snapshot.track.clone());
         }
@@ -390,8 +394,8 @@ mod tests {
             track_id: "track_edit".to_string(),
             before,
             after,
-            before_dependents: Vec::new(),
-            after_dependents: Vec::new(),
+            before_dependents: Vec::default(),
+            after_dependents: Vec::default(),
         });
 
         assert!(history.undo(&mut project).unwrap());
@@ -412,7 +416,7 @@ mod tests {
         project.tracks.retain(|track| track.id != "track_edit");
         let command = MarkerSnapshotCommand {
             track_id: "track_edit".to_string(),
-            before: Vec::new(),
+            before: Vec::default(),
             after: vec![Marker {
                 id: "marker_orphan".to_string(),
                 track_id: "track_edit".to_string(),
@@ -421,13 +425,13 @@ mod tests {
                 label: "Cue".to_string(),
                 category: "cue".to_string(),
                 confidence: None,
-                tags: Vec::new(),
-                source_transform: String::new(),
-                source_marker_ids: Vec::new(),
-                metadata: JsonObject::new(),
+                tags: Vec::default(),
+                source_transform: String::default(),
+                source_marker_ids: Vec::default(),
+                metadata: JsonObject::default(),
             }],
-            before_dependents: Vec::new(),
-            after_dependents: Vec::new(),
+            before_dependents: Vec::default(),
+            after_dependents: Vec::default(),
         };
 
         let error = command.redo(&mut project).unwrap_err();
@@ -454,10 +458,10 @@ mod tests {
                 .iter()
                 .position(|track| track.id == manual.id)
                 .unwrap(),
-            before_markers: Vec::new(),
-            after_markers: Vec::new(),
-            before_job_runs: Vec::new(),
-            after_job_runs: Vec::new(),
+            before_markers: Vec::default(),
+            after_markers: Vec::default(),
+            before_job_runs: Vec::default(),
+            after_job_runs: Vec::default(),
         });
         project.tracks.push(generated_track(
             "track_downstream",
@@ -488,19 +492,19 @@ mod tests {
         let mut history = EditHistory::new();
         history.push(MarkerSnapshotCommand {
             track_id: "track_edit".to_string(),
-            before: Vec::new(),
+            before: Vec::default(),
             after: vec![marker.clone()],
-            before_dependents: Vec::new(),
-            after_dependents: Vec::new(),
+            before_dependents: Vec::default(),
+            after_dependents: Vec::default(),
         });
         history.undo(&mut project).unwrap();
 
         history.push(MarkerSnapshotCommand {
             track_id: "track_edit".to_string(),
-            before: Vec::new(),
+            before: Vec::default(),
             after: vec![marker],
-            before_dependents: Vec::new(),
-            after_dependents: Vec::new(),
+            before_dependents: Vec::default(),
+            after_dependents: Vec::default(),
         });
 
         assert!(!history.can_redo());
@@ -566,22 +570,22 @@ mod tests {
             channels: 2,
             fingerprint: "fingerprint".to_string(),
             import_status: "online".to_string(),
-            relink_hint: String::new(),
+            relink_hint: String::default(),
         });
         project.tracks.push(Track {
             id: "track_source".to_string(),
             track_type: TrackType::Source,
             name: "Source".to_string(),
-            input_track_ids: Vec::new(),
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            input_track_ids: Vec::default(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: object(json!({ "asset_id": "asset_source" })),
-            error: String::new(),
+            error: String::default(),
         });
         project
     }
@@ -593,14 +597,14 @@ mod tests {
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
             transform_id: "markers.fixed_interval".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: "markers.v1".to_string(),
             dependency_hash: format!("dep_{id}"),
             result_state,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -610,15 +614,15 @@ mod tests {
             track_type: TrackType::Editable,
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: object(json!({ "source_track_id": parent_id })),
-            error: String::new(),
+            error: String::default(),
         }
     }
 

@@ -385,7 +385,12 @@ mod tests {
     fn transforms_audio_parent_compatibility_accepts_source_or_audio_artifact_context() {
         let mut project = project_with_source();
         project.tracks.extend([
-            generated_track("track_markers", "track_source", "markers.v1", Vec::new()),
+            generated_track(
+                "track_markers",
+                "track_source",
+                "markers.v1",
+                Vec::default(),
+            ),
             generated_track(
                 "track_stem",
                 "track_source",
@@ -413,7 +418,7 @@ mod tests {
             "track_stale_markers",
             "track_source",
             "markers.v1",
-            Vec::new(),
+            Vec::default(),
         ));
         project.tracks[1].result_state = ResultState::Stale;
         let registry = TransformRegistry::with_builtin_transforms();
@@ -444,22 +449,22 @@ mod tests {
             channels: 2,
             fingerprint: "fingerprint".to_string(),
             import_status: "online".to_string(),
-            relink_hint: String::new(),
+            relink_hint: String::default(),
         });
         project.tracks.push(Track {
             id: "track_source".to_string(),
             track_type: TrackType::Source,
             name: "Source".to_string(),
-            input_track_ids: Vec::new(),
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            input_track_ids: Vec::default(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: object(json!({"asset_id": "asset_source"})),
-            error: String::new(),
+            error: String::default(),
         });
         project
     }
@@ -476,14 +481,14 @@ mod tests {
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
             transform_id: "markers.fixed_interval".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: output_schema.to_string(),
             dependency_hash: "dep".to_string(),
             result_state: ResultState::Complete,
             cache_refs,
-            provenance: JsonObject::new(),
-            error: String::new(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -493,10 +498,10 @@ mod tests {
             dependency_hash: "dep".to_string(),
             artifact_kind: artifact_kind.to_string(),
             path: format!("{artifact_kind}/{id}.bin"),
-            created_at: String::new(),
+            created_at: String::default(),
             transform_version: "1".to_string(),
             size_bytes: 0,
-            payload_digest: String::new(),
+            payload_digest: String::default(),
             validation_status: "valid".to_string(),
         }
     }

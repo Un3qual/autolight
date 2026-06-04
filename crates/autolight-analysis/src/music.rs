@@ -301,8 +301,7 @@ fn chroma_frames(chroma_vectors: &[[f64; 12]], duration: f64, max_frames: usize)
                     .iter()
                     .enumerate()
                     .max_by(|left, right| left.1.total_cmp(right.1))
-                    .map(|(index, _)| index as i64)
-                    .unwrap_or(-1)
+                    .map_or(-1, |(index, _)| index as i64)
             } else {
                 -1
             };

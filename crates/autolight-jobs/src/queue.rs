@@ -115,13 +115,13 @@ impl TransformResult {
     pub fn markers(markers: Vec<ProducedMarker>) -> Self {
         Self {
             markers,
-            artifacts: Vec::new(),
+            artifacts: Vec::default(),
         }
     }
 
     pub fn artifact(artifact_kind: impl Into<String>, payload: impl Into<Vec<u8>>) -> Self {
         Self {
-            markers: Vec::new(),
+            markers: Vec::default(),
             artifacts: vec![ProducedArtifact {
                 artifact_kind: artifact_kind.into(),
                 payload: payload.into(),
@@ -147,10 +147,10 @@ impl ProducedMarker {
             timestamp,
             duration: None,
             label: label.into(),
-            category: String::new(),
+            category: String::default(),
             confidence: None,
-            tags: Vec::new(),
-            metadata: JsonObject::new(),
+            tags: Vec::default(),
+            metadata: JsonObject::default(),
         }
     }
 }
@@ -233,7 +233,7 @@ impl LocalJobQueue {
         project: &mut ProjectDocument,
         track_id: &str,
     ) -> Result<String, JobQueueError> {
-        self.submit_with_runtime_params(project, track_id, JsonObject::new())
+        self.submit_with_runtime_params(project, track_id, JsonObject::default())
     }
 
     pub fn submit_with_runtime_params(
@@ -269,7 +269,7 @@ impl LocalJobQueue {
             .iter_mut()
             .find(|track| track.id == track_id)
             .ok_or_else(|| JobQueueError::TrackNotFound(track_id.to_string()))?;
-        track.dependency_hash = dependency_hash.clone();
+        track.dependency_hash.clone_from(&dependency_hash);
         track.result_state = ResultState::Pending;
         track.error.clear();
 
@@ -282,10 +282,10 @@ impl LocalJobQueue {
             parameters: run_params,
             state: ResultState::Pending,
             progress: 0.0,
-            started_at: String::new(),
-            completed_at: String::new(),
-            error: String::new(),
-            produced_cache_refs: Vec::new(),
+            started_at: String::default(),
+            completed_at: String::default(),
+            error: String::default(),
+            produced_cache_refs: Vec::default(),
         });
         self.pending_job_ids.push_back(job_id.clone());
         Ok(job_id)
@@ -466,7 +466,7 @@ impl LocalJobQueue {
             .iter_mut()
             .find(|track| track.id == run.track_id)
             .ok_or_else(|| JobQueueError::TrackNotFound(run.track_id.clone()))?;
-        track.cache_refs = produced_cache_refs.clone();
+        track.cache_refs.clone_from(&produced_cache_refs);
         track.result_state = ResultState::Complete;
         track.error.clear();
 
@@ -630,7 +630,7 @@ fn dependency_hash_for_track(
     transform_version: &str,
     identity_params: &JsonObject,
 ) -> Result<String, JobQueueError> {
-    let mut input_cache_refs = Vec::new();
+    let mut input_cache_refs = Vec::default();
     for input_track_id in input_track_ids {
         let input_track = find_track(project, input_track_id)
             .ok_or_else(|| JobQueueError::TrackNotFound(input_track_id.clone()))?;
@@ -714,7 +714,7 @@ fn build_markers(
                 confidence: marker.confidence,
                 tags: marker.tags,
                 source_transform: transform_id.to_string(),
-                source_marker_ids: Vec::new(),
+                source_marker_ids: Vec::default(),
                 metadata: marker.metadata,
             })
         })
@@ -1148,7 +1148,7 @@ mod tests {
             &["cache_new".to_string()],
             "test.noop",
             "1",
-            &JsonObject::new(),
+            &JsonObject::default(),
         )
         .unwrap();
         assert_eq!(
@@ -1422,23 +1422,23 @@ mod tests {
             channels: 2,
             fingerprint: "fingerprint".to_string(),
             import_status: "online".to_string(),
-            relink_hint: String::new(),
+            relink_hint: String::default(),
         });
         project.tracks.extend([
             Track {
                 id: "track_source".to_string(),
                 track_type: TrackType::Source,
                 name: "Source".to_string(),
-                input_track_ids: Vec::new(),
-                transform_id: String::new(),
-                transform_params: JsonObject::new(),
-                transform_version: String::new(),
-                output_schema: String::new(),
-                dependency_hash: String::new(),
+                input_track_ids: Vec::default(),
+                transform_id: String::default(),
+                transform_params: JsonObject::default(),
+                transform_version: String::default(),
+                output_schema: String::default(),
+                dependency_hash: String::default(),
                 result_state: ResultState::Complete,
-                cache_refs: Vec::new(),
+                cache_refs: Vec::default(),
                 provenance: object(json!({"asset_id": "asset_source"})),
-                error: String::new(),
+                error: String::default(),
             },
             Track {
                 id: "track_generated".to_string(),
@@ -1446,14 +1446,14 @@ mod tests {
                 name: "Generated".to_string(),
                 input_track_ids: vec!["track_source".to_string()],
                 transform_id: transform_id.to_string(),
-                transform_params: JsonObject::new(),
+                transform_params: JsonObject::default(),
                 transform_version: "1".to_string(),
                 output_schema: "markers.v1".to_string(),
                 dependency_hash: "old_dep".to_string(),
                 result_state: ResultState::Complete,
-                cache_refs: Vec::new(),
-                provenance: JsonObject::new(),
-                error: String::new(),
+                cache_refs: Vec::default(),
+                provenance: JsonObject::default(),
+                error: String::default(),
             },
         ]);
         project
@@ -1466,14 +1466,14 @@ mod tests {
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
             transform_id: "test.child".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: "markers.v1".to_string(),
             dependency_hash: "child_dep".to_string(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -1483,15 +1483,15 @@ mod tests {
             track_type: TrackType::Editable,
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -1501,13 +1501,13 @@ mod tests {
             track_id: track_id.to_string(),
             timestamp,
             duration: None,
-            label: String::new(),
-            category: String::new(),
+            label: String::default(),
+            category: String::default(),
             confidence: None,
-            tags: Vec::new(),
-            source_transform: String::new(),
-            source_marker_ids: Vec::new(),
-            metadata: JsonObject::new(),
+            tags: Vec::default(),
+            source_transform: String::default(),
+            source_marker_ids: Vec::default(),
+            metadata: JsonObject::default(),
         }
     }
 
@@ -1517,10 +1517,10 @@ mod tests {
             dependency_hash: "dep".to_string(),
             artifact_kind: artifact_kind.to_string(),
             path: format!("{artifact_kind}/{id}.bin"),
-            created_at: String::new(),
+            created_at: String::default(),
             transform_version: "1".to_string(),
             size_bytes: 0,
-            payload_digest: String::new(),
+            payload_digest: String::default(),
             validation_status: "valid".to_string(),
         }
     }

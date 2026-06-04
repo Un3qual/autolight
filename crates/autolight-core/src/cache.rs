@@ -164,7 +164,7 @@ pub fn mark_invalid_cache_refs_stale(project: &mut ProjectDocument, invalid_refs
         return;
     }
 
-    let mut affected_track_ids = Vec::new();
+    let mut affected_track_ids = Vec::default();
     for track in &mut project.tracks {
         if track
             .cache_refs
@@ -368,10 +368,10 @@ mod tests {
             label: "Beat".to_string(),
             category: "timing".to_string(),
             confidence: Some(1.0),
-            tags: Vec::new(),
+            tags: Vec::default(),
             source_transform: "markers.fixed_interval".to_string(),
-            source_marker_ids: Vec::new(),
-            metadata: JsonObject::new(),
+            source_marker_ids: Vec::default(),
+            metadata: JsonObject::default(),
         });
         let changed = track_dependency_inputs(&project, &project.tracks[1]).unwrap();
 
@@ -410,10 +410,10 @@ mod tests {
             dependency_hash: "dep".to_string(),
             artifact_kind: artifact_kind.to_string(),
             path: format!("{artifact_kind}/{id}.bin"),
-            created_at: String::new(),
+            created_at: String::default(),
             transform_version: "1".to_string(),
             size_bytes: 0,
-            payload_digest: String::new(),
+            payload_digest: String::default(),
             validation_status: "valid".to_string(),
         }
     }
@@ -423,16 +423,16 @@ mod tests {
             id: id.to_string(),
             track_type: TrackType::Generated,
             name: id.to_string(),
-            input_track_ids: Vec::new(),
+            input_track_ids: Vec::default(),
             transform_id: "stems.vocals_stand_in".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: "artifact.stem.v1".to_string(),
             dependency_hash: "dep".to_string(),
             result_state: ResultState::Complete,
             cache_refs,
-            provenance: JsonObject::new(),
-            error: String::new(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -443,14 +443,14 @@ mod tests {
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
             transform_id: "markers.fixed_interval".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: "markers.v1".to_string(),
             dependency_hash: "dep_child".to_string(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -460,15 +460,15 @@ mod tests {
             track_type: TrackType::Editable,
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 

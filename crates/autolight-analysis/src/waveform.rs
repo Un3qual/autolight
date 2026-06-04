@@ -131,7 +131,7 @@ pub fn derive_waveform_level(
     }
 
     let source_ranges = sample_frame_ranges(source_samples);
-    let total_frames = source_ranges.last().map(|(_, stop, _)| *stop).unwrap_or(0);
+    let total_frames = source_ranges.last().map_or(0, |(_, stop, _)| *stop);
     if total_frames == 0 {
         return (0..bucket_count)
             .map(|_| WaveformSample {
@@ -190,7 +190,7 @@ pub fn visible_samples(
         };
     }
 
-    let start_seconds = scroll_seconds.max(0.0).min(duration);
+    let start_seconds = clamped_scroll_origin(scroll_seconds, duration);
     let stop_seconds = (start_seconds + visible_seconds.max(0.0)).min(duration);
     let start_index = ((start_seconds / duration) * level_bucket_count as f64).floor() as usize;
     let mut stop_index = ((stop_seconds / duration) * level_bucket_count as f64).ceil() as usize;
@@ -270,13 +270,15 @@ fn select_waveform_level(
         .levels
         .iter()
         .min_by_key(|level| normalize_bucket_count(level).abs_diff(target_bucket_count))
-        .map(Cow::Borrowed)
-        .unwrap_or_else(|| {
-            Cow::Owned(WaveformLevel {
-                bucket_count: 0,
-                samples: Vec::new(),
-            })
-        })
+        .map_or_else(
+            || {
+                Cow::Owned(WaveformLevel {
+                    bucket_count: 0,
+                    samples: Vec::new(),
+                })
+            },
+            Cow::Borrowed,
+        )
 }
 
 fn normalize_bucket_count(level: &WaveformLevel) -> usize {
@@ -298,6 +300,14 @@ fn visible_sample(
         time: round6(index as f64 * duration / level_bucket_count.max(1) as f64),
         peak: sample_peak(sample),
         rms: finite_non_negative(sample.rms),
+    }
+}
+
+fn clamped_scroll_origin(scroll_seconds: f64, duration: f64) -> f64 {
+    if scroll_seconds.is_nan() {
+        0.0
+    } else {
+        scroll_seconds.clamp(0.0, duration)
     }
 }
 
@@ -561,6 +571,33 @@ mod tests {
         };
 
         let visible = visible_samples(&payload, -5.0, 2.0, 48.0);
+
+        assert_eq!(
+            visible
+                .samples
+                .iter()
+                .map(|sample| sample.time)
+                .collect::<Vec<_>>(),
+            [0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn waveform_visible_samples_treats_nan_scroll_origin_as_zero() {
+        let payload = WaveformPayload {
+            version: 2,
+            sample_rate: 0,
+            duration: 10.0,
+            samples: Vec::new(),
+            levels: vec![super::WaveformLevel {
+                bucket_count: 10,
+                samples: (0..10)
+                    .map(|index| sample(index as f64 / 10.0, 0.05, 1, 0.0))
+                    .collect(),
+            }],
+        };
+
+        let visible = visible_samples(&payload, f64::NAN, 2.0, 48.0);
 
         assert_eq!(
             visible

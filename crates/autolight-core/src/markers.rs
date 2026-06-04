@@ -91,19 +91,19 @@ pub fn create_manual_editable_track(
             name.to_string()
         },
         input_track_ids: vec![source_track_id.clone()],
-        transform_id: String::new(),
-        transform_params: JsonObject::new(),
-        transform_version: String::new(),
-        output_schema: String::new(),
-        dependency_hash: String::new(),
+        transform_id: String::default(),
+        transform_params: JsonObject::default(),
+        transform_version: String::default(),
+        output_schema: String::default(),
+        dependency_hash: String::default(),
         result_state: ResultState::Complete,
-        cache_refs: Vec::new(),
+        cache_refs: Vec::default(),
         provenance: json_object([
             ("source_track_id", json!(source_track_id)),
             ("manual_track", json!(true)),
             ("created_by", json!("user")),
         ]),
-        error: String::new(),
+        error: String::default(),
     };
     project.tracks.push(track.clone());
     Ok(track)
@@ -126,9 +126,9 @@ pub fn add_editable_marker(
         label: input.label,
         category: normalize_marker_category(&input.category),
         confidence: None,
-        tags: Vec::new(),
-        source_transform: String::new(),
-        source_marker_ids: Vec::new(),
+        tags: Vec::default(),
+        source_transform: String::default(),
+        source_marker_ids: Vec::default(),
         metadata: json_object([
             ("created_by", json!("user")),
             ("color", json!(color.as_str())),
@@ -614,10 +614,10 @@ mod tests {
             label: "Existing".to_string(),
             category: "cue".to_string(),
             confidence: None,
-            tags: Vec::new(),
-            source_transform: String::new(),
-            source_marker_ids: Vec::new(),
-            metadata: JsonObject::new(),
+            tags: Vec::default(),
+            source_transform: String::default(),
+            source_marker_ids: Vec::default(),
+            metadata: JsonObject::default(),
         });
 
         let track =
@@ -859,22 +859,22 @@ mod tests {
             channels: 2,
             fingerprint: "fingerprint".to_string(),
             import_status: "online".to_string(),
-            relink_hint: String::new(),
+            relink_hint: String::default(),
         });
         project.tracks.push(Track {
             id: "track_source".to_string(),
             track_type: TrackType::Source,
             name: "Source".to_string(),
-            input_track_ids: Vec::new(),
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            input_track_ids: Vec::default(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: object(json!({ "asset_id": "asset_source" })),
-            error: String::new(),
+            error: String::default(),
         });
         project
     }
@@ -886,14 +886,14 @@ mod tests {
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
             transform_id: "markers.fixed_interval".to_string(),
-            transform_params: JsonObject::new(),
+            transform_params: JsonObject::default(),
             transform_version: "1".to_string(),
             output_schema: "markers.v1".to_string(),
             dependency_hash: format!("dep_{id}"),
             result_state,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         }
     }
 
@@ -903,15 +903,15 @@ mod tests {
             track_type: TrackType::Editable,
             name: id.to_string(),
             input_track_ids: vec![parent_id.to_string()],
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: object(json!({ "source_track_id": parent_id })),
-            error: String::new(),
+            error: String::default(),
         }
     }
 

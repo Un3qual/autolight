@@ -138,7 +138,7 @@ impl Default for AppControllerState {
             job_queue: LocalJobQueue::new(job_registry()),
             next_track_number: 1,
             next_asset_number: 1,
-            selected_marker_ids: Vec::new(),
+            selected_marker_ids: Vec::default(),
             expanded_track_ids: BTreeSet::new(),
             edit_history: EditHistory::new(),
             non_history_dirty: false,
@@ -205,27 +205,27 @@ impl AppControllerState {
             Ok(params) => params,
             Err(error) => {
                 self.set_error(error);
-                return String::new();
+                return String::default();
             }
         };
         let Some(parent) = find_track(&self.project, parent_track_id) else {
             self.set_error(format!("track not found: {parent_track_id}"));
-            return String::new();
+            return String::default();
         };
         if parent.result_state != ResultState::Complete {
             self.set_error(format!("parent track is not complete: {}", parent.name));
-            return String::new();
+            return String::default();
         }
         let spec = match self.transform_registry.get(transform_id, Some(version)) {
             Ok(spec) => spec.clone(),
             Err(error) => {
                 self.set_error(error.to_string());
-                return String::new();
+                return String::default();
             }
         };
         if !spec.is_compatible_parent(&self.project, parent_track_id) {
             self.set_error(parent_compatibility_error(parent, &spec));
-            return String::new();
+            return String::default();
         }
 
         let dependency_hash = match dependency_hash_for_new_track(
@@ -238,7 +238,7 @@ impl AppControllerState {
             Ok(hash) => hash,
             Err(error) => {
                 self.set_error(error);
-                return String::new();
+                return String::default();
             }
         };
         let track_id = self.next_track_id();
@@ -253,9 +253,9 @@ impl AppControllerState {
             output_schema: spec.output_schema,
             dependency_hash,
             result_state: ResultState::Pending,
-            cache_refs: Vec::new(),
-            provenance: JsonObject::new(),
-            error: String::new(),
+            cache_refs: Vec::default(),
+            provenance: JsonObject::default(),
+            error: String::default(),
         });
         self.expand_parent_for_new_child(parent_track_id);
         self.selected_track_id = QString::from(&track_id);
@@ -277,7 +277,7 @@ impl AppControllerState {
                     self.mark_project_mutation_dirty();
                     self.set_error(error.to_string());
                     self.refresh_view_state();
-                    return String::new();
+                    return String::default();
                 }
                 self.mark_project_mutation_dirty();
                 self.last_error = QString::default();
@@ -286,7 +286,7 @@ impl AppControllerState {
             }
             Err(error) => {
                 self.set_error(error.to_string());
-                String::new()
+                String::default()
             }
         }
     }
@@ -398,13 +398,13 @@ impl AppControllerState {
         let audio_path = path_from_qml(path);
         if !audio_path.is_file() {
             self.set_error(format!("No such file: {}", audio_path.display()));
-            return String::new();
+            return String::default();
         }
         let inspection = match inspect_wav_file(&audio_path) {
             Ok(inspection) => inspection,
             Err(error) => {
                 self.set_error(error);
-                return String::new();
+                return String::default();
             }
         };
         let asset_id = self.next_asset_id();
@@ -417,7 +417,7 @@ impl AppControllerState {
             channels: inspection.metadata.channels,
             fingerprint: inspection.fingerprint,
             import_status: "online".to_string(),
-            relink_hint: String::new(),
+            relink_hint: String::default(),
         });
         self.project.tracks.push(Track {
             id: track_id.clone(),
@@ -427,16 +427,16 @@ impl AppControllerState {
                 .and_then(|stem| stem.to_str())
                 .unwrap_or("Audio")
                 .to_string(),
-            input_track_ids: Vec::new(),
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            input_track_ids: Vec::default(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: json_object([("asset_id", json!(asset_id))]),
-            error: String::new(),
+            error: String::default(),
         });
         self.selected_track_id = QString::from(&track_id);
         self.selected_marker_ids.clear();
@@ -448,13 +448,13 @@ impl AppControllerState {
 
     fn refresh_loaded_audio_assets(&mut self) -> usize {
         let project_dir = current_project_dir(&self.project_path.to_string());
-        let mut affected_assets = Vec::new();
+        let mut affected_assets = Vec::default();
         for asset in &mut self.project.audio_assets {
             let Some(error) = audio_asset_load_error(asset) else {
                 if asset.import_status != "online" {
                     asset.import_status = "online".to_string();
                     asset.relink_hint.clear();
-                    affected_assets.push((asset.id.clone(), String::new()));
+                    affected_assets.push((asset.id.clone(), String::default()));
                 }
                 continue;
             };
@@ -465,7 +465,7 @@ impl AppControllerState {
                     asset.path = relinked_path.to_string_lossy().to_string();
                     asset.import_status = "online".to_string();
                     asset.relink_hint.clear();
-                    affected_assets.push((asset.id.clone(), String::new()));
+                    affected_assets.push((asset.id.clone(), String::default()));
                     continue;
                 }
             }
@@ -514,7 +514,7 @@ impl AppControllerState {
                         .find(|track| track.id == track_id)
                     {
                         track.result_state = ResultState::Stale;
-                        track.error = error.clone();
+                        track.error.clone_from(error);
                     }
                     mark_dependents_stale(&mut self.project, &track_id, error);
                 }
@@ -753,7 +753,7 @@ impl AppControllerState {
             Ok(track) => track,
             Err(error) => {
                 self.set_error(error.to_string());
-                return String::new();
+                return String::default();
             }
         };
         if let Some(parent_track_id) = track.input_track_ids.first() {
@@ -770,11 +770,11 @@ impl AppControllerState {
     fn create_editable_track_from_track_state(&mut self, source_track_id: &str) -> String {
         let Some(source_track) = find_track(&self.project, source_track_id) else {
             self.set_error(format!("track not found: {source_track_id}"));
-            return String::new();
+            return String::default();
         };
         if source_track.result_state != ResultState::Complete {
             self.set_error(format!("source track is not complete: {source_track_id}"));
-            return String::new();
+            return String::default();
         }
         let mut source_markers = self
             .project
@@ -785,7 +785,7 @@ impl AppControllerState {
             .collect::<Vec<_>>();
         if source_markers.is_empty() {
             self.set_error("source track has no markers");
-            return String::new();
+            return String::default();
         }
         source_markers.sort_by(|left, right| {
             left.timestamp
@@ -804,18 +804,18 @@ impl AppControllerState {
             track_type: TrackType::Editable,
             name: "Editable Cues".to_string(),
             input_track_ids: vec![source_track_id.to_string()],
-            transform_id: String::new(),
-            transform_params: JsonObject::new(),
-            transform_version: String::new(),
-            output_schema: String::new(),
-            dependency_hash: String::new(),
+            transform_id: String::default(),
+            transform_params: JsonObject::default(),
+            transform_version: String::default(),
+            output_schema: String::default(),
+            dependency_hash: String::default(),
             result_state: ResultState::Complete,
-            cache_refs: Vec::new(),
+            cache_refs: Vec::default(),
             provenance: json_object([
                 ("source_track_id", json!(source_track_id)),
                 ("source_marker_ids", json!(source_marker_ids)),
             ]),
-            error: String::new(),
+            error: String::default(),
         };
         self.project.tracks.push(track);
         for (index, source_marker) in source_markers.iter().enumerate() {
@@ -906,7 +906,7 @@ impl AppControllerState {
             Ok(marker) => marker,
             Err(error) => {
                 self.set_error(error.to_string());
-                return String::new();
+                return String::default();
             }
         };
         self.selected_marker_ids = vec![marker.id.clone()];
@@ -1118,7 +1118,7 @@ impl AppControllerState {
     fn delete_markers_from_selected_track(&mut self, marker_ids: &[String]) -> usize {
         let track_id = self.selected_track_id.to_string();
         let before = self.project.clone();
-        let mut deleted_ids = Vec::new();
+        let mut deleted_ids = Vec::default();
         for marker_id in marker_ids {
             match delete_editable_marker(&mut self.project, &track_id, marker_id) {
                 Ok(true) => deleted_ids.push(marker_id.clone()),
@@ -2330,7 +2330,7 @@ fn fixed_interval_number_param(
 
 fn parse_params(params_json: &str) -> Result<JsonObject, String> {
     if params_json.trim().is_empty() {
-        return Ok(JsonObject::new());
+        return Ok(JsonObject::default());
     }
     let value: Value = serde_json::from_str(params_json).map_err(|error| error.to_string())?;
     value
@@ -2419,8 +2419,7 @@ fn path_from_qml(path: &str) -> PathBuf {
     let value = path.trim();
     let path = value
         .strip_prefix("file://")
-        .map(percent_decode)
-        .unwrap_or_else(|| percent_decode(value));
+        .map_or_else(|| percent_decode(value), percent_decode);
     PathBuf::from(path)
 }
 
@@ -2465,7 +2464,7 @@ fn audio_asset_project_dir_relink_path(
     project_dir: Option<&Path>,
 ) -> Option<PathBuf> {
     let project_dir = project_dir?;
-    let mut file_names = Vec::new();
+    let mut file_names = Vec::default();
     if !asset.relink_hint.is_empty() {
         file_names.push(asset.relink_hint.clone());
     }
@@ -2603,6 +2602,15 @@ struct AudioInspection {
 fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
     let file = File::open(path).map_err(|error| error.to_string())?;
     let mut reader = HashedReader::new(BufReader::new(file));
+    read_wav_header(&mut reader)?;
+    let chunks = read_wav_chunks(&mut reader)?;
+    Ok(AudioInspection {
+        metadata: chunks.audio_metadata()?,
+        fingerprint: reader.finish(),
+    })
+}
+
+fn read_wav_header(reader: &mut HashedReader<impl Read>) -> Result<(), String> {
     let mut header = [0_u8; 12];
     reader
         .read_exact(&mut header)
@@ -2610,81 +2618,122 @@ fn inspect_wav_file(path: &Path) -> Result<AudioInspection, String> {
     if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
         return Err("unsupported audio file: expected WAV".to_string());
     }
+    Ok(())
+}
 
-    let mut sample_rate = 0_u32;
-    let mut channels = 0_u32;
-    let mut bits_per_sample = 0_u32;
-    let mut data_bytes = 0_u64;
-    let mut has_data_chunk = false;
-
-    loop {
-        let mut chunk_header = [0_u8; 8];
-        match reader.read_exact(&mut chunk_header) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(error) => return Err(error.to_string()),
-        }
-        let chunk_id = &chunk_header[0..4];
-        let chunk_size = u32::from_le_bytes([
-            chunk_header[4],
-            chunk_header[5],
-            chunk_header[6],
-            chunk_header[7],
-        ]) as u64;
-        if chunk_id == b"fmt " && chunk_size >= 16 {
-            let mut fmt = [0_u8; 16];
-            reader
-                .read_exact(&mut fmt)
-                .map_err(|error| error.to_string())?;
-            let audio_format = u16::from_le_bytes([fmt[0], fmt[1]]);
-            let extension_size = chunk_size - 16;
-            let extension_read_size = extension_size.min(24) as usize;
-            let mut extension = vec![0_u8; extension_read_size];
-            if extension_read_size > 0 {
-                reader
-                    .read_exact(&mut extension)
-                    .map_err(|error| error.to_string())?;
-            }
-            if !supported_wav_format(audio_format, &extension) {
-                return Err("unsupported WAV encoding".to_string());
-            }
-            channels = u16::from_le_bytes([fmt[2], fmt[3]]) as u32;
-            sample_rate = u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]);
-            bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]) as u32;
-            reader.skip_bytes(extension_size - extension_read_size as u64)?;
-        } else if chunk_id == b"data" {
-            has_data_chunk = true;
-            data_bytes = chunk_size;
-            reader.skip_bytes(chunk_size)?;
+fn read_wav_chunks(reader: &mut HashedReader<impl Read>) -> Result<WavChunkMetadata, String> {
+    let mut metadata = WavChunkMetadata::default();
+    while let Some(chunk) = read_wav_chunk_header(reader)? {
+        if chunk.id == *b"fmt " && chunk.size >= 16 {
+            metadata.format = Some(read_wav_format(reader, chunk.size)?);
+        } else if chunk.id == *b"data" {
+            metadata.has_data_chunk = true;
+            metadata.data_bytes = chunk.size;
+            reader.skip_bytes(chunk.size)?;
         } else {
-            reader.skip_bytes(chunk_size)?;
+            reader.skip_bytes(chunk.size)?;
         }
-        if chunk_size % 2 == 1 {
+        if chunk.size % 2 == 1 {
             reader.skip_bytes(1)?;
         }
     }
+    Ok(metadata)
+}
 
-    if sample_rate == 0 || channels == 0 || bits_per_sample == 0 {
-        return Err("invalid WAV metadata".to_string());
+fn read_wav_chunk_header(
+    reader: &mut HashedReader<impl Read>,
+) -> Result<Option<WavChunkHeader>, String> {
+    let mut chunk_header = [0_u8; 8];
+    match reader.read_exact(&mut chunk_header) {
+        Ok(()) => Ok(Some(WavChunkHeader {
+            id: [
+                chunk_header[0],
+                chunk_header[1],
+                chunk_header[2],
+                chunk_header[3],
+            ],
+            size: u32::from_le_bytes([
+                chunk_header[4],
+                chunk_header[5],
+                chunk_header[6],
+                chunk_header[7],
+            ]) as u64,
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
-    if !has_data_chunk || data_bytes == 0 {
-        return Err("invalid WAV data chunk".to_string());
+}
+
+fn read_wav_format(
+    reader: &mut HashedReader<impl Read>,
+    chunk_size: u64,
+) -> Result<WavFormat, String> {
+    let mut fmt = [0_u8; 16];
+    reader
+        .read_exact(&mut fmt)
+        .map_err(|error| error.to_string())?;
+    let audio_format = u16::from_le_bytes([fmt[0], fmt[1]]);
+    let extension_size = chunk_size - 16;
+    let extension_read_size = extension_size.min(24) as usize;
+    let mut extension = vec![0_u8; extension_read_size];
+    if extension_read_size > 0 {
+        reader
+            .read_exact(&mut extension)
+            .map_err(|error| error.to_string())?;
     }
-    if !bits_per_sample.is_multiple_of(8) {
-        return Err("invalid WAV frame size".to_string());
+    if !supported_wav_format(audio_format, &extension) {
+        return Err("unsupported WAV encoding".to_string());
     }
-    let bytes_per_frame = u64::from(channels) * u64::from(bits_per_sample / 8);
-    if bytes_per_frame == 0 {
-        return Err("invalid WAV frame size".to_string());
-    }
-    Ok(AudioInspection {
-        metadata: AudioMetadata {
-            duration: data_bytes as f64 / (sample_rate as f64 * bytes_per_frame as f64),
-            sample_rate,
-            channels,
-        },
-        fingerprint: reader.finish(),
+    reader.skip_bytes(extension_size - extension_read_size as u64)?;
+    Ok(WavFormat {
+        channels: u16::from_le_bytes([fmt[2], fmt[3]]) as u32,
+        sample_rate: u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]),
+        bits_per_sample: u16::from_le_bytes([fmt[14], fmt[15]]) as u32,
     })
+}
+
+struct WavChunkHeader {
+    id: [u8; 4],
+    size: u64,
+}
+
+#[derive(Default)]
+struct WavChunkMetadata {
+    format: Option<WavFormat>,
+    data_bytes: u64,
+    has_data_chunk: bool,
+}
+
+impl WavChunkMetadata {
+    fn audio_metadata(&self) -> Result<AudioMetadata, String> {
+        let Some(format) = &self.format else {
+            return Err("invalid WAV metadata".to_string());
+        };
+        if format.sample_rate == 0 || format.channels == 0 || format.bits_per_sample == 0 {
+            return Err("invalid WAV metadata".to_string());
+        }
+        if !self.has_data_chunk || self.data_bytes == 0 {
+            return Err("invalid WAV data chunk".to_string());
+        }
+        if !format.bits_per_sample.is_multiple_of(8) {
+            return Err("invalid WAV frame size".to_string());
+        }
+        let bytes_per_frame = u64::from(format.channels) * u64::from(format.bits_per_sample / 8);
+        if bytes_per_frame == 0 {
+            return Err("invalid WAV frame size".to_string());
+        }
+        Ok(AudioMetadata {
+            duration: self.data_bytes as f64 / (format.sample_rate as f64 * bytes_per_frame as f64),
+            sample_rate: format.sample_rate,
+            channels: format.channels,
+        })
+    }
+}
+
+struct WavFormat {
+    channels: u32,
+    sample_rate: u32,
+    bits_per_sample: u32,
 }
 
 fn supported_wav_format(audio_format: u16, extension: &[u8]) -> bool {
@@ -3343,9 +3392,11 @@ mod tests {
         );
         assert_eq!(markers[0]["colorKey"], "amber");
         assert_eq!(markers[0]["color"], "#fbbf24");
-        assert_eq!(markers[0]["selected"], true);
-        assert_eq!(markers[1]["selected"], true);
-        assert_eq!(editable_row["markerSpans"][0]["selected"], true);
+        assert!(markers[0]["selected"].as_bool().unwrap_or(false));
+        assert!(markers[1]["selected"].as_bool().unwrap_or(false));
+        assert!(editable_row["markerSpans"][0]["selected"]
+            .as_bool()
+            .unwrap_or(false));
     }
 
     #[test]
@@ -3520,7 +3571,7 @@ mod tests {
             .iter()
             .find(|row| row["trackId"] == "track_drums")
             .unwrap();
-        assert_eq!(drums["expanded"], false);
+        assert!(!drums["expanded"].as_bool().unwrap_or(true));
         assert_eq!(state.selected_track_id.to_string(), "track_drums");
         assert!(state.is_dirty);
     }
