@@ -4,16 +4,21 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-use autolight_core::cache::{track_dependency_hash, track_dependency_inputs};
-use autolight_core::graph::{default_expanded_track_ids, find_track, source_track_id_for_context};
+use autolight_core::cache::{
+    cache_entry_matches_payload, track_dependency_hash, track_dependency_inputs,
+};
+use autolight_core::graph::{
+    default_expanded_track_ids, find_track, mark_dependents_stale, source_track_id_for_context,
+};
 use autolight_core::history::{EditHistory, ProjectSnapshotCommand};
 use autolight_core::markers::{
     add_editable_marker, bulk_update_editable_markers, create_manual_editable_track,
     delete_editable_marker, move_editable_markers, resize_editable_marker, update_editable_marker,
     BulkMarkerUpdate, EditableMarkerInput, MarkerUpdate,
 };
-use autolight_core::project::AudioAsset;
-use autolight_core::project::{JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType};
+use autolight_core::project::{
+    AudioAsset, CacheEntry, JsonObject, Marker, ProjectDocument, ResultState, Track, TrackType,
+};
 use autolight_core::transforms::{TransformRegistry, TransformSpec};
 use autolight_jobs::queue::{
     JobRegistry, LocalJobQueue, ProducedMarker, TransformResult, TransformRunError,
@@ -292,10 +297,11 @@ impl AppControllerState {
     }
 
     fn refresh_cache_status_state(&mut self) -> Vec<String> {
+        let project_dir = current_project_dir(&self.project_path.to_string());
         let invalid_refs = self
             .job_queue
             .refresh_cache_validity(&mut self.project, |entry| {
-                entry.validation_status == "valid"
+                cache_entry_is_valid(entry, project_dir.as_deref())
             });
         if invalid_refs.is_empty() {
             self.last_error = QString::default();
@@ -319,6 +325,7 @@ impl AppControllerState {
         self.project = project;
         self.project_name = QString::from(&self.project.name);
         self.project_path = QString::from(project_path.to_string_lossy().to_string());
+        let refreshed_audio_assets = self.refresh_loaded_audio_assets();
         self.expanded_track_ids = expanded_track_ids_from_project(&self.project)
             .unwrap_or_else(|| default_expanded_track_ids(&self.project));
         self.selected_track_id = QString::from(&selected_track_id_from_project(&self.project));
@@ -326,6 +333,9 @@ impl AppControllerState {
         self.selected_marker_ids.clear();
         self.unload_playback();
         self.mark_clean();
+        if refreshed_audio_assets > 0 {
+            self.mark_non_history_dirty();
+        }
         self.last_error = QString::default();
         self.refresh_view_state();
         true
@@ -405,6 +415,65 @@ impl AppControllerState {
         self.last_error = QString::default();
         self.refresh_view_state();
         track_id
+    }
+
+    fn refresh_loaded_audio_assets(&mut self) -> usize {
+        let mut affected_assets = Vec::new();
+        for asset in &mut self.project.audio_assets {
+            let Some(error) = audio_asset_load_error(asset) else {
+                if asset.import_status != "online" {
+                    asset.import_status = "online".to_string();
+                    asset.relink_hint.clear();
+                    affected_assets.push((asset.id.clone(), String::new()));
+                }
+                continue;
+            };
+            let status = if error.starts_with("input audio asset offline:") {
+                "offline"
+            } else {
+                "modified"
+            };
+            if asset.import_status != status || asset.relink_hint.is_empty() {
+                asset.import_status = status.to_string();
+                asset.relink_hint = Path::new(&asset.path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+            }
+            affected_assets.push((asset.id.clone(), error));
+        }
+
+        for (asset_id, error) in &affected_assets {
+            if error.is_empty() {
+                continue;
+            }
+            let source_track_ids = self
+                .project
+                .tracks
+                .iter()
+                .filter(|track| {
+                    track.track_type == TrackType::Source
+                        && track.provenance.get("asset_id").and_then(Value::as_str)
+                            == Some(asset_id.as_str())
+                })
+                .map(|track| track.id.clone())
+                .collect::<Vec<_>>();
+            for track_id in source_track_ids {
+                if let Some(track) = self
+                    .project
+                    .tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                {
+                    track.result_state = ResultState::Stale;
+                    track.error = error.clone();
+                }
+                mark_dependents_stale(&mut self.project, &track_id, error);
+            }
+        }
+
+        affected_assets.len()
     }
 
     fn play_selected_track_state(&mut self) -> bool {
@@ -2064,7 +2133,11 @@ fn job_registry() -> JobRegistry {
         let register_result = if transform_id == "markers.fixed_interval" {
             registry.register(spec, fixed_interval_runner)
         } else {
-            registry.register(spec, |_context, _params| Ok(TransformResult::default()))
+            registry.register(spec, move |_context, _params| {
+                Err(TransformRunError::Failed(format!(
+                    "unsupported Rust transform: {transform_id}"
+                )))
+            })
         };
         register_result.expect("builtin job transforms are unique");
     }
@@ -2174,6 +2247,76 @@ fn path_from_qml(path: &str) -> PathBuf {
         .map(percent_decode)
         .unwrap_or_else(|| percent_decode(value));
     PathBuf::from(path)
+}
+
+fn current_project_dir(path: &str) -> Option<PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    path_from_qml(path).parent().map(Path::to_path_buf)
+}
+
+fn audio_asset_load_error(asset: &AudioAsset) -> Option<String> {
+    let path = Path::new(&asset.path);
+    match inspect_wav_file(path) {
+        Ok(inspection) => {
+            let metadata_changed = asset.duration != inspection.metadata.duration
+                || asset.sample_rate != inspection.metadata.sample_rate
+                || asset.channels != inspection.metadata.channels;
+            if (!asset.fingerprint.is_empty() && asset.fingerprint != inspection.fingerprint)
+                || metadata_changed
+            {
+                Some(format!("input audio asset modified: {}", asset.path))
+            } else {
+                None
+            }
+        }
+        Err(_) if !path.is_file() => Some(format!("input audio asset offline: {}", asset.path)),
+        Err(_) => Some(format!("input audio asset modified: {}", asset.path)),
+    }
+}
+
+fn cache_entry_is_valid(entry: &CacheEntry, project_dir: Option<&Path>) -> bool {
+    if entry.validation_status != "valid" || !cache_entry_path_is_safe(Path::new(&entry.path)) {
+        return false;
+    }
+
+    let Some(path) = cache_entry_path(entry, project_dir) else {
+        return true;
+    };
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let Ok(metadata) = file.metadata() else {
+        return false;
+    };
+    if metadata.len() != entry.size_bytes {
+        return false;
+    }
+
+    let mut payload = Vec::with_capacity(entry.size_bytes as usize);
+    if file.read_to_end(&mut payload).is_err() {
+        return false;
+    }
+    cache_entry_matches_payload(entry, &payload).unwrap_or(false)
+}
+
+fn cache_entry_path(entry: &CacheEntry, project_dir: Option<&Path>) -> Option<PathBuf> {
+    let entry_path = Path::new(&entry.path);
+    if entry_path.is_absolute() {
+        Some(entry_path.to_path_buf())
+    } else {
+        project_dir.map(|directory| directory.join(entry_path))
+    }
+}
+
+fn cache_entry_path_is_safe(path: &Path) -> bool {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return !path.as_os_str().is_empty();
+    }
+    path.components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
 }
 
 fn percent_decode(value: &str) -> String {
@@ -2432,6 +2575,7 @@ mod tests {
     use serde_json::Value;
 
     use super::{AppControllerState, SMOKE_PROJECT_NAME};
+    use autolight_core::cache::cache_entry_for_bytes;
     use autolight_core::project::{ResultState, TrackType};
 
     #[test]
@@ -2541,6 +2685,32 @@ mod tests {
     }
 
     #[test]
+    fn controller_run_unsupported_builtin_transform_fails_without_empty_completion() {
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        let track_id =
+            state.add_transform_track_state("track_source", "waveform.summary", "1", "{}");
+
+        let job_id = state.run_track_state(&track_id);
+
+        assert!(!job_id.is_empty());
+        let track = state
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .unwrap();
+        assert_eq!(track.result_state, ResultState::Failed);
+        assert!(track.error.contains("unsupported Rust transform"));
+        assert!(track.cache_refs.is_empty());
+        assert!(state
+            .project
+            .job_runs
+            .iter()
+            .any(|run| run.id == job_id && run.state == ResultState::Failed));
+    }
+
+    #[test]
     fn controller_rejects_audio_transform_for_generated_marker_parent_without_audio_artifact() {
         let mut state = AppControllerState::default();
         state.load_demo_project_state();
@@ -2583,6 +2753,55 @@ mod tests {
                 .unwrap()
                 .result_state,
             ResultState::Stale
+        );
+    }
+
+    #[test]
+    fn controller_refresh_cache_status_checks_persisted_artifact_files() {
+        let root = test_dir("cache-refresh-files");
+        let mut state = AppControllerState::default();
+        state.load_demo_project_state();
+        state.project_path =
+            cxx_qt_lib::QString::from(root.join("show.autolight").to_string_lossy().to_string());
+        let entry = cache_entry_for_bytes("stem", "dep_drums", b"valid stem", "1", "now").unwrap();
+        let artifact_path = root.join(&entry.path);
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, b"corrupt stem").unwrap();
+        state
+            .project
+            .cache_entries
+            .retain(|entry| entry.id != "cache_drums");
+        state.project.cache_entries.push(entry.clone());
+        state
+            .project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_drums")
+            .unwrap()
+            .cache_refs = vec![entry.id.clone()];
+
+        let invalid = state.refresh_cache_status_state();
+
+        assert!(invalid.contains(&entry.id));
+        assert_eq!(
+            state
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == "track_drums")
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+        assert_eq!(
+            state
+                .project
+                .cache_entries
+                .iter()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap()
+                .validation_status,
+            "invalid"
         );
     }
 
@@ -2834,6 +3053,49 @@ mod tests {
     }
 
     #[test]
+    fn controller_open_project_marks_missing_audio_asset_stale() {
+        let root = test_dir("open-missing-audio");
+        let audio_path = root.join("song.wav");
+        let project_path = root.join("show.autolight");
+        write_test_wav(&audio_path, 44_100, 2, 16);
+        let mut state = AppControllerState::default();
+        let source_id = state.import_audio_state(audio_path.to_str().unwrap());
+        let generated_id = state.add_transform_track_state(
+            &source_id,
+            "markers.fixed_interval",
+            "1",
+            r#"{"duration": 1.0, "interval": 0.5}"#,
+        );
+        state.run_track_state(&generated_id);
+        assert!(state.save_project_state(project_path.to_str().unwrap()));
+        std::fs::remove_file(&audio_path).unwrap();
+
+        let mut opened = AppControllerState::default();
+        assert!(opened.open_project_state(project_path.to_str().unwrap()));
+
+        assert!(opened.is_dirty);
+        assert_eq!(opened.project.audio_assets[0].import_status, "offline");
+        let source = opened
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == source_id)
+            .unwrap();
+        assert_eq!(source.result_state, ResultState::Stale);
+        assert!(source.error.contains("input audio asset offline"));
+        assert_eq!(
+            opened
+                .project
+                .tracks
+                .iter()
+                .find(|track| track.id == generated_id)
+                .unwrap()
+                .result_state,
+            ResultState::Stale
+        );
+    }
+
+    #[test]
     fn controller_playback_state_transitions_from_selected_track() {
         let root = test_dir("playback");
         let audio_path = root.join("song.wav");
@@ -2978,6 +3240,8 @@ mod tests {
         assert!(qml.contains("rustController.openProject"));
         assert!(qml.contains("rustController.saveProject"));
         assert!(qml.contains("rustController.importAudio"));
+        assert!(qml.contains("WAV audio files (*.wav)"));
+        assert!(!qml.contains("*.mp3"));
         assert!(qml.contains("rustController.playSelectedTrack"));
         assert!(qml.contains("rustController.playbackSourcePath"));
         assert!(qml.contains("rustController.playbackPositionSeconds"));

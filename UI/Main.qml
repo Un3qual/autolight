@@ -284,7 +284,7 @@ Window {
     FileDialog {
         id: importAudioDialog
         title: "Import Audio"
-        nameFilters: ["Audio files (*.wav *.mp3 *.flac *.aiff *.aif *.m4a)", "All files (*)"]
+        nameFilters: ["WAV audio files (*.wav)", "All files (*)"]
         fileMode: FileDialog.OpenFile
         onAccepted: root.controller.import_audio(String(selectedFile))
     }
