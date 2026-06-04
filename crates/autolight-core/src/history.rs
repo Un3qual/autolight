@@ -389,7 +389,7 @@ mod tests {
         )
         .unwrap();
         let after = vec![updated];
-        let mut history = EditHistory::new();
+        let mut history = EditHistory::default();
         history.push(MarkerSnapshotCommand {
             track_id: "track_edit".to_string(),
             before,
@@ -448,7 +448,7 @@ mod tests {
         let mut project = project_with_source();
         let manual =
             create_manual_editable_track(&mut project, "track_source", "Manual Cues").unwrap();
-        let mut history = EditHistory::new();
+        let mut history = EditHistory::default();
         history.push(TrackSnapshotCommand {
             track_id: manual.id.clone(),
             before: None,
@@ -489,7 +489,7 @@ mod tests {
             EditableMarkerInput::cue(1.0, "Cue"),
         )
         .unwrap();
-        let mut history = EditHistory::new();
+        let mut history = EditHistory::default();
         history.push(MarkerSnapshotCommand {
             track_id: "track_edit".to_string(),
             before: Vec::default(),
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn history_clear_resets_undo_redo_and_clean_state() {
-        let mut history = EditHistory::new();
+        let mut history = EditHistory::default();
         history.push(ProjectSnapshotCommand {
             before: ProjectDocument::new("before", "Before"),
             after: ProjectDocument::new("after", "After"),

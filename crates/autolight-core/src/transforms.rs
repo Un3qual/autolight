@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn transforms_registry_rejects_duplicates_and_reports_version_mismatch() {
-        let mut registry = TransformRegistry::new();
+        let mut registry = TransformRegistry::default();
         registry
             .register(TransformSpec::new(
                 "test.versioned",
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn transforms_registry_requires_explicit_version_for_multi_version_specs() {
-        let mut registry = TransformRegistry::new();
+        let mut registry = TransformRegistry::default();
         registry
             .register(TransformSpec::new(
                 "test.versioned",

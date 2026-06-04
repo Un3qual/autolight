@@ -26,6 +26,17 @@ uv run python main.py
 
 ## Completion Update
 
+- 2026-06-04: Addressed the follow-up DeepSource Rust dashboard report for PR #13 at commit range `f5342af...c9c936b`.
+- Changes made: replaced remaining empty `new()` calls in test setup with `EditHistory::default()` and `TransformRegistry::default()` where `Default` is equivalent and already preserves the intended empty state.
+- Next batch: none. Push this final DeepSource cleanup and refresh PR checks/review threads.
+- Verification:
+  - `rg -n 'EditHistory::new\(\)|TransformRegistry::new\(\)' crates/autolight-core/src/history.rs crates/autolight-core/src/transforms.rs`: passed, no matches.
+  - `cargo test -p autolight-core --locked`: passed, 44 tests.
+  - `cargo fmt --all -- --check`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`: passed.
+  - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+  - `git diff --check`: passed.
+
 - 2026-06-04: Addressed four new unresolved Codex bot review threads that surfaced after the DeepSource cleanup push `2f0a7ed`.
 - Changes made: decoded Windows `file:///C:/...` file-dialog URLs to local paths before Rust import/open/save path handling; built QML playback file URLs from native Windows paths by normalizing backslashes and preserving drive-letter colons; avoided rebuilding `trackModel` during `select_track` so marker press handling does not lose delegates mid-gesture; rejected opened project markers with non-finite or negative timestamps/durations during graph validation.
 - Next batch: none. Push this follow-up, refresh GitHub review threads, reply/resolve the four current Codex bot comments, and report any newly surfaced bot comments or external check failures.
