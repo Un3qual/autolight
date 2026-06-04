@@ -99,20 +99,22 @@ impl ProjectDocument {
         let output = self.to_json_string_pretty()?;
         let tmp_path = atomic_save_temp_path(path);
         let write_result = (|| -> Result<(), ProjectError> {
-            let mut file = fs::File::create(&tmp_path).map_err(|source| ProjectError::Write {
-                path: tmp_path.clone(),
-                source,
-            })?;
-            file.write_all(output.as_bytes())
-                .map_err(|source| ProjectError::Write {
+            {
+                let mut file =
+                    fs::File::create(&tmp_path).map_err(|source| ProjectError::Write {
+                        path: tmp_path.clone(),
+                        source,
+                    })?;
+                file.write_all(output.as_bytes())
+                    .map_err(|source| ProjectError::Write {
+                        path: tmp_path.clone(),
+                        source,
+                    })?;
+                file.sync_all().map_err(|source| ProjectError::Write {
                     path: tmp_path.clone(),
                     source,
                 })?;
-            file.sync_all().map_err(|source| ProjectError::Write {
-                path: tmp_path.clone(),
-                source,
-            })?;
-            drop(file);
+            }
             fs::rename(&tmp_path, path).map_err(|source| ProjectError::Write {
                 path: path.to_path_buf(),
                 source,

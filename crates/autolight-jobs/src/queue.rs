@@ -774,22 +774,23 @@ fn write_cache_artifact_payload(
     }
     let tmp_path = cache_artifact_temp_path(&path);
     let write_result = (|| -> Result<(), JobQueueError> {
-        let mut file =
-            fs::File::create(&tmp_path).map_err(|source| JobQueueError::ArtifactWrite {
-                path: tmp_path.clone(),
-                source,
-            })?;
-        file.write_all(payload)
-            .map_err(|source| JobQueueError::ArtifactWrite {
-                path: tmp_path.clone(),
-                source,
-            })?;
-        file.sync_all()
-            .map_err(|source| JobQueueError::ArtifactWrite {
-                path: tmp_path.clone(),
-                source,
-            })?;
-        drop(file);
+        {
+            let mut file =
+                fs::File::create(&tmp_path).map_err(|source| JobQueueError::ArtifactWrite {
+                    path: tmp_path.clone(),
+                    source,
+                })?;
+            file.write_all(payload)
+                .map_err(|source| JobQueueError::ArtifactWrite {
+                    path: tmp_path.clone(),
+                    source,
+                })?;
+            file.sync_all()
+                .map_err(|source| JobQueueError::ArtifactWrite {
+                    path: tmp_path.clone(),
+                    source,
+                })?;
+        }
         fs::rename(&tmp_path, &path).map_err(|source| JobQueueError::ArtifactWrite {
             path: path.clone(),
             source,
