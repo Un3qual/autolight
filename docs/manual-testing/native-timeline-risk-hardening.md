@@ -10,6 +10,10 @@ Qt: 6.11.1
 
 - `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app` built and launched the Rust app in a real macOS window.
 - The terminal emitted only the known host audio-channel warnings before the app was stopped with Ctrl-C.
+- Follow-up automation found and fixed a QML wrapper refresh bug where the native controller loaded
+  the demo project but `AppRuntime` wrapper properties stayed on the initial smoke values.
+- After the wrapper refresh fix, macOS Accessibility verified the real window title as
+  `Autolight Rust Demo`; clicking `Play` advanced the visible playback label to `0:02 / 0:02`.
 - `screencapture -x /private/tmp/autolight-native-window.png` failed with `could not create image from display`, so the agent harness could not capture visual proof.
 - Physical trackpad-only checks, pinch gesture feel, and 10-minute memory observation were not executable by this non-interactive harness. Keep those rows open for a human real-device pass.
 
@@ -35,6 +39,8 @@ Qt: 6.11.1
 | Scenario | Observation | Pass/Fail |
 | --- | --- | --- |
 | Real-window app launch | Built and launched with `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app`; no fatal runtime errors before Ctrl-C. | Pass |
+| Demo startup state | macOS Accessibility read the real window title as `Autolight Rust Demo` after `AppRuntime` mirrored native qproperties through `reloadModels()`. | Pass |
+| Playback source state | Clicking `Play` in the real window updated the visible playback label to `0:02 / 0:02`, proving the playback source/duration mirror is live. | Pass |
 | Screenshot capture | `screencapture -x /private/tmp/autolight-native-window.png` failed with `could not create image from display`. | Blocked by harness |
 | 50-track snapshot load | Requires interactive fixture creation/import in the real app window. | Needs human pass |
 | High-zoom playback follow | Code guard verified by `qml_follow_smoothing_is_disabled_during_native_viewport_gestures`; physical visual smoothness still requires trackpad/window observation. | Needs human pass |

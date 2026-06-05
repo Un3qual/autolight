@@ -8,18 +8,18 @@ QtObject {
     id: appRuntime
 
     property var nativeController: AppController {}
-    readonly property string projectName: nativeController.projectName
-    readonly property string lastError: nativeController.lastError
-    readonly property string timelineRowsJson: nativeController.timelineRowsJson
+    property string projectName: nativeController.projectName
+    property string lastError: nativeController.lastError
+    property string timelineRowsJson: nativeController.timelineRowsJson
     property string timelineSceneSnapshotJson: nativeController.timelineSceneSnapshotJson
-    readonly property string transformSpecsJson: nativeController.transformSpecsJson
+    property string transformSpecsJson: nativeController.transformSpecsJson
     readonly property string selectedMarkerIdsJson: nativeController.selectedMarkerIdsJson
     readonly property string selectedTrackMarkersJson: nativeController.selectedTrackMarkersJson
     readonly property string markerColorOptionsJson: nativeController.markerColorOptionsJson
-    readonly property string projectPath: nativeController.projectPath
-    readonly property bool isDirty: nativeController.isDirty
-    readonly property bool canUndo: nativeController.canUndo
-    readonly property bool canRedo: nativeController.canRedo
+    property string projectPath: nativeController.projectPath
+    property bool isDirty: nativeController.isDirty
+    property bool canUndo: nativeController.canUndo
+    property bool canRedo: nativeController.canRedo
     property string selectedTrackId: nativeController.selectedTrackId
     property bool selectedTrackCanPlay: nativeController.selectedTrackCanPlay
     property bool selectedTrackCanRerun: nativeController.selectedTrackCanRerun
@@ -72,12 +72,15 @@ QtObject {
         onTriggered: appRuntime.poll_jobs()
     }
     property var playback: QtObject {
-        readonly property string lastError: nativeController.playbackLastError.length > 0 ? nativeController.playbackLastError : appRuntime.mediaPlayer.errorString
+        property string nativeLastError: nativeController.playbackLastError
+        property real nativePositionSeconds: nativeController.playbackPositionSeconds
+        property real nativeDurationSeconds: nativeController.playbackDurationSeconds
+        property string lastError: nativeLastError.length > 0 ? nativeLastError : appRuntime.mediaPlayer.errorString
         readonly property bool isPlaying: appRuntime.mediaPlayer.playbackState === MediaPlayer.PlayingState
-        readonly property string sourcePath: nativeController.playbackSourcePath
-        readonly property real positionSeconds: appRuntime.mediaPlayer.source.toString().length > 0 ? appRuntime.mediaPlayer.position / 1000.0 : nativeController.playbackPositionSeconds
-        readonly property real durationSeconds: appRuntime.mediaPlayer.duration > 0 ? appRuntime.mediaPlayer.duration / 1000.0 : nativeController.playbackDurationSeconds
-        readonly property real volume: appRuntime.audioOutput.volume
+        property string sourcePath: nativeController.playbackSourcePath
+        readonly property real positionSeconds: appRuntime.mediaPlayer.source.toString().length > 0 ? appRuntime.mediaPlayer.position / 1000.0 : nativePositionSeconds
+        readonly property real durationSeconds: appRuntime.mediaPlayer.duration > 0 ? appRuntime.mediaPlayer.duration / 1000.0 : nativeDurationSeconds
+        property real volume: appRuntime.audioOutput.volume
 
         function play() {
             var played = nativeController.playLoadedPlayback()
@@ -89,6 +92,7 @@ QtObject {
         function set_volume(value) {
             nativeController.setPlaybackVolumeValue(value)
             appRuntime.audioOutput.volume = nativeController.playbackVolume
+            volume = nativeController.playbackVolume
             appRuntime.reloadModels()
         }
     }
@@ -107,7 +111,7 @@ QtObject {
     }
 
     function syncPlaybackSource() {
-        var path = nativeController.playbackSourcePath
+        var path = playback.sourcePath
         if (path.length === 0) {
             mediaPlayer.stop()
             mediaPlayer.source = ""
@@ -116,6 +120,25 @@ QtObject {
         var sourceUrl = playbackSourceUrl(path)
         if (mediaPlayer.source.toString() !== sourceUrl) mediaPlayer.source = sourceUrl
         return true
+    }
+
+    function reloadProjectState() {
+        projectName = nativeController.projectName
+        lastError = nativeController.lastError
+        timelineRowsJson = nativeController.timelineRowsJson
+        transformSpecsJson = nativeController.transformSpecsJson
+        projectPath = nativeController.projectPath
+        isDirty = nativeController.isDirty
+        canUndo = nativeController.canUndo
+        canRedo = nativeController.canRedo
+    }
+
+    function reloadPlaybackState() {
+        playback.nativeLastError = nativeController.playbackLastError
+        playback.sourcePath = nativeController.playbackSourcePath
+        playback.nativePositionSeconds = nativeController.playbackPositionSeconds
+        playback.nativeDurationSeconds = nativeController.playbackDurationSeconds
+        playback.volume = nativeController.playbackVolume
     }
 
     function seekMediaPlayerToSeconds(seconds) {
@@ -189,6 +212,8 @@ QtObject {
     }
 
     function reloadModels() {
+        reloadProjectState()
+        reloadPlaybackState()
         reloadSelectionModels()
         reloadViewportState()
         reloadTrackModel()

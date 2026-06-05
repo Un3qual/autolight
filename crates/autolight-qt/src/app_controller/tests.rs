@@ -3431,7 +3431,9 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("Failed to parse transformSpecsJson"));
     assert!(adapter_qml.contains("trackRows = rows"));
     assert!(!adapter_qml.contains("trackModel.append(rows[i])"));
-    assert!(adapter_qml.contains("function reloadModels() {\n        reloadSelectionModels()"));
+    assert!(adapter_qml.contains(
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()\n        reloadSelectionModels()"
+    ));
     assert!(adapter_qml.contains("nativeController.selectedTrackId"));
     assert!(adapter_qml.contains("nativeController.addTransformTrack"));
     assert!(adapter_qml.contains("nativeController.runTrack"));
@@ -3539,11 +3541,42 @@ fn qml_app_runtime_refreshes_native_timeline_scene_snapshot_after_model_changes(
     assert!(adapter_qml
         .contains("timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"));
     assert!(adapter_qml.contains(
-        "function reloadModels() {\n        reloadSelectionModels()\n        reloadViewportState()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n        reloadTransformModel()"
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()\n        reloadSelectionModels()\n        reloadViewportState()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n        reloadTransformModel()"
     ));
     assert!(adapter_qml.contains(
         "function select_track(trackId) {\n        nativeController.selectTrack(trackId)\n        reloadSelectionModels()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n    }"
     ));
+}
+
+#[test]
+fn qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(adapter_qml.contains("function reloadProjectState()"));
+    assert!(adapter_qml.contains("projectName = nativeController.projectName"));
+    assert!(adapter_qml.contains("lastError = nativeController.lastError"));
+    assert!(adapter_qml.contains("projectPath = nativeController.projectPath"));
+    assert!(adapter_qml.contains("isDirty = nativeController.isDirty"));
+    assert!(adapter_qml.contains("canUndo = nativeController.canUndo"));
+    assert!(adapter_qml.contains("canRedo = nativeController.canRedo"));
+    assert!(adapter_qml.contains("function reloadPlaybackState()"));
+    assert!(adapter_qml.contains("playback.sourcePath = nativeController.playbackSourcePath"));
+    assert!(adapter_qml
+        .contains("playback.nativePositionSeconds = nativeController.playbackPositionSeconds"));
+    assert!(adapter_qml
+        .contains("playback.nativeDurationSeconds = nativeController.playbackDurationSeconds"));
+    assert!(adapter_qml.contains("playback.volume = nativeController.playbackVolume"));
+    assert!(adapter_qml.contains(
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()"
+    ));
+    assert!(
+        !adapter_qml.contains("readonly property string projectName: nativeController.projectName")
+    );
+    assert!(!adapter_qml
+        .contains("readonly property string sourcePath: nativeController.playbackSourcePath"));
 }
 
 #[test]

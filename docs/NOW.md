@@ -133,6 +133,29 @@ gates: frame-builder benchmarking remains a future perf harness item, queued cou
 covered by the atomic/queued update shape and local tests, waveform budget edge cases are covered,
 and the scene layout constants are still intentionally local renderer constants.
 
+**Manual Gate Follow-Up:** Completed 2026-06-05. A real-window rerun exposed a Rust QML runtime
+wrapper bug: the native controller loaded `Autolight Rust Demo`, but `AppRuntime` readonly bindings
+to native qproperties did not refresh the window title or playback-facing properties after invokable
+state changes. `AppRuntime` now mirrors project and playback qproperties explicitly through
+`reloadProjectState()` and `reloadPlaybackState()` before refreshing selection, viewport, rows, scene
+snapshot, and transform models. The regression
+`qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes` locks the wrapper contract.
+After the fix, a clean real-window launch reported `Autolight Rust Demo` through macOS Accessibility,
+and clicking `Play` advanced the visible playback label to `0:02 / 0:02`. The physical trackpad,
+pinch, 50-track interactive fixture, and 10-minute visual memory rows still require the human-device
+pass recorded in `docs/manual-testing/native-timeline-risk-hardening.md`.
+
+**Manual Gate Follow-Up Verification:** Passed:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_loads_demo_project_and_selects_source_track`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked controller_playback_state_transitions_from_selected_track`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 170 tests;
+`cargo fmt --all -- --check`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`;
+and `git diff --check`.
+
 **PR #15 Bot Follow-Up Verification:** Passed:
 `cargo test -p autolight-analysis --locked waveform_level_counts_`;
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_cpp_is_split_into_focused_units`;
