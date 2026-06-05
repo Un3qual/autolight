@@ -9,10 +9,12 @@ namespace autolight::qt::timeline_scene {
 struct MarkerSpec
 {
   QString markerId;
+  QString label;
   double timestamp = 0.0;
   double duration = 0.0;
   QColor color = QColor(QStringLiteral("#f59e0b"));
   bool selected = false;
+  bool editable = false;
 };
 
 struct WaveformSampleSpec

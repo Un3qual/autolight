@@ -38,7 +38,12 @@ Item {
     function setTrackScrollPixels(value) {
         var safeValue = Number(value)
         if (!isFinite(safeValue)) safeValue = 0
-        timelineRoot.trackScrollPixels = Math.max(0, Math.min(timelineRoot.maxTrackScrollPixels(), safeValue))
+        var clampedValue = Math.max(0, Math.min(timelineRoot.maxTrackScrollPixels(), safeValue))
+        if (timelineRoot.trackScrollPixels === clampedValue) {
+            timelineRoot.updateVisibleTrackRange()
+            return
+        }
+        timelineRoot.trackScrollPixels = clampedValue
     }
 
     function updateVisibleTrackRange() {
@@ -79,6 +84,17 @@ Item {
             if (!timelineRoot.appController) return
             timelineRoot.appController.select_track(trackId)
             timelineRoot.appController.toggle_marker_selection(markerId, additive)
+        }
+        onMarkerMoveRequested: function(trackId, markerId, deltaSeconds, bypassSnap, preserveSelection) {
+            if (!timelineRoot.appController) return
+            timelineRoot.appController.select_track(trackId)
+            if (!preserveSelection) timelineRoot.appController.toggle_marker_selection(markerId, false)
+            timelineRoot.appController.move_selected_markers(deltaSeconds, bypassSnap)
+        }
+        onMarkerResizeRequested: function(trackId, markerId, durationSeconds) {
+            if (!timelineRoot.appController) return
+            timelineRoot.appController.select_track(trackId)
+            timelineRoot.appController.resize_marker(markerId, durationSeconds)
         }
         onTrackExpansionToggled: function(trackId, expanded) {
             if (timelineRoot.appController) timelineRoot.appController.set_track_expanded(trackId, expanded)

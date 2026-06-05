@@ -79,6 +79,7 @@ SceneSnapshot parseTimelineSceneSnapshot(const QString& sceneSnapshotJson)
       const QJsonObject markerObject = markerValue.toObject();
       MarkerSpec marker;
       marker.markerId = markerObject.value(QStringLiteral("markerId")).toString();
+      marker.label = markerObject.value(QStringLiteral("label")).toString();
       marker.timestamp = finiteNonNegative(
         finiteJsonNumber(markerObject.value(QStringLiteral("timestamp")), 0.0));
       marker.duration = finiteNonNegative(
@@ -87,6 +88,7 @@ SceneSnapshot parseTimelineSceneSnapshot(const QString& sceneSnapshotJson)
         markerObject.value(QStringLiteral("color")).toString(QStringLiteral("#f59e0b")),
         QColor(QStringLiteral("#f59e0b")));
       marker.selected = markerObject.value(QStringLiteral("selected")).toBool(false);
+      marker.editable = markerObject.value(QStringLiteral("editable")).toBool(false);
       track.markers.push_back(marker);
     }
 

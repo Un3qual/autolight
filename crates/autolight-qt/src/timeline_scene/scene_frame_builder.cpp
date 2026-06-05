@@ -511,8 +511,8 @@ int timelineFirstVisibleTrackIndex(double trackScrollPixels)
 
 double timelineVisibleTrackY(int trackIndex, double trackScrollPixels)
 {
-  return kRulerHeight
-    + static_cast<double>(trackIndex - timelineFirstVisibleTrackIndex(trackScrollPixels)) * kRowHeight;
+  return kRulerHeight + static_cast<double>(trackIndex) * kRowHeight
+    - finiteNonNegative(trackScrollPixels);
 }
 
 int timelineTrackIndexForY(double y, double trackScrollPixels, const SceneSnapshot& snapshot)
@@ -520,8 +520,8 @@ int timelineTrackIndexForY(double y, double trackScrollPixels, const SceneSnapsh
   if (y < kRulerHeight) {
     return -1;
   }
-  const int visibleRow = static_cast<int>(std::floor((y - kRulerHeight) / kRowHeight));
-  const int trackIndex = timelineFirstVisibleTrackIndex(trackScrollPixels) + visibleRow;
+  const int trackIndex = static_cast<int>(std::floor(
+    (y - kRulerHeight + finiteNonNegative(trackScrollPixels)) / kRowHeight));
   return trackIndex >= 0 && trackIndex < snapshot.tracks.size() ? trackIndex : -1;
 }
 
@@ -676,6 +676,7 @@ SceneFrameSpec buildTimelineSceneFrame(
     }
     for (const MarkerSpec& marker : track.markers) {
       const QRectF markerRect = timelineMarkerRectForTrack(marker, y, rowHeight, scrollSeconds, pixelsPerSecond);
+      const QRectF visibleMarkerRect = timelineLaneClippedRect(markerRect, width, height);
       QColor markerFill = marker.color;
       markerFill.setAlpha(marker.selected ? 230 : 155);
       appendLaneClippedRect(
@@ -696,6 +697,18 @@ SceneFrameSpec buildTimelineSceneFrame(
         6.0,
         width,
         height);
+      if (!marker.label.isEmpty() && visibleMarkerRect.width() >= kMinimumMarkerLabelWidth) {
+        appendText(
+          texts,
+          marker.label,
+          QColor(QStringLiteral("#111318")),
+          visibleMarkerRect.x() + 4.0,
+          visibleMarkerRect.y() + visibleMarkerRect.height() / 2.0 - 7.0,
+          std::max(1.0, visibleMarkerRect.width() - 8.0),
+          14.0,
+          10,
+          true);
+      }
     }
   }
 

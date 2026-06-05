@@ -71,6 +71,8 @@ signals:
   void scenePerfCountersChanged();
   void trackClicked(const QString& trackId);
   void markerClicked(const QString& trackId, const QString& markerId, bool additive);
+  void markerMoveRequested(const QString& trackId, const QString& markerId, double deltaSeconds, bool bypassSnap, bool preserveSelection);
+  void markerResizeRequested(const QString& trackId, const QString& markerId, double durationSeconds);
   void trackExpansionToggled(const QString& trackId, bool expanded);
   void scrubRequested(double seconds);
   void viewportScrollRequested(double pixelDelta);
@@ -85,6 +87,34 @@ protected:
   void wheelEvent(QWheelEvent* event) override;
 
 private:
+  enum class MarkerDragMode
+  {
+    None,
+    Move,
+    Resize,
+  };
+
+  struct MarkerDragState
+  {
+    MarkerDragMode mode = MarkerDragMode::None;
+    QString trackId;
+    QString markerId;
+    double pressX = 0.0;
+    double duration = 0.0;
+    bool preserveSelection = false;
+
+    bool active() const { return mode != MarkerDragMode::None; }
+    void reset()
+    {
+      mode = MarkerDragMode::None;
+      trackId.clear();
+      markerId.clear();
+      pressX = 0.0;
+      duration = 0.0;
+      preserveSelection = false;
+    }
+  };
+
   void queueScenePerfCountersChanged();
 
   QString m_sceneSnapshotJson;
@@ -95,6 +125,7 @@ private:
   double m_playbackPositionSeconds = 0.0;
   int m_selectedTrackIndex = -1;
   bool m_scrubbingRuler = false;
+  MarkerDragState m_markerDrag;
   qulonglong m_sceneSnapshotParseCount = 0;
   qulonglong m_worstSceneSnapshotParseMicros = 0;
   std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};

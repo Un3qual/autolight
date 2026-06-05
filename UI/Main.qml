@@ -131,8 +131,17 @@ Window {
         }
     }
 
+    function extendTimelineControlNavigation() {
+        if (!root.controller) return
+        if (typeof root.controller.begin_timeline_user_navigation === "function") {
+            root.controller.begin_timeline_user_navigation()
+            timelineControlNavigationQuietTimer.restart()
+        }
+    }
+
     function setTimelineScrollSeconds(seconds) {
         if (root.controller && typeof root.controller.set_timeline_scroll_seconds === "function") {
+            root.extendTimelineControlNavigation()
             root.controller.set_timeline_scroll_seconds(seconds)
         }
     }
@@ -278,6 +287,17 @@ Window {
         onRejected: {
             pendingAction = ""
             pendingPath = ""
+        }
+    }
+
+    Timer {
+        id: timelineControlNavigationQuietTimer
+        interval: 220
+        repeat: false
+        onTriggered: {
+            if (root.controller && typeof root.controller.end_timeline_user_navigation === "function") {
+                root.controller.end_timeline_user_navigation()
+            }
         }
     }
 

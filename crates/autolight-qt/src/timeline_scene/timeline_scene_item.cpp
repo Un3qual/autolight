@@ -75,6 +75,23 @@ bool hasMeaningfulDelta(double value)
   return std::abs(value) > 0.000001;
 }
 
+constexpr double kMarkerDragThresholdPixels = 2.0;
+constexpr double kMarkerResizeHandleMaxWidth = 8.0;
+constexpr double kMarkerResizeHandleMinimumMarkerWidth = 16.0;
+
+QRectF markerResizeHandleRect(const QRectF& markerRect)
+{
+  if (markerRect.width() <= kMarkerResizeHandleMinimumMarkerWidth) {
+    return QRectF();
+  }
+  const double handleWidth = std::min(kMarkerResizeHandleMaxWidth, markerRect.width() / 3.0);
+  return QRectF(
+    markerRect.right() - handleWidth,
+    markerRect.y(),
+    handleWidth,
+    markerRect.height());
+}
+
 } // namespace
 
 TimelineSceneItem::TimelineSceneItem(QQuickItem* parent)
@@ -306,11 +323,16 @@ void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
   const double trackScrollPixels = itemFiniteNonNegative(m_viewportTrackScrollPixels);
   const SceneSnapshot emptySnapshot;
   const SceneSnapshot& snapshot = currentSnapshot(m_snapshot, emptySnapshot);
+  m_markerDrag.reset();
 
-  if (y < kRulerHeight) {
+  if (y < kRulerHeight && x >= timelineLaneOriginX()) {
     m_scrubbingRuler = true;
     emit scrubRequested(timelineSecondsForPosition(x, scrollSeconds, pixelsPerSecond, snapshot));
     event->accept();
+    return;
+  }
+  if (y < kRulerHeight) {
+    event->ignore();
     return;
   }
 
@@ -334,7 +356,20 @@ void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
     const QRectF markerRect = timelineMarkerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond);
     const QRectF visibleMarkerRect = timelineLaneClippedRect(markerRect, width(), height());
     if (!marker.markerId.isEmpty() && visibleMarkerRect.contains(event->position())) {
-      emit markerClicked(trackId, marker.markerId, timelineAdditiveSelection(event->modifiers()));
+      if (marker.editable) {
+        m_markerDrag.trackId = trackId;
+        m_markerDrag.markerId = marker.markerId;
+        m_markerDrag.pressX = x;
+        m_markerDrag.duration = marker.duration;
+        m_markerDrag.preserveSelection = marker.selected;
+        if (markerResizeHandleRect(visibleMarkerRect).contains(event->position())) {
+          m_markerDrag.mode = MarkerDragMode::Resize;
+        } else {
+          m_markerDrag.mode = MarkerDragMode::Move;
+        }
+      } else {
+        emit markerClicked(trackId, marker.markerId, timelineAdditiveSelection(event->modifiers()));
+      }
       event->accept();
       return;
     }
@@ -356,7 +391,14 @@ void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
 
 void TimelineSceneItem::mouseMoveEvent(QMouseEvent* event)
 {
-  if (event == nullptr || !m_scrubbingRuler) {
+  if (event == nullptr) {
+    return;
+  }
+  if (m_markerDrag.active()) {
+    event->accept();
+    return;
+  }
+  if (!m_scrubbingRuler) {
     return;
   }
   const SceneSnapshot emptySnapshot;
@@ -371,7 +413,37 @@ void TimelineSceneItem::mouseMoveEvent(QMouseEvent* event)
 
 void TimelineSceneItem::mouseReleaseEvent(QMouseEvent* event)
 {
-  if (event == nullptr || !m_scrubbingRuler) {
+  if (event == nullptr) {
+    return;
+  }
+  if (m_markerDrag.active()) {
+    const double pixelDelta = event->position().x() - m_markerDrag.pressX;
+    if (std::abs(pixelDelta) < kMarkerDragThresholdPixels) {
+      emit markerClicked(
+        m_markerDrag.trackId,
+        m_markerDrag.markerId,
+        timelineAdditiveSelection(event->modifiers()));
+    } else {
+      const double pixelsPerSecond = itemFinitePositive(m_viewportPixelsPerSecond, 100.0);
+      if (m_markerDrag.mode == MarkerDragMode::Resize) {
+        emit markerResizeRequested(
+          m_markerDrag.trackId,
+          m_markerDrag.markerId,
+          std::max(0.0, m_markerDrag.duration + pixelDelta / pixelsPerSecond));
+      } else {
+        emit markerMoveRequested(
+          m_markerDrag.trackId,
+          m_markerDrag.markerId,
+          pixelDelta / pixelsPerSecond,
+          (event->modifiers() & Qt::AltModifier) != 0,
+          m_markerDrag.preserveSelection);
+      }
+    }
+    m_markerDrag.reset();
+    event->accept();
+    return;
+  }
+  if (!m_scrubbingRuler) {
     return;
   }
   const SceneSnapshot emptySnapshot;

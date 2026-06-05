@@ -15,6 +15,7 @@ constexpr double kLabelWidth = 280.0;
 constexpr double kLeftPadding = 24.0;
 constexpr double kSelectionStripeWidth = 4.0;
 constexpr double kMinimumMarkerWidth = 2.0;
+constexpr double kMinimumMarkerLabelWidth = 36.0;
 
 struct RectSpec
 {

@@ -2951,6 +2951,122 @@ fn qml_native_timeline_keeps_vertical_scroll_and_visible_track_range_current() {
 }
 
 #[test]
+fn native_timeline_scene_applies_fractional_vertical_track_scroll() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains(
+        "return kRulerHeight + static_cast<double>(trackIndex) * kRowHeight\n    - finiteNonNegative(trackScrollPixels);"
+    ));
+    assert!(scene_sources.contains(
+        "const int trackIndex = static_cast<int>(std::floor(\n    (y - kRulerHeight + finiteNonNegative(trackScrollPixels)) / kRowHeight));"
+    ));
+    assert!(!scene_sources.contains(
+        "static_cast<double>(trackIndex - timelineFirstVisibleTrackIndex(trackScrollPixels)) * kRowHeight"
+    ));
+}
+
+#[test]
+fn native_timeline_scene_preserves_marker_labels() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("QString label;"));
+    assert!(scene_sources
+        .contains("marker.label = markerObject.value(QStringLiteral(\"label\")).toString();"));
+    assert!(scene_sources.contains("constexpr double kMinimumMarkerLabelWidth = 36.0;"));
+    assert!(scene_sources.contains(
+        "if (!marker.label.isEmpty() && visibleMarkerRect.width() >= kMinimumMarkerLabelWidth)"
+    ));
+    assert!(scene_sources.contains("appendText(\n          texts,\n          marker.label"));
+}
+
+#[test]
+fn native_timeline_scene_restores_editable_marker_drag_and_resize() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("bool editable = false;"));
+    assert!(scene_sources.contains(
+        "marker.editable = markerObject.value(QStringLiteral(\"editable\")).toBool(false);"
+    ));
+    assert!(scene_header.contains(
+        "void markerMoveRequested(const QString& trackId, const QString& markerId, double deltaSeconds, bool bypassSnap, bool preserveSelection);"
+    ));
+    assert!(scene_header.contains(
+        "void markerResizeRequested(const QString& trackId, const QString& markerId, double durationSeconds);"
+    ));
+    assert!(scene_cpp.contains("m_markerDrag.mode = MarkerDragMode::Move;"));
+    assert!(scene_cpp.contains("m_markerDrag.mode = MarkerDragMode::Resize;"));
+    assert!(scene_cpp.contains("emit markerMoveRequested("));
+    assert!(scene_cpp.contains("emit markerResizeRequested("));
+    assert!(timeline_qml.contains("onMarkerMoveRequested: function(trackId, markerId, deltaSeconds, bypassSnap, preserveSelection)"));
+    assert!(timeline_qml
+        .contains("timelineRoot.appController.move_selected_markers(deltaSeconds, bypassSnap)"));
+    assert!(timeline_qml
+        .contains("onMarkerResizeRequested: function(trackId, markerId, durationSeconds)"));
+    assert!(timeline_qml
+        .contains("timelineRoot.appController.resize_marker(markerId, durationSeconds)"));
+}
+
+#[test]
+fn native_timeline_scene_keeps_ruler_label_clicks_from_scrubbing() {
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_cpp.contains("if (y < kRulerHeight && x >= timelineLaneOriginX())"));
+    assert!(!scene_cpp.contains("if (y < kRulerHeight) {\n    m_scrubbingRuler = true;"));
+}
+
+#[test]
+fn qml_native_timeline_refreshes_visible_range_when_scroll_value_is_unchanged() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(timeline_qml.contains("if (timelineRoot.trackScrollPixels === clampedValue)"));
+    assert!(timeline_qml.contains("timelineRoot.updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains(
+        "onHeightChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)"
+    ));
+    assert!(timeline_qml.contains(
+        "onTrackCountChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)"
+    ));
+}
+
+#[test]
+fn qml_main_marks_scroll_slider_changes_as_user_navigation() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+
+    assert!(main_qml.contains("function extendTimelineControlNavigation()"));
+    assert!(main_qml.contains("root.controller.begin_timeline_user_navigation()"));
+    assert!(main_qml.contains("timelineControlNavigationQuietTimer.restart()"));
+    assert!(main_qml.contains("id: timelineControlNavigationQuietTimer"));
+    assert!(main_qml.contains("root.controller.end_timeline_user_navigation()"));
+    assert!(main_qml.contains("onMoved: root.setTimelineScrollSeconds(value)"));
+}
+
+#[test]
 fn qml_timeline_native_scrub_omits_label_width_with_rust_only_runtime() {
     let main_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
