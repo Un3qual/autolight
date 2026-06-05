@@ -6,6 +6,7 @@ use thiserror::Error;
 
 pub const MAX_WAVEFORM_LOD_BUCKETS: usize = 32_768;
 const MAX_VISIBLE_WAVEFORM_SAMPLES: usize = 16;
+const MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS: usize = 2;
 
 #[derive(Debug, Error)]
 pub enum WaveformError {
@@ -144,7 +145,8 @@ pub fn waveform_level_bucket_counts(base_bucket_count: usize, frame_count: usize
 /// Returns waveform LOD counts bounded by estimated loaded `WaveformSample` storage.
 ///
 /// The estimate includes both `levels` and the legacy `payload.samples`
-/// duplicate of the first/coarsest level.
+/// duplicate of the first/coarsest level. Nonempty inputs have a best-effort
+/// one-bucket floor even when `max_bytes` is smaller than that two-slot minimum.
 pub fn waveform_level_bucket_counts_for_budget(
     base_bucket_count: usize,
     frame_count: usize,
@@ -153,7 +155,11 @@ pub fn waveform_level_bucket_counts_for_budget(
     let maximum = MAX_WAVEFORM_LOD_BUCKETS.min(frame_count.max(1));
     let requested_base_count = base_bucket_count.max(1).min(maximum);
     let sample_budget = max_bytes / std::mem::size_of::<WaveformSample>().max(1);
-    let budgeted_base_count = requested_base_count.min((sample_budget / 2).max(1));
+    let budgeted_base_count = if sample_budget < MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS {
+        1
+    } else {
+        requested_base_count.min(sample_budget / MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS)
+    };
     let mut counts = waveform_level_bucket_counts(budgeted_base_count, frame_count);
 
     while counts.len() > 1 && estimated_waveform_payload_sample_count(&counts) > sample_budget {
@@ -539,6 +545,14 @@ mod tests {
     }
 
     #[test]
+    fn waveform_level_counts_keep_one_bucket_floor_for_tiny_positive_budget() {
+        let counts = waveform_level_bucket_counts_for_budget(4_096, 1_000_000, 1);
+
+        assert_eq!(counts, [1]);
+        assert_eq!(estimated_payload_sample_count(&counts), 2);
+    }
+
+    #[test]
     fn waveform_payload_build_uses_budgeted_lod_counts() {
         let samples = vec![0.25; 1_024];
         let max_bytes = std::mem::size_of::<WaveformSample>() * 64;
@@ -562,6 +576,25 @@ mod tests {
         );
         assert_eq!(payload.samples.len(), 32);
         assert!(payload_sample_count(&payload) <= 64);
+    }
+
+    #[test]
+    fn waveform_payload_build_documents_minimum_floor_for_tiny_budget() {
+        let samples = vec![0.25; 1_024];
+
+        let payload = build_waveform_payload_from_mono_samples_with_max_bytes(
+            1_024,
+            &samples,
+            128,
+            Some(1),
+            || false,
+        )
+        .unwrap();
+
+        assert_eq!(payload.levels.len(), 1);
+        assert_eq!(payload.levels[0].bucket_count, 1);
+        assert_eq!(payload.samples.len(), 1);
+        assert_eq!(payload_sample_count(&payload), 2);
     }
 
     #[test]

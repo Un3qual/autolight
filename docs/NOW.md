@@ -68,6 +68,12 @@ Focused checks then passed:
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_max_bytes_param`;
 and `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_bucket_param`.
 
+**Task 4 Quality Follow-Up:** Completed 2026-06-05. Documented and tested the explicit
+best-effort floor for tiny positive `maxBytes` budgets: nonempty payloads still produce one
+bucket/level, which means two loaded `WaveformSample` slots once the legacy `payload.samples`
+duplicate is counted. Added a queue-backed `waveform.summary` runner regression proving `maxBytes`
+params produce a budgeted waveform artifact through the real job path.
+
 **Next Task:** Fence legacy JSON geometry and Python reference drift.
 
 ## Batch Plan

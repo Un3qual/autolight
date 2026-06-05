@@ -175,11 +175,19 @@ fn waveform_error_to_run_error(error: WaveformError) -> TransformRunError {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use serde_json::json;
 
-    use super::{waveform_bucket_param, waveform_max_bytes_param, DEFAULT_WAVEFORM_BUCKETS};
-    use autolight_analysis::waveform::MAX_WAVEFORM_LOD_BUCKETS;
-    use autolight_core::project::JsonObject;
+    use super::super::audio::write_silent_wav;
+    use super::{
+        job_registry, waveform_bucket_param, waveform_max_bytes_param, DEFAULT_WAVEFORM_BUCKETS,
+    };
+    use autolight_analysis::waveform::{WaveformPayload, WaveformSample, MAX_WAVEFORM_LOD_BUCKETS};
+    use autolight_core::project::{
+        AudioAsset, ImportStatus, JsonObject, ProjectDocument, ResultState, Track, TrackType,
+    };
+    use autolight_jobs::queue::LocalJobQueue;
 
     #[test]
     fn waveform_bucket_param_defaults_to_high_resolution_lod_base() {
@@ -252,5 +260,133 @@ mod tests {
 
             assert!(waveform_max_bytes_param(&params).is_err());
         }
+    }
+
+    #[test]
+    fn waveform_summary_runner_applies_max_bytes_to_artifact_payload() {
+        let root = test_dir("waveform-summary-budgeted-artifact");
+        let audio_path = root.join("source.wav");
+        let artifact_dir = root.join("artifacts");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        write_silent_wav(&audio_path, 1_024, 1, 1_024).unwrap();
+        let max_bytes = std::mem::size_of::<WaveformSample>() * 64;
+        let mut project = project_with_waveform_track(&audio_path, 128, max_bytes);
+        let mut queue = LocalJobQueue::with_clock(job_registry(), deterministic_clock());
+
+        let job_id = queue.submit(&mut project, "track_waveform").unwrap();
+        assert_eq!(
+            queue
+                .run_next_with_artifact_dir(&mut project, Some(&artifact_dir))
+                .unwrap(),
+            Some(job_id)
+        );
+
+        let cache_entry = project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.artifact_kind == "waveform")
+            .unwrap();
+        let payload_bytes = std::fs::read(artifact_dir.join(&cache_entry.path)).unwrap();
+        let payload: WaveformPayload = serde_json::from_slice(&payload_bytes).unwrap();
+
+        assert_eq!(
+            payload
+                .levels
+                .iter()
+                .map(|level| level.bucket_count)
+                .collect::<Vec<_>>(),
+            [32]
+        );
+        assert_eq!(payload.samples.len(), 32);
+        assert_eq!(payload_sample_count(&payload), 64);
+    }
+
+    fn project_with_waveform_track(
+        audio_path: &Path,
+        buckets: usize,
+        max_bytes: usize,
+    ) -> ProjectDocument {
+        let mut project = ProjectDocument::new("project_1", "Waveform Budget Test");
+        project.audio_assets.push(AudioAsset {
+            id: "asset_source".to_string(),
+            path: audio_path.to_string_lossy().into_owned(),
+            duration: 1.0,
+            sample_rate: 1_024,
+            channels: 1,
+            fingerprint: "fingerprint".to_string(),
+            import_status: ImportStatus::Online,
+            relink_hint: String::default(),
+        });
+        project.tracks.extend([
+            Track {
+                id: "track_source".to_string(),
+                track_type: TrackType::Source,
+                name: "Source".to_string(),
+                input_track_ids: Vec::default(),
+                transform_id: String::default(),
+                transform_params: JsonObject::default(),
+                transform_version: String::default(),
+                output_schema: String::default(),
+                dependency_hash: String::default(),
+                result_state: ResultState::Complete,
+                cache_refs: Vec::default(),
+                provenance: object(json!({"asset_id": "asset_source"})),
+                error: String::default(),
+            },
+            Track {
+                id: "track_waveform".to_string(),
+                track_type: TrackType::Generated,
+                name: "Waveform".to_string(),
+                input_track_ids: vec!["track_source".to_string()],
+                transform_id: "waveform.summary".to_string(),
+                transform_params: object(json!({
+                    "audio_path": audio_path.to_string_lossy(),
+                    "buckets": buckets,
+                    "maxBytes": max_bytes,
+                })),
+                transform_version: "1".to_string(),
+                output_schema: "artifact.waveform.v1".to_string(),
+                dependency_hash: String::default(),
+                result_state: ResultState::Complete,
+                cache_refs: Vec::default(),
+                provenance: JsonObject::default(),
+                error: String::default(),
+            },
+        ]);
+        project
+    }
+
+    fn payload_sample_count(payload: &WaveformPayload) -> usize {
+        payload
+            .levels
+            .iter()
+            .map(|level| level.samples.len())
+            .sum::<usize>()
+            .saturating_add(payload.samples.len())
+    }
+
+    fn deterministic_clock() -> impl FnMut() -> String {
+        let mut tick = 0_u64;
+        move || {
+            tick += 1;
+            format!("2026-06-05T00:00:{tick:02}Z")
+        }
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "autolight-qt-jobs-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn object(value: serde_json::Value) -> JsonObject {
+        value.as_object().cloned().unwrap()
     }
 }
