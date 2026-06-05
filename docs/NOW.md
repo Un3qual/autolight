@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 6 complete
+**Status:** complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -101,7 +101,24 @@ display capture environment; and focused checks passed after the QML guard harde
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_native_timeline_gestures_resume_follow_after_quiet_period`;
 `cargo fmt --all -- --check`; and `git diff --check`.
 
-**Next Task:** Final verification and stacked PR.
+**Task 7:** Completed 2026-06-05. Full automated verification passed after the hardening batch.
+The resulting stacked branch is ready for a non-draft PR on top of PR #14. Remaining manual-only
+risk is the human-device trackpad/pinch/10-minute pass recorded in
+`docs/manual-testing/native-timeline-risk-hardening.md`; this harness could launch the real app but
+could not capture the display or synthesize physical gestures.
+
+**Task 7 Verification:** Passed:
+`cargo fmt --all -- --check`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 164 tests;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D clippy::perf`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`;
+and `git diff --check`. The smoke emitted only the known host audio/font warnings and loaded
+`UI/Main.qml` with `Autolight.Qt AppController`.
+
+**Next Task:** Push `codex/native-timeline-risk-hardening`, open a non-draft stacked PR against
+`codex/native-timeline-navigation`, then refresh bot feedback.
 
 ## Batch Plan
 

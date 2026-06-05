@@ -608,7 +608,7 @@ git commit -m "Validate native timeline real-window feel"
 **Files:**
 - Modify: `docs/NOW.md`
 
-- [ ] **Step 1: Run formatting and full automated checks**
+- [x] **Step 1: Run formatting and full automated checks**
 
 Run:
 
@@ -624,7 +624,7 @@ git diff --check
 
 Expected: all pass; smoke may emit known host audio/font warnings.
 
-- [ ] **Step 2: Update `docs/NOW.md`**
+- [x] **Step 2: Update `docs/NOW.md`**
 
 Record:
 
@@ -636,7 +636,7 @@ Record:
 - exact verification commands and outcomes;
 - next batch.
 
-- [ ] **Step 3: Commit docs if needed**
+- [x] **Step 3: Commit docs if needed**
 
 Run:
 
