@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 3 complete
+**Status:** in progress, Task 4 complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -53,7 +53,22 @@ live in `scene_frame_builder.{h,cpp}`, QSG node/text texture maintenance lives i
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_`;
 `cargo fmt --all -- --check`; and `git diff --check`.
 
-**Next Task:** Add waveform memory budgeting.
+**Task 4:** Completed 2026-06-05. Added optional waveform LOD memory budgeting in
+`autolight-analysis` after the WAV frame count is known. The budgeted count helper clamps the
+requested base when needed, keeps nonzero LOD counts for nonempty inputs, and estimates loaded
+`WaveformSample` storage for both `levels` and the legacy duplicate `payload.samples`. The
+`waveform.summary` job now parses optional positive integer `maxBytes` separately from `buckets` and
+passes it to the new builder while preserving default bucket behavior when `maxBytes` is absent.
+
+**Task 4 Verification:** New budget tests first failed on missing
+`waveform_level_bucket_counts_for_budget`, the max-bytes builder, and `waveform_max_bytes_param`.
+Focused checks then passed:
+`cargo test -p autolight-analysis --locked waveform_level_counts_`;
+`cargo test -p autolight-analysis --locked waveform_payload_build_uses_budgeted_lod_counts`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_max_bytes_param`;
+and `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_bucket_param`.
+
+**Next Task:** Fence legacy JSON geometry and Python reference drift.
 
 ## Batch Plan
 

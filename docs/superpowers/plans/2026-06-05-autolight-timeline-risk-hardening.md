@@ -357,7 +357,11 @@ git commit -m "Split native timeline scene item internals"
 - Modify: `crates/autolight-qt/src/app_controller/jobs.rs`
 - Modify: `crates/autolight-qt/src/app_controller/tests.rs`
 
-- [ ] **Step 1: Add tests for budgeted LOD counts**
+- [x] **Step 1: Add tests for budgeted LOD counts**
+
+Actual implementation note: budget enforcement stayed in `autolight-analysis` after frame count is
+known. `waveform_bucket_param` tests only preserve default/clamp behavior; `maxBytes` is parsed by a
+separate helper.
 
 In `crates/autolight-analysis/src/waveform.rs` tests, add:
 
@@ -389,18 +393,20 @@ fn waveform_bucket_param_clamps_to_memory_budget_and_max_lod() {
 }
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
 ```bash
-cargo test -p autolight-analysis --locked waveform_level_counts_respect_memory_budget
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_bucket_param_clamps_to_memory_budget_and_max_lod
+cargo test -p autolight-analysis --locked waveform_level_counts_
+cargo test -p autolight-analysis --locked waveform_payload_build_uses_budgeted_lod_counts
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_max_bytes_param
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_bucket_param
 ```
 
 Expected: fail until helper/policy exists.
 
-- [ ] **Step 3: Implement budget helper**
+- [x] **Step 3: Implement budget helper**
 
 Add this public helper near `waveform_level_bucket_counts`:
 
@@ -422,7 +428,7 @@ pub fn waveform_level_bucket_counts_for_budget(
 
 Then route waveform payload building through this helper if a budget is passed from the job params. Keep the default behavior equivalent for normal demo/default jobs.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -433,7 +439,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked wavefor
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
