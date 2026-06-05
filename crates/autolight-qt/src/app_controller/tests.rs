@@ -2175,6 +2175,29 @@ fn native_timeline_scene_sources() -> String {
 }
 
 #[test]
+fn native_timeline_disclosure_chrome_uses_resolved_selection() {
+    let frame_builder_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/scene_frame_builder.cpp"),
+    )
+    .unwrap();
+
+    assert!(frame_builder_cpp.contains(
+        "void appendTrackTreeChrome(\n  QVector<BandSpec>& bands,\n  const TrackSpec& track,\n  bool selected,"
+    ));
+    assert!(frame_builder_cpp.contains(
+        "const QColor disclosureFill(selected ? QStringLiteral(\"#334155\") : QStringLiteral(\"#252d39\"));"
+    ));
+    assert!(frame_builder_cpp.contains(
+        "const QColor disclosureBorder(selected ? QStringLiteral(\"#7dd3fc\") : QStringLiteral(\"#475569\"));"
+    ));
+    assert!(frame_builder_cpp
+        .contains("appendTrackTreeChrome(bands, track, selected, y, rowHeight, width, height);"));
+    assert!(!frame_builder_cpp.contains("disclosureFill(track.selected"));
+    assert!(!frame_builder_cpp.contains("disclosureBorder(track.selected"));
+}
+
+#[test]
 fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -172,14 +172,15 @@ void appendTrackLabel(
 void appendTrackTreeChrome(
   QVector<BandSpec>& bands,
   const TrackSpec& track,
+  bool selected,
   double y,
   double rowHeight,
   double width,
   double height)
 {
   const QColor treeGuide = withAlpha(QColor(QStringLiteral("#64748b")), 80);
-  const QColor disclosureFill(track.selected ? QStringLiteral("#334155") : QStringLiteral("#252d39"));
-  const QColor disclosureBorder(track.selected ? QStringLiteral("#7dd3fc") : QStringLiteral("#475569"));
+  const QColor disclosureFill(selected ? QStringLiteral("#334155") : QStringLiteral("#252d39"));
+  const QColor disclosureBorder(selected ? QStringLiteral("#7dd3fc") : QStringLiteral("#475569"));
   for (int depth = 1; depth <= track.depth; ++depth) {
     const double x = 21.0 + treeIndentForDepth(depth - 1);
     appendClippedRect(bands, treeGuide, x, y + 9.0, 1.0, rowHeight - 18.0, width, height);
@@ -587,7 +588,7 @@ SceneFrameSpec buildTimelineSceneFrame(
     }
 
     const TrackSpec& track = snapshot.tracks[trackIndex];
-    appendTrackTreeChrome(bands, track, y, rowHeight, width, height);
+    appendTrackTreeChrome(bands, track, selected, y, rowHeight, width, height);
     appendTrackLabel(texts, track, y, rowHeight, selected);
 
     const double waveformTop = y + 12.0;

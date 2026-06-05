@@ -117,8 +117,28 @@ could not capture the display or synthesize physical gestures.
 and `git diff --check`. The smoke emitted only the known host audio/font warnings and loaded
 `UI/Main.qml` with `Autolight.Qt AppController`.
 
-**Next Task:** Push `codex/native-timeline-risk-hardening`, open a non-draft stacked PR against
-`codex/native-timeline-navigation`, then refresh bot feedback.
+**PR #15 Bot Follow-Up:** Completed 2026-06-05. DeepSource Rust initially reported two minor nits
+after the stacked PR opened; both were fixed and the stale review threads were resolved after the
+DeepSource Rust and Python checks passed on the pushed head. CodeAnt then surfaced one valid native
+scene consistency issue: disclosure chrome read raw `track.selected` while label/lane chrome used
+the resolved `selectedTrackIndex` state. `appendTrackTreeChrome` now receives the resolved selected
+row state, and `native_timeline_disclosure_chrome_uses_resolved_selection` locks that contract.
+Diffray's remaining suggestions were analyzed as already covered by the hardening batch or manual
+gates: frame-builder benchmarking remains a future perf harness item, queued counter notification is
+covered by the atomic/queued update shape and local tests, waveform budget edge cases are covered,
+and the scene layout constants are still intentionally local renderer constants.
+
+**PR #15 Bot Follow-Up Verification:** Passed:
+`cargo test -p autolight-analysis --locked waveform_level_counts_`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_cpp_is_split_into_focused_units`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-analysis -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_disclosure_chrome_uses_resolved_selection`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 165 tests;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
+`cargo fmt --all -- --check`; and `git diff --check`.
+
+**Next Task:** Watch PR #15 for Greptile completion. If it surfaces no new actionable issues, the
+remaining risk is the already-recorded real-window macOS trackpad/playback feel gate.
 
 ## Batch Plan
 
