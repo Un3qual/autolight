@@ -1,3 +1,5 @@
+// Reference-only Python timeline path. The Rust runtime uses TimelineSceneItem
+// in TimelineView.qml; do not optimize this path for new Rust timeline work.
 import QtQuick
 
 ListView {

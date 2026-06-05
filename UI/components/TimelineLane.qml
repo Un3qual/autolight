@@ -86,6 +86,8 @@ Rectangle {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         z: 1
+        // Reference-only Python timeline path. The Rust runtime uses TimelineSceneItem
+        // in TimelineView.qml; do not optimize this path for new Rust timeline work.
         geometryJson: root.appController && root.appController.nativeController && root.waveformRef
             ? root.appController.nativeController.renderTimelineWaveform(
                 root.trackId,

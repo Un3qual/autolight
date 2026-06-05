@@ -456,7 +456,7 @@ git commit -m "Budget waveform LOD memory"
 - Modify: `UI/components/TimelineLane.qml`
 - Modify: `docs/NOW.md`
 
-- [ ] **Step 1: Add a regression proving legacy geometry is not used by the active Rust timeline**
+- [x] **Step 1: Add a regression proving legacy geometry is not used by the active Rust timeline**
 
 Add:
 
@@ -487,7 +487,7 @@ fn active_rust_timeline_does_not_use_legacy_geometry_invokables() {
 }
 ```
 
-- [ ] **Step 2: Add comments at the legacy boundary**
+- [x] **Step 2: Add comments at the legacy boundary**
 
 Add a short comment at the top of `LegacyTimelineView.qml` and near the retained legacy call in `TimelineLane.qml`:
 
@@ -496,7 +496,7 @@ Add a short comment at the top of `LegacyTimelineView.qml` and near the retained
 // in TimelineView.qml; do not optimize this path for new Rust timeline work.
 ```
 
-- [ ] **Step 3: Run the focused test**
+- [x] **Step 3: Run the focused test**
 
 Run:
 
@@ -506,7 +506,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked active_
 
 Expected: pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

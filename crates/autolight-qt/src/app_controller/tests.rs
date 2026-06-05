@@ -2435,6 +2435,38 @@ fn qml_timeline_uses_native_scene_waveform_refs_not_qml_waveform_geometry() {
 }
 
 #[test]
+fn active_rust_timeline_does_not_use_legacy_geometry_invokables() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let legacy_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/LegacyTimelineView.qml"),
+    )
+    .unwrap();
+    let lane_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineLane.qml"),
+    )
+    .unwrap();
+    let reference_only_comment =
+        "Reference-only Python timeline path. The Rust runtime uses TimelineSceneItem";
+
+    assert!(timeline_view_qml.contains("TimelineSceneItem"));
+    assert!(!timeline_view_qml.contains("renderTimelineWaveform"));
+    assert!(!timeline_view_qml.contains("renderTimelineAnalysis"));
+    assert!(!timeline_view_qml.contains("TimelineWaveformItem"));
+    assert!(!timeline_view_qml.contains("TimelineAnalysisItem"));
+    assert!(!timeline_view_qml.contains("geometryJson"));
+    assert!(legacy_view_qml.contains("TrackRow"));
+    assert!(legacy_view_qml.contains(reference_only_comment));
+    assert!(lane_qml.contains("renderTimelineWaveform"));
+    assert!(lane_qml.contains(reference_only_comment));
+}
+
+#[test]
 fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

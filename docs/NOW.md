@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 4 complete
+**Status:** in progress, Task 5 complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -74,7 +74,17 @@ bucket/level, which means two loaded `WaveformSample` slots once the legacy `pay
 duplicate is counted. Added a queue-backed `waveform.summary` runner regression proving `maxBytes`
 params produce a budgeted waveform artifact through the real job path.
 
-**Next Task:** Fence legacy JSON geometry and Python reference drift.
+**Task 5:** Completed 2026-06-05. Fenced the reference-only Python timeline geometry path with
+comments in `LegacyTimelineView.qml` and the retained `TimelineLane.qml` JSON waveform bridge. Added
+the static regression `active_rust_timeline_does_not_use_legacy_geometry_invokables` proving the
+active Rust `TimelineView.qml` uses `TimelineSceneItem` and does not call legacy geometry invokables,
+while the legacy view/lane path remains explicit rather than silently deleted.
+
+**Task 5 Verification:** The focused regression first failed on the missing legacy boundary comment,
+then passed after adding the fences:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked active_rust_timeline_does_not_use_legacy_geometry_invokables`.
+
+**Next Task:** Real-window gesture and follow pass.
 
 ## Batch Plan
 
