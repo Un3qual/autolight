@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 1 complete
+**Status:** in progress, Task 2 complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -22,7 +22,19 @@ hardening gate at `docs/manual-testing/native-timeline-risk-hardening.md`.
 
 **Task 1 Verification:** `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_viewport_changes_do_not_reparse_scene_snapshot` passed with 1 test.
 
-**Next Task:** Add native scene timing counters for manual profiling.
+**Task 2:** Completed 2026-06-05. Added QML-readable native scene timing counters
+on `TimelineSceneItem` for snapshot parse count, worst snapshot parse time, worst scene graph
+update time, and text texture creation count. Counter updates use `QElapsedTimer`, preserve the
+snapshot parse hot-path boundary from Task 1, and count text textures only on new texture creation.
+
+**Task 2 Verification:** The focused regression
+`timeline_scene_item_exposes_native_timing_counters_for_manual_profiling` first failed on the missing
+counter `Q_PROPERTY` contract, then passed after implementation. Final focused checks passed:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_exposes_native_timing_counters_for_manual_profiling`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_repeaters`;
+`cargo fmt --all -- --check`; and `git diff --check`.
+
+**Next Task:** Split `timeline_scene_item.cpp` by responsibility.
 
 ## Batch Plan
 

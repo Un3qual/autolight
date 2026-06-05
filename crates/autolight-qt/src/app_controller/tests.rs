@@ -2480,6 +2480,45 @@ fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
 }
 
 #[test]
+fn timeline_scene_item_exposes_native_timing_counters_for_manual_profiling() {
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong sceneSnapshotParseCount READ sceneSnapshotParseCount NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong worstSceneSnapshotParseMicros READ worstSceneSnapshotParseMicros NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong worstSceneGraphUpdateMicros READ worstSceneGraphUpdateMicros NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong textTextureCreateCount READ textTextureCreateCount NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains("qulonglong sceneSnapshotParseCount() const;"));
+    assert!(scene_header.contains("qulonglong worstSceneSnapshotParseMicros() const;"));
+    assert!(scene_header.contains("qulonglong worstSceneGraphUpdateMicros() const;"));
+    assert!(scene_header.contains("qulonglong textTextureCreateCount() const;"));
+    assert!(scene_header.contains("void scenePerfCountersChanged();"));
+    assert!(scene_header.contains("qulonglong m_sceneSnapshotParseCount = 0;"));
+    assert!(scene_header.contains("qulonglong m_worstSceneSnapshotParseMicros = 0;"));
+    assert!(scene_header.contains("qulonglong m_worstSceneGraphUpdateMicros = 0;"));
+    assert!(scene_header.contains("qulonglong m_textTextureCreateCount = 0;"));
+    assert!(scene_cpp.contains("QElapsedTimer"));
+    assert!(scene_cpp.contains("m_sceneSnapshotParseCount"));
+    assert!(scene_cpp.contains("m_textTextureCreateCount"));
+}
+
+#[test]
 fn qml_timeline_scroll_updates_native_viewport_without_per_frame_geometry_regeneration() {
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

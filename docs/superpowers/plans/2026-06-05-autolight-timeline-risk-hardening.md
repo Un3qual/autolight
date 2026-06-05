@@ -138,7 +138,7 @@ git commit -m "Document native timeline hardening gate"
 - Modify: `crates/autolight-qt/src/timeline_scene/timeline_scene_item.cpp`
 - Modify: `crates/autolight-qt/src/app_controller/tests.rs`
 
-- [ ] **Step 1: Write a structure test for native timing fields**
+- [x] **Step 1: Write a structure test for native timing fields**
 
 Add this test:
 
@@ -166,7 +166,7 @@ fn timeline_scene_item_exposes_native_timing_counters_for_manual_profiling() {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -176,7 +176,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timelin
 
 Expected: fail until the Q_PROPERTY counters exist.
 
-- [ ] **Step 3: Implement C++ counters**
+- [x] **Step 3: Implement C++ counters**
 
 In `timeline_scene_item.h`, add read-only properties and getters:
 
@@ -198,7 +198,7 @@ qulonglong m_textTextureCreateCount = 0;
 
 In `timeline_scene_item.cpp`, time `parseSnapshot` in `setSceneSnapshotJson`, time `updateRootNode` in `updatePaintNode`, and increment `m_textTextureCreateCount` only when `updateTextNode` creates a new texture. Use `QElapsedTimer`, `std::max`, and emit `scenePerfCountersChanged()` after counter mutations.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -209,7 +209,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timelin
 
 Expected: both pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 

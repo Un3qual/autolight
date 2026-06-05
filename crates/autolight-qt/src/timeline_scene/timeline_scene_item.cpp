@@ -1,5 +1,6 @@
 #include "timeline_scene_item.h"
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -64,6 +65,11 @@ struct SceneFrameSpec
 {
   QVector<BandSpec> bands;
   QVector<TextSpec> texts;
+};
+
+struct SceneGraphUpdateStats
+{
+  qulonglong textTextureCreateCount = 0;
 };
 
 struct MarkerSpec
@@ -141,6 +147,15 @@ double finitePositive(double value, double fallback)
 bool sameDouble(double left, double right)
 {
   return std::abs(left - right) <= 0.000001;
+}
+
+qulonglong elapsedMicros(const QElapsedTimer& timer)
+{
+  const qint64 elapsedNanos = timer.nsecsElapsed();
+  if (elapsedNanos <= 0) {
+    return 0;
+  }
+  return static_cast<qulonglong>((elapsedNanos + 999) / 1000);
 }
 
 double laneOriginX()
@@ -1031,10 +1046,10 @@ TextTextureNode* ensureTextNode(QSGNode* root, int index)
   return node;
 }
 
-void updateTextNode(TextTextureNode* node, const TextSpec& spec, QQuickWindow* window)
+bool updateTextNode(TextTextureNode* node, const TextSpec& spec, QQuickWindow* window)
 {
   if (node == nullptr || window == nullptr) {
-    return;
+    return false;
   }
 
   node->setRect(spec.rect);
@@ -1044,7 +1059,7 @@ void updateTextNode(TextTextureNode* node, const TextSpec& spec, QQuickWindow* w
     std::max(1, static_cast<int>(std::ceil(spec.rect.height() * devicePixelRatio))));
   const QString key = QStringLiteral("%1|%2|%3").arg(spec.key).arg(imageSize.width()).arg(imageSize.height());
   if (node->key == key) {
-    return;
+    return false;
   }
 
   QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
@@ -1068,21 +1083,32 @@ void updateTextNode(TextTextureNode* node, const TextSpec& spec, QQuickWindow* w
   node->setOwnsTexture(true);
   node->key = key;
   node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+  return true;
 }
 
-void updateTextNodes(QSGNode* root, const QVector<TextSpec>& texts, QQuickWindow* window)
+void updateTextNodes(
+  QSGNode* root,
+  const QVector<TextSpec>& texts,
+  QQuickWindow* window,
+  SceneGraphUpdateStats& stats)
 {
   if (window == nullptr) {
     trimChildNodes(root, 0);
     return;
   }
   for (int index = 0; index < texts.size(); ++index) {
-    updateTextNode(ensureTextNode(root, index), texts[index], window);
+    if (updateTextNode(ensureTextNode(root, index), texts[index], window)) {
+      ++stats.textTextureCreateCount;
+    }
   }
   trimChildNodes(root, texts.size());
 }
 
-QSGNode* updateRootNode(QSGNode* root, const SceneFrameSpec& frame, QQuickWindow* window)
+QSGNode* updateRootNode(
+  QSGNode* root,
+  const SceneFrameSpec& frame,
+  QQuickWindow* window,
+  SceneGraphUpdateStats& stats)
 {
   QSGNode* geometryRoot = ensureContainerNode(root, 0);
   QSGNode* textRoot = ensureContainerNode(root, 1);
@@ -1091,7 +1117,7 @@ QSGNode* updateRootNode(QSGNode* root, const SceneFrameSpec& frame, QQuickWindow
     updateBandNode(ensureBandNode(geometryRoot, index), frame.bands[index]);
   }
   trimChildNodes(geometryRoot, frame.bands.size());
-  updateTextNodes(textRoot, frame.texts, window);
+  updateTextNodes(textRoot, frame.texts, window, stats);
   trimChildNodes(root, 2);
   return root;
 }
@@ -1128,9 +1154,17 @@ void TimelineSceneItem::setSceneSnapshotJson(const QString& sceneSnapshotJson)
   if (m_snapshot == nullptr) {
     m_snapshot = std::make_unique<TimelineSceneSnapshotData>();
   }
+  QElapsedTimer parseTimer;
+  parseTimer.start();
   m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);
+  const qulonglong parseMicros = elapsedMicros(parseTimer);
+  ++m_sceneSnapshotParseCount;
+  if (parseMicros > m_worstSceneSnapshotParseMicros) {
+    m_worstSceneSnapshotParseMicros = parseMicros;
+  }
   update();
   emit sceneSnapshotJsonChanged();
+  emit scenePerfCountersChanged();
 }
 
 double TimelineSceneItem::viewportScrollSeconds() const
@@ -1228,6 +1262,26 @@ void TimelineSceneItem::setSelectedTrackIndex(int selectedTrackIndex)
   emit selectedTrackIndexChanged();
 }
 
+qulonglong TimelineSceneItem::sceneSnapshotParseCount() const
+{
+  return m_sceneSnapshotParseCount;
+}
+
+qulonglong TimelineSceneItem::worstSceneSnapshotParseMicros() const
+{
+  return m_worstSceneSnapshotParseMicros;
+}
+
+qulonglong TimelineSceneItem::worstSceneGraphUpdateMicros() const
+{
+  return m_worstSceneGraphUpdateMicros;
+}
+
+qulonglong TimelineSceneItem::textTextureCreateCount() const
+{
+  return m_textTextureCreateCount;
+}
+
 QSGNode* TimelineSceneItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
   const double itemWidth = width();
@@ -1255,7 +1309,24 @@ QSGNode* TimelineSceneItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeDat
     itemHeight);
 
   QSGNode* root = oldNode != nullptr ? oldNode : new QSGNode();
-  return updateRootNode(root, frame, window());
+  SceneGraphUpdateStats stats;
+  QElapsedTimer graphTimer;
+  graphTimer.start();
+  QSGNode* updatedRoot = updateRootNode(root, frame, window(), stats);
+  const qulonglong graphMicros = elapsedMicros(graphTimer);
+  bool perfCountersChanged = false;
+  if (graphMicros > m_worstSceneGraphUpdateMicros) {
+    m_worstSceneGraphUpdateMicros = graphMicros;
+    perfCountersChanged = true;
+  }
+  if (stats.textTextureCreateCount > 0) {
+    m_textTextureCreateCount += stats.textTextureCreateCount;
+    perfCountersChanged = true;
+  }
+  if (perfCountersChanged) {
+    emit scenePerfCountersChanged();
+  }
+  return updatedRoot;
 }
 
 void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
