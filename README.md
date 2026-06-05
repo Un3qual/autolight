@@ -14,7 +14,14 @@ Use `docs/ROADMAP.md` only when `docs/NOW.md` is complete, blocked, or stale. Us
 
 ## App
 
-Install or expose a Qt 6 development package that provides `qmake`. On this machine Homebrew Qt 6 is used.
+Install or expose a Qt 6 development package that provides `qmake`. For example, on macOS with Homebrew:
+
+```bash
+brew install qt
+export QMAKE=/opt/homebrew/opt/qt/bin/qmake
+```
+
+For other platforms or Qt distributions, locate the Qt 6 `qmake` binary and set `QMAKE` to that path before running the commands below.
 
 Run the app:
 

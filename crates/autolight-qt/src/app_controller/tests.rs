@@ -3899,7 +3899,9 @@ fn qml_main_initializes_rust_runtime_demo_after_runtime_is_owned() {
     .unwrap();
 
     assert!(main_qml.contains("function initializeRustRuntime()"));
-    assert!(main_qml.contains("root.controller.start_default_project()"));
+    assert!(main_qml.contains("if (root.appRuntime)"));
+    assert!(main_qml.contains("root.appRuntime.start_default_project()"));
+    assert!(!main_qml.contains("root.controller.start_default_project()"));
     assert!(!main_qml.contains("pythonReferenceMode"));
     assert!(main_qml.contains("Component.onCompleted: root.initializeRustRuntime()"));
     assert!(adapter_qml.contains("function start_default_project()"));

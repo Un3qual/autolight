@@ -173,7 +173,9 @@ Window {
     }
 
     function initializeRustRuntime() {
-        root.controller.start_default_project()
+        if (root.appRuntime) {
+            root.appRuntime.start_default_project()
+        }
         root.updateTimelineVisibleSeconds()
     }
 
