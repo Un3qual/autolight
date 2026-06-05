@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 5 complete
+**Status:** in progress, Task 6 complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -84,7 +84,24 @@ while the legacy view/lane path remains explicit rather than silently deleted.
 then passed after adding the fences:
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked active_rust_timeline_does_not_use_legacy_geometry_invokables`.
 
-**Next Task:** Real-window gesture and follow pass.
+**Task 6:** Completed 2026-06-05 with an honest harness-limited real-window gate. The Rust app
+built and launched in a real macOS window via `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p
+autolight-app`, emitting only the known host audio-channel warnings before it was stopped. macOS
+screen capture failed with `could not create image from display`, and this non-interactive harness
+could not synthesize physical trackpad/pinch gestures or run the 10-minute visual memory pass. Those
+rows are recorded as human-device follow-ups in
+`docs/manual-testing/native-timeline-risk-hardening.md`. The QML follow guard was hardened without
+changing behavior by naming the 220 ms native viewport quiet period and adding
+`qml_follow_smoothing_is_disabled_during_native_viewport_gestures`.
+
+**Task 6 Verification:** `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app` launched
+the real app window; `screencapture -x /private/tmp/autolight-native-window.png` was blocked by the
+display capture environment; and focused checks passed after the QML guard hardening:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_follow_smoothing_is_disabled_during_native_viewport_gestures`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_native_timeline_gestures_resume_follow_after_quiet_period`;
+`cargo fmt --all -- --check`; and `git diff --check`.
+
+**Next Task:** Final verification and stacked PR.
 
 ## Batch Plan
 

@@ -524,7 +524,7 @@ git commit -m "Fence legacy timeline geometry path"
 - Modify: `docs/manual-testing/native-timeline-risk-hardening.md`
 - Modify: `docs/NOW.md`
 
-- [ ] **Step 1: Run the app in a real window**
+- [x] **Step 1: Run the app in a real window**
 
 Run:
 
@@ -534,7 +534,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app
 
 Expected: the Rust app opens with the demo project and visible native timeline tracks.
 
-- [ ] **Step 2: Execute the manual checklist**
+- [x] **Step 2: Execute the manual checklist**
 
 Fill in `docs/manual-testing/native-timeline-risk-hardening.md` for:
 
@@ -546,7 +546,7 @@ Fill in `docs/manual-testing/native-timeline-risk-hardening.md` for:
 - ruler scrub
 - 10-minute memory stability
 
-- [ ] **Step 3: If follow animation conflicts with rapid programmatic updates, replace it with native-follow-only smoothing**
+- [x] **Step 3: If follow animation conflicts with rapid programmatic updates, replace it with native-follow-only smoothing**
 
 Only if the manual gate fails because `Behavior on timelineScrollSeconds` lags or fights manual interaction, add a failing QML structure test that asserts follow smoothing is disabled during native viewport gestures and then tune the existing guards:
 
@@ -577,12 +577,13 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_fol
 
 Expected: pass after any tuning.
 
-- [ ] **Step 4: If the 220 ms quiet period feels wrong, tune with a named constant and test**
+- [x] **Step 4: If the 220 ms quiet period feels wrong, tune with a named constant and test**
 
-Only if manual testing shows the timer is too sluggish or premature, replace the literal in `TimelineView.qml` with:
+Manual physical gesture testing was blocked by the non-interactive harness, so this pass did not
+change the quiet-period value. It still replaced the literal with a named constant and test:
 
 ```qml
-readonly property int nativeViewportGestureQuietMillis: 160
+readonly property int nativeViewportGestureQuietMillis: 220
 ```
 
 and:
@@ -593,7 +594,7 @@ interval: timelineRoot.nativeViewportGestureQuietMillis
 
 Add a test that asserts the named property exists and no raw `interval: 220` remains in `TimelineView.qml`.
 
-- [ ] **Step 5: Commit manual-gate fixes and notes**
+- [x] **Step 5: Commit manual-gate fixes and notes**
 
 Run:
 

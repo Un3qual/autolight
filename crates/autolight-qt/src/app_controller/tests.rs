@@ -2283,7 +2283,9 @@ fn qml_native_timeline_gestures_resume_follow_after_quiet_period() {
     assert!(timeline_qml.contains("timelineRoot.appController.begin_timeline_user_navigation()"));
     assert!(timeline_qml.contains("nativeViewportGestureQuietTimer.restart()"));
     assert!(timeline_qml.contains("id: nativeViewportGestureQuietTimer"));
-    assert!(timeline_qml.contains("interval: 220"));
+    assert!(timeline_qml.contains("readonly property int nativeViewportGestureQuietMillis: 220"));
+    assert!(timeline_qml.contains("interval: timelineRoot.nativeViewportGestureQuietMillis"));
+    assert!(!timeline_qml.contains("interval: 220"));
     assert!(timeline_qml.contains("timelineRoot.appController.end_timeline_user_navigation()"));
     assert!(timeline_qml.contains(
         "onViewportScrollRequested: function(pixelDelta) {\n            timelineRoot.extendNativeViewportGesture()"
@@ -2291,6 +2293,24 @@ fn qml_native_timeline_gestures_resume_follow_after_quiet_period() {
     assert!(timeline_qml.contains(
         "onViewportZoomRequested: function(factor, anchorX) {\n            timelineRoot.extendNativeViewportGesture()"
     ));
+}
+
+#[test]
+fn qml_follow_smoothing_is_disabled_during_native_viewport_gestures() {
+    let app_runtime_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(app_runtime_qml.contains("!timelineUserNavigationActive"));
+    assert!(timeline_view_qml.contains("begin_timeline_user_navigation()"));
+    assert!(timeline_view_qml.contains("end_timeline_user_navigation()"));
+    assert!(timeline_view_qml.contains("nativeViewportGestureQuietMillis"));
 }
 
 #[test]
