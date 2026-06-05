@@ -153,7 +153,7 @@ pub fn waveform_level_bucket_counts_for_budget(
     max_bytes: usize,
 ) -> Vec<usize> {
     let maximum = MAX_WAVEFORM_LOD_BUCKETS.min(frame_count.max(1));
-    let requested_base_count = base_bucket_count.max(1).min(maximum);
+    let requested_base_count = base_bucket_count.clamp(1, maximum);
     let sample_budget = max_bytes / std::mem::size_of::<WaveformSample>().max(1);
     let budgeted_base_count = if sample_budget < MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS {
         1

@@ -2164,7 +2164,7 @@ fn native_timeline_scene_sources() -> String {
         "timeline_input.h",
         "timeline_input.cpp",
     ];
-    let mut sources = String::new();
+    let mut sources = String::default();
     for file in files {
         sources.push_str(
             &std::fs::read_to_string(manifest_dir.join("src/timeline_scene").join(file)).unwrap(),
