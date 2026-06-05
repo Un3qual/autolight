@@ -1,12 +1,15 @@
 import QtQuick
+import Autolight.Qt 1.0
 
-ListView {
-    id: timelineRows
+Item {
+    id: timelineRoot
     property var appController
     property real rowsWidth: width
     property real timelineLeftPadding: 24
     property real timelineLabelWidth: 280
     property int timelineRowHeight: 76
+    property real timelineRulerHeight: 32
+    property real trackScrollPixels: 0
     property color panelBackground: "#1c1f26"
     property color laneBackground: "#171a20"
     property color laneBackgroundAlt: "#14171d"
@@ -20,108 +23,114 @@ ListView {
     signal layoutWidthChanged()
     signal trackSelected(string trackId)
     signal seekRequested(real x)
-    signal scrollPixelsRequested(real pixels)
-    signal zoomRequested(real x, real wheelDelta)
 
-    function updateVisibleTrackRange() {
-        if (!timelineRows.appController) {
+    readonly property int nativeViewportGestureQuietMillis: 220
+    readonly property int trackCount: timelineRoot.appController && Array.isArray(timelineRoot.appController.trackRows)
+        ? timelineRoot.appController.trackRows.length
+        : 0
+
+    function maxTrackScrollPixels() {
+        var rowHeight = Math.max(1, timelineRoot.timelineRowHeight)
+        var rowViewportHeight = Math.max(0, timelineRoot.height - timelineRoot.timelineRulerHeight)
+        return Math.max(0, timelineRoot.trackCount * rowHeight - rowViewportHeight)
+    }
+
+    function setTrackScrollPixels(value) {
+        var safeValue = Number(value)
+        if (!isFinite(safeValue)) safeValue = 0
+        var clampedValue = Math.max(0, Math.min(timelineRoot.maxTrackScrollPixels(), safeValue))
+        if (timelineRoot.trackScrollPixels === clampedValue) {
+            timelineRoot.updateVisibleTrackRange()
             return
         }
-        var rowHeight = Math.max(1, timelineRows.timelineRowHeight)
-        var firstRow = Math.max(0, Math.floor(timelineRows.contentY / rowHeight))
-        var rowCount = Math.max(0, Math.ceil(timelineRows.height / rowHeight) + 1)
-        timelineRows.appController.set_timeline_visible_track_range(firstRow, rowCount)
+        timelineRoot.trackScrollPixels = clampedValue
     }
 
-    function wheelDeltaValue(value) {
-        var number = Number(value)
-        return isFinite(number) ? number : 0
+    function updateVisibleTrackRange() {
+        if (!timelineRoot.appController) return
+        if (typeof timelineRoot.appController.set_timeline_visible_track_range !== "function") return
+        var rowHeight = Math.max(1, timelineRoot.timelineRowHeight)
+        var firstRow = Math.max(0, Math.floor(timelineRoot.trackScrollPixels / rowHeight))
+        var rowViewportHeight = Math.max(0, timelineRoot.height - timelineRoot.timelineRulerHeight)
+        var rowCount = Math.max(0, Math.ceil(rowViewportHeight / rowHeight) + 2)
+        timelineRoot.appController.set_timeline_visible_track_range(firstRow, rowCount)
     }
 
-    readonly property var safeTrackRows: timelineRows.appController && Array.isArray(timelineRows.appController.trackRows)
-        ? timelineRows.appController.trackRows
-        : []
+    function extendNativeViewportGesture() {
+        if (!timelineRoot.appController) return
+        timelineRoot.appController.begin_timeline_user_navigation()
+        nativeViewportGestureQuietTimer.restart()
+    }
 
-    model: timelineRows.safeTrackRows.length
     clip: true
-    onWidthChanged: timelineRows.layoutWidthChanged()
-    onHeightChanged: timelineRows.updateVisibleTrackRange()
-    onContentYChanged: timelineRows.updateVisibleTrackRange()
-    onCountChanged: timelineRows.updateVisibleTrackRange()
-    Component.onCompleted: timelineRows.updateVisibleTrackRange()
+    onWidthChanged: timelineRoot.layoutWidthChanged()
+    onHeightChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)
+    onAppControllerChanged: timelineRoot.updateVisibleTrackRange()
+    onTrackCountChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)
+    onTrackScrollPixelsChanged: timelineRoot.updateVisibleTrackRange()
+    Component.onCompleted: timelineRoot.updateVisibleTrackRange()
 
-    delegate: TrackRow {
-        property var rowData: timelineRows.safeTrackRows[index] || ({})
-        width: timelineRows.width
-        trackId: rowData.trackId || ""
-        name: rowData.name || ""
-        trackType: rowData.trackType || ""
-        resultState: rowData.resultState || ""
-        markerCount: Number(rowData.markerCount || 0)
-        cacheRefCount: Number(rowData.cacheRefCount || 0)
-        artifactKinds: rowData.artifactKinds || ""
-        error: rowData.error || ""
-        jobProgress: Number(rowData.jobProgress || 0)
-        activeJobId: rowData.activeJobId || ""
-        markerSpans: rowData.markerSpans || []
-        waveformLevels: rowData.waveformLevels || []
-        visibleEnergySamples: rowData.visibleEnergySamples || []
-        visibleHarmonicColorSamples: rowData.visibleHarmonicColorSamples || []
-        waveformDurationSeconds: Number(rowData.waveformDurationSeconds || 0)
-        depth: Number(rowData.depth || 0)
-        hasChildren: Boolean(rowData.hasChildren)
-        expanded: Boolean(rowData.expanded)
-        visibleChildStateSummary: rowData.visibleChildStateSummary || ""
-        treeError: rowData.treeError || ""
-        appController: timelineRows.appController
-        timelineLeftPadding: timelineRows.timelineLeftPadding
-        timelineLabelWidth: timelineRows.timelineLabelWidth
-        timelineRowHeight: timelineRows.timelineRowHeight
-        panelBackground: timelineRows.panelBackground
-        laneBackground: timelineRows.laneBackground
-        laneBackgroundAlt: timelineRows.laneBackgroundAlt
-        borderSubtle: timelineRows.borderSubtle
-        textPrimary: timelineRows.textPrimary
-        textMuted: timelineRows.textMuted
-        focusAccent: timelineRows.focusAccent
-        statusErrorColor: timelineRows.statusErrorColor
-        artifactAccent: timelineRows.artifactAccent
-        markerLabelText: timelineRows.markerLabelText
-        onTrackSelected: function(trackId) { timelineRows.trackSelected(trackId) }
-        onSeekRequested: function(x) { timelineRows.seekRequested(x) }
+    TimelineSceneItem {
+        id: scene
+        anchors.fill: parent
+        sceneSnapshotJson: timelineRoot.appController ? timelineRoot.appController.timelineSceneSnapshotJson : ""
+        viewportScrollSeconds: timelineRoot.appController ? timelineRoot.appController.timelineScrollSeconds : 0
+        viewportPixelsPerSecond: timelineRoot.appController ? timelineRoot.appController.timelinePixelsPerSecond : 96
+        viewportVisibleSeconds: timelineRoot.appController ? timelineRoot.appController.timelineVisibleSeconds : 8
+        viewportTrackScrollPixels: timelineRoot.trackScrollPixels
+        playbackPositionSeconds: timelineRoot.appController ? timelineRoot.appController.playback.positionSeconds : 0
+        onTrackClicked: function(trackId) { timelineRoot.trackSelected(trackId) }
+        onMarkerClicked: function(trackId, markerId, additive) {
+            if (!timelineRoot.appController) return
+            timelineRoot.appController.select_track(trackId)
+            timelineRoot.appController.toggle_marker_selection(markerId, additive)
+        }
+        onMarkerMoveRequested: function(trackId, markerId, deltaSeconds, bypassSnap, preserveSelection) {
+            if (!timelineRoot.appController) return
+            timelineRoot.appController.select_track(trackId)
+            if (!preserveSelection) timelineRoot.appController.toggle_marker_selection(markerId, false)
+            timelineRoot.appController.move_selected_markers(deltaSeconds, bypassSnap)
+        }
+        onMarkerResizeRequested: function(trackId, markerId, durationSeconds) {
+            if (!timelineRoot.appController) return
+            timelineRoot.appController.select_track(trackId)
+            timelineRoot.appController.resize_marker(markerId, durationSeconds)
+        }
+        onTrackExpansionToggled: function(trackId, expanded) {
+            if (timelineRoot.appController) timelineRoot.appController.set_track_expanded(trackId, expanded)
+        }
+        onScrubRequested: function(seconds) {
+            var x = (seconds - scene.viewportScrollSeconds) * Math.max(1, scene.viewportPixelsPerSecond) + timelineRoot.timelineLeftPadding
+            timelineRoot.seekRequested(x)
+        }
+        onViewportVerticalScrollRequested: function(pixelDelta) {
+            timelineRoot.extendNativeViewportGesture()
+            timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels + pixelDelta)
+        }
+        onViewportScrollRequested: function(pixelDelta) {
+            timelineRoot.extendNativeViewportGesture()
+            if (timelineRoot.appController) {
+                timelineRoot.appController.scroll_timeline_by_pixels(pixelDelta)
+            }
+        }
+        onViewportZoomRequested: function(factor, anchorX) {
+            timelineRoot.extendNativeViewportGesture()
+            if (timelineRoot.appController) {
+                timelineRoot.appController.zoom_timeline_by_factor(
+                    factor,
+                    anchorX,
+                    Math.max(0, width - timelineRoot.timelineLabelWidth - timelineRoot.timelineLeftPadding)
+                )
+            }
+        }
     }
 
-    WheelHandler {
-        target: null
-
-        onWheel: function(event) {
-            var pixelX = timelineRows.wheelDeltaValue(event.pixelDelta.x)
-            var pixelY = timelineRows.wheelDeltaValue(event.pixelDelta.y)
-            var angleX = timelineRows.wheelDeltaValue(event.angleDelta.x) / 8
-            var angleY = timelineRows.wheelDeltaValue(event.angleDelta.y) / 8
-            var zoomModifier = (event.modifiers & Qt.ControlModifier) !== 0
-                || (event.modifiers & Qt.MetaModifier) !== 0
-            if (zoomModifier) {
-                var zoomDelta = pixelY !== 0 ? pixelY : angleY
-                if (zoomDelta !== 0) {
-                    timelineRows.zoomRequested(event.position.x, zoomDelta)
-                    event.accepted = true
-                    return
-                }
-                event.accepted = false
-                return
-            }
-
-            var horizontalPixels = pixelX !== 0 ? -pixelX : -angleX
-            if (horizontalPixels === 0 && (event.modifiers & Qt.ShiftModifier) !== 0) {
-                horizontalPixels = pixelY !== 0 ? -pixelY : -angleY
-            }
-            if (horizontalPixels !== 0) {
-                timelineRows.scrollPixelsRequested(horizontalPixels)
-                event.accepted = true
-                return
-            }
-            event.accepted = false
+    Timer {
+        id: nativeViewportGestureQuietTimer
+        interval: timelineRoot.nativeViewportGestureQuietMillis
+        repeat: false
+        onTriggered: {
+            if (timelineRoot.appController) timelineRoot.appController.end_timeline_user_navigation()
         }
     }
 }

@@ -325,7 +325,7 @@ mod tests {
     };
 
     #[test]
-    fn transforms_builtin_registry_exposes_python_registry_specs() {
+    fn transforms_builtin_registry_exposes_expected_transform_specs() {
         let registry = TransformRegistry::with_builtin_transforms();
 
         assert_eq!(

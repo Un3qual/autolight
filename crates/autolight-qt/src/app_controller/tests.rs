@@ -3,9 +3,11 @@ use serde_json::Value;
 use super::job_worker::JobWorkerResult;
 use super::project_io::cache_entry_path_is_safe;
 use super::{path_from_qml, AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
+use crate::timeline_renderer::cache::AnalysisRenderRequest;
+use crate::timeline_renderer::waveform::WaveformRenderRequest;
 use autolight_core::cache::cache_entry_for_bytes;
 use autolight_core::project::{
-    CacheValidationStatus, ImportStatus, JobRun, ResultState, Track, TrackType,
+    CacheValidationStatus, ImportStatus, JobRun, ProjectDocument, ResultState, Track, TrackType,
 };
 use autolight_core::transforms::TransformSpec;
 use autolight_jobs::queue::{JobRegistry, LocalJobQueue, ProducedMarker, TransformResult};
@@ -482,7 +484,9 @@ fn controller_run_waveform_summary_completes_with_visible_waveform() {
         .any(|run| run.id == job_id && run.state == ResultState::Complete));
     let rows = json_array(&state.timeline_rows_json.to_string());
     let row = rows.iter().find(|row| row["trackId"] == track_id).unwrap();
-    assert!(!row["waveformLevels"].as_array().unwrap().is_empty());
+    assert_eq!(row["waveformRef"]["trackId"], track_id);
+    assert_eq!(row["waveformRef"]["artifactKind"], "waveform");
+    assert!(row.get("waveformLevels").is_none());
     assert!(row.get("visibleWaveformSamples").is_none());
 }
 
@@ -850,7 +854,9 @@ fn controller_demo_waveform_can_be_selected_and_rerun() {
         .iter()
         .find(|row| row["trackId"] == "track_waveform")
         .unwrap();
-    assert!(!row["waveformLevels"].as_array().unwrap().is_empty());
+    assert_eq!(row["waveformRef"]["trackId"], "track_waveform");
+    assert_eq!(row["waveformRef"]["artifactKind"], "waveform");
+    assert!(row.get("waveformLevels").is_none());
     assert!(row.get("visibleWaveformSamples").is_none());
 }
 
@@ -1371,6 +1377,29 @@ fn controller_import_audio_adds_source_track_and_playability() {
         state.project.tracks[0].provenance["asset_id"],
         "asset_rust_0001"
     );
+}
+
+#[test]
+fn controller_import_audio_updates_native_timeline_scene_snapshot() {
+    let root = test_dir("import-audio-scene-snapshot");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 16_000);
+    let mut state = AppControllerState::default();
+
+    let track_id = state.import_audio_state(audio_path.to_str().unwrap());
+    let parsed: serde_json::Value =
+        serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
+    let imported_track = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == track_id)
+        .unwrap();
+
+    assert_eq!(parsed["durationSeconds"], 2.0);
+    assert_eq!(imported_track["name"], "song");
+    assert_eq!(imported_track["trackType"], "source");
+    assert!(imported_track["selected"].as_bool().unwrap());
 }
 
 #[test]
@@ -1976,6 +2005,33 @@ fn controller_persists_timeline_viewport_state() {
 }
 
 #[test]
+fn controller_restore_timeline_view_clamps_scroll_and_clears_navigation_state() {
+    let root = test_dir("restore-viewport");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.sync_playback_position_state(2.0);
+    state.begin_timeline_user_navigation_state();
+    state.project.ui_state.insert(
+        "timeline".to_string(),
+        serde_json::json!({
+            "pixels_per_second": 144.0,
+            "scroll_seconds": 999.0,
+            "follow_mode": 1
+        }),
+    );
+
+    state.restore_timeline_view_state();
+
+    assert_eq!(state.timeline_pixels_per_second, 144.0);
+    assert_eq!(state.timeline_visible_seconds, 8.0);
+    assert_eq!(state.timeline_scroll_seconds, 7.0);
+    assert!(!state.timeline_user_navigation_active);
+    assert_eq!(state.timeline_playhead_offscreen_direction, -1);
+}
+
+#[test]
 fn controller_snaps_single_marker_moves_to_visible_timing_markers() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
@@ -2069,33 +2125,261 @@ fn controller_snapped_single_marker_move_clamps_at_timeline_start() {
 }
 
 #[test]
-fn qml_track_rows_show_track_selection_and_allow_lane_selection() {
-    let track_row_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
-    )
-    .unwrap();
-    let lane_qml = std::fs::read_to_string(
+fn qml_runtime_has_no_legacy_track_row_or_lane_components() {
+    let ui_components =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components");
+    let timeline_qml = std::fs::read_to_string(ui_components.join("TimelineView.qml")).unwrap();
+
+    for removed_component in [
+        "TrackRow.qml",
+        "TimelineLane.qml",
+        "MarkerBlock.qml",
+        "TimelineRuler.qml",
+        "TimelineNavigationSurface.qml",
+        "LegacyTimelineView.qml",
+    ] {
+        assert!(!ui_components.join(removed_component).exists());
+    }
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(!timeline_qml.contains("TrackRow"));
+    assert!(!timeline_qml.contains("TimelineLane"));
+}
+
+fn native_timeline_scene_sources() -> String {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let files = [
+        "timeline_scene_item.h",
+        "timeline_scene_item.cpp",
+        "scene_snapshot_parser.h",
+        "scene_snapshot_parser.cpp",
+        "scene_frame_builder.h",
+        "scene_frame_builder.cpp",
+        "scene_graph_nodes.h",
+        "scene_graph_nodes.cpp",
+        "timeline_input.h",
+        "timeline_input.cpp",
+    ];
+    let mut sources = String::default();
+    for file in files {
+        sources.push_str(
+            &std::fs::read_to_string(manifest_dir.join("src/timeline_scene").join(file)).unwrap(),
+        );
+        sources.push('\n');
+    }
+    sources
+}
+
+#[test]
+fn native_timeline_disclosure_chrome_uses_resolved_selection() {
+    let frame_builder_cpp = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
+            .join("src/timeline_scene/scene_frame_builder.cpp"),
     )
     .unwrap();
 
-    assert!(track_row_qml.contains(
-        "readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId"
+    assert!(frame_builder_cpp.contains(
+        "void appendTrackTreeChrome(\n  QVector<BandSpec>& bands,\n  const TrackSpec& track,\n  bool selected,"
     ));
-    assert!(track_row_qml.contains("id: selectedTrackStripe"));
-    assert!(track_row_qml.contains("visible: root.rowSelected"));
-    assert!(track_row_qml.contains("border.width: root.rowSelected ? 2 : 1"));
-    assert!(track_row_qml.contains("onClicked: root.trackSelected(root.trackId)"));
-    assert!(lane_qml.contains(
-        "readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId"
+    assert!(frame_builder_cpp.contains(
+        "const QColor disclosureFill(selected ? QStringLiteral(\"#334155\") : QStringLiteral(\"#252d39\"));"
     ));
-    assert!(lane_qml.contains("border.width: root.rowSelected ? 2 : 1"));
-    assert!(lane_qml.contains("signal clicked(real x)"));
+    assert!(frame_builder_cpp.contains(
+        "const QColor disclosureBorder(selected ? QStringLiteral(\"#7dd3fc\") : QStringLiteral(\"#475569\"));"
+    ));
+    assert!(frame_builder_cpp
+        .contains("appendTrackTreeChrome(bands, track, selected, y, rowHeight, width, height);"));
+    assert!(!frame_builder_cpp.contains("disclosureFill(track.selected"));
+    assert!(!frame_builder_cpp.contains("disclosureBorder(track.selected"));
+}
+
+#[test]
+fn native_timeline_scene_graph_reconciles_nodes_linearly_and_retries_failed_textures() {
+    let scene_graph_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/scene_graph_nodes.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_graph_cpp.contains("QSGGeometryNode* nextBandNode"));
+    assert!(scene_graph_cpp.contains("TextTextureNode* nextTextNode"));
+    assert!(scene_graph_cpp.contains("QSGNode* nextBandChild = geometryRoot->firstChild();"));
+    assert!(scene_graph_cpp.contains("QSGNode* nextTextChild = root->firstChild();"));
+    assert!(scene_graph_cpp.contains("trimChildNodesFrom(geometryRoot, nextBandChild);"));
+    assert!(scene_graph_cpp.contains("trimChildNodesFrom(root, nextTextChild);"));
+    assert!(!scene_graph_cpp.contains("childNodeAt"));
+    assert!(!scene_graph_cpp.contains("ensureBandNode(geometryRoot, index)"));
+    assert!(!scene_graph_cpp.contains("ensureTextNode(root, index)"));
+    assert!(scene_graph_cpp.contains("auto* texture = window->createTextureFromImage(image);"));
+    assert!(scene_graph_cpp.contains("if (texture == nullptr)"));
+    assert!(
+        scene_graph_cpp.find("if (texture == nullptr)").unwrap()
+            < scene_graph_cpp.find("node->key = key;").unwrap()
+    );
+}
+
+#[test]
+fn native_timeline_parser_skips_invalid_track_entries() {
+    let snapshot_parser_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/scene_snapshot_parser.cpp"),
+    )
+    .unwrap();
+
+    assert!(snapshot_parser_cpp.contains("if (!trackValue.isObject())"));
+    assert!(snapshot_parser_cpp.contains(
+        "const QString trackId = trackObject.value(QStringLiteral(\"trackId\")).toString().trimmed();"
+    ));
+    assert!(snapshot_parser_cpp.contains("if (trackId.isEmpty())"));
+    assert!(snapshot_parser_cpp.contains("track.trackId = trackId;"));
+    assert!(
+        snapshot_parser_cpp.find("if (trackId.isEmpty())").unwrap()
+            < snapshot_parser_cpp
+                .find("snapshot.tracks.push_back(track);")
+                .unwrap()
+    );
 }
 
 #[test]
 fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_header.contains("void wheelEvent(QWheelEvent* event) override;"));
+    assert!(scene_header.contains("void viewportScrollRequested(double pixelDelta);"));
+    assert!(scene_header.contains("void viewportZoomRequested(double factor, double anchorX);"));
+    assert!(scene_cpp.contains("void TimelineSceneItem::wheelEvent(QWheelEvent* event)"));
+    assert!(scene_sources.contains("event.pixelDelta()"));
+    assert!(scene_sources.contains("event.angleDelta()"));
+    assert!(scene_sources.contains("Qt::ShiftModifier"));
+    assert!(scene_sources.contains("Qt::ControlModifier"));
+    assert!(scene_sources.contains("Qt::MetaModifier"));
+    assert!(scene_cpp.contains("timelineHorizontalScrollDelta(*event)"));
+    assert!(scene_cpp.contains("timelineZoomFactor(*event)"));
+    assert!(scene_cpp.contains("emit viewportScrollRequested(scrollDelta);"));
+    assert!(scene_cpp.contains(
+        "emit viewportZoomRequested(zoomFactor, timelineZoomAnchorX(event->position().x()));"
+    ));
+    assert!(timeline_qml.contains("onViewportScrollRequested"));
+    assert!(
+        timeline_qml.contains("timelineRoot.appController.scroll_timeline_by_pixels(pixelDelta)")
+    );
+    assert!(timeline_qml.contains("onViewportZoomRequested"));
+    assert!(timeline_qml.contains(
+        "Math.max(0, width - timelineRoot.timelineLabelWidth - timelineRoot.timelineLeftPadding)"
+    ));
+    assert!(!timeline_qml.contains("WheelHandler {"));
+    assert!(!timeline_qml.contains("TimelineNavigationSurface"));
+}
+
+#[test]
+fn native_timeline_scene_cpp_is_split_into_focused_units() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let build_rs = std::fs::read_to_string(manifest_dir.join("build.rs")).unwrap();
+    let scene_dir = manifest_dir.join("src/timeline_scene");
+    let scene_cpp = std::fs::read_to_string(scene_dir.join("timeline_scene_item.cpp")).unwrap();
+    let snapshot_parser_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_snapshot_parser.cpp")).unwrap();
+    let frame_builder_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_frame_builder.cpp")).unwrap();
+    let scene_graph_nodes_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_graph_nodes.cpp")).unwrap();
+    let timeline_input_cpp = std::fs::read_to_string(scene_dir.join("timeline_input.cpp")).unwrap();
+    let required_files = [
+        "scene_snapshot_parser.cpp",
+        "scene_frame_builder.cpp",
+        "scene_graph_nodes.cpp",
+        "timeline_input.cpp",
+    ];
+
+    for file in required_files {
+        assert!(
+            build_rs.contains(file),
+            "{file} must be compiled by cxx-qt-build"
+        );
+    }
+    assert!(
+        scene_cpp.lines().count() < 650,
+        "timeline_scene_item.cpp should stay as the QQuickItem shell"
+    );
+    assert!(!scene_cpp.contains("QJsonDocument"));
+    assert!(!scene_cpp.contains("QSGSimpleTextureNode"));
+    assert!(!scene_cpp.contains("QPainter painter"));
+    assert!(!scene_cpp.contains("void appendRulerTicks"));
+    assert!(snapshot_parser_cpp.contains("parseTimelineSceneSnapshot"));
+    assert!(frame_builder_cpp.contains("buildTimelineSceneFrame"));
+    assert!(scene_graph_nodes_cpp.contains("updateTimelineSceneGraph"));
+    assert!(timeline_input_cpp.contains("timelineHorizontalScrollDelta"));
+    assert!(timeline_input_cpp.contains("timelineZoomFactor"));
+}
+
+#[test]
+fn native_timeline_trackpad_scroll_uses_natural_horizontal_direction() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("scrollDelta = -static_cast<double>(pixelDelta.x());"));
+    assert!(scene_sources.contains("-static_cast<double>(angleDelta.x())"));
+    assert!(scene_sources.contains("kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch"));
+    assert!(scene_sources.contains("scrollDelta = -static_cast<double>(pixelDelta.y());"));
+}
+
+#[test]
+fn qml_native_timeline_gestures_resume_follow_after_quiet_period() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(timeline_qml.contains("function extendNativeViewportGesture()"));
+    assert!(timeline_qml.contains("timelineRoot.appController.begin_timeline_user_navigation()"));
+    assert!(timeline_qml.contains("nativeViewportGestureQuietTimer.restart()"));
+    assert!(timeline_qml.contains("id: nativeViewportGestureQuietTimer"));
+    assert!(timeline_qml.contains("readonly property int nativeViewportGestureQuietMillis: 220"));
+    assert!(timeline_qml.contains("interval: timelineRoot.nativeViewportGestureQuietMillis"));
+    assert!(!timeline_qml.contains("interval: 220"));
+    assert!(timeline_qml.contains("timelineRoot.appController.end_timeline_user_navigation()"));
+    assert!(timeline_qml.contains(
+        "onViewportScrollRequested: function(pixelDelta) {\n            timelineRoot.extendNativeViewportGesture()"
+    ));
+    assert!(timeline_qml.contains(
+        "onViewportZoomRequested: function(factor, anchorX) {\n            timelineRoot.extendNativeViewportGesture()"
+    ));
+}
+
+#[test]
+fn qml_follow_smoothing_is_disabled_during_native_viewport_gestures() {
+    let app_runtime_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(app_runtime_qml.contains("!timelineUserNavigationActive"));
+    assert!(timeline_view_qml.contains("begin_timeline_user_navigation()"));
+    assert!(timeline_view_qml.contains("end_timeline_user_navigation()"));
+    assert!(timeline_view_qml.contains("nativeViewportGestureQuietMillis"));
+}
+
+#[test]
+fn qml_timeline_exposes_log_zoom_fit_follow_and_playhead_handle() {
     let main_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
     )
@@ -2105,79 +2389,63 @@ fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let lane_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
     let adapter_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
     )
     .unwrap();
 
-    assert!(timeline_qml.contains("signal scrollPixelsRequested(real pixels)"));
-    assert!(timeline_qml.contains("signal zoomRequested(real x, real wheelDelta)"));
-    assert!(timeline_qml.contains("WheelHandler {"));
-    assert!(timeline_qml.contains("onWheel: function(event)"));
-    assert!(!timeline_qml.contains("acceptedButtons: Qt.NoButton"));
-    assert!(!timeline_qml.contains("z: 100"));
-    assert!(main_qml.contains("function scrollTimelineByPixels(pixelDelta)"));
-    assert!(main_qml.contains("function zoomTimelineAtX(xValue, wheelDelta)"));
-    assert!(main_qml.contains(
-        "onScrollPixelsRequested: function(pixels) { root.scrollTimelineByPixels(pixels) }"
-    ));
-    assert!(main_qml.contains(
-        "onZoomRequested: function(x, wheelDelta) { root.zoomTimelineAtX(x, wheelDelta) }"
-    ));
-    assert!(adapter_qml.contains("property real timelinePixelsPerSecond"));
-    assert!(adapter_qml.contains("function reloadViewportState()"));
-    assert!(
-        adapter_qml.contains("timelinePixelsPerSecond = nativeController.timelinePixelsPerSecond")
-    );
-    assert!(adapter_qml.contains("timelineScrollSeconds = nativeController.timelineScrollSeconds"));
-    assert!(adapter_qml.contains(
-        "function set_timeline_zoom(value) {\n        nativeController.setTimelineZoom(value)\n        reloadViewportState()\n    }"
-    ));
-    assert!(adapter_qml.contains(
-        "function set_timeline_scroll_seconds(value) {\n        nativeController.applyTimelineScrollSeconds(value)\n        reloadViewportState()\n    }"
-    ));
-    assert!(adapter_qml.contains(
-        "function set_timeline_visible_seconds(value) {\n        nativeController.applyTimelineVisibleSeconds(value)\n        reloadViewportState()\n    }"
-    ));
-    assert!(!adapter_qml.contains(
-        "function set_timeline_zoom(value) { nativeController.setTimelineZoom(value); reloadModels() }"
-    ));
-    assert!(!adapter_qml.contains(
-        "function set_timeline_scroll_seconds(value) { nativeController.applyTimelineScrollSeconds(value); reloadModels() }"
-    ));
-    assert!(!adapter_qml.contains(
-        "function set_timeline_visible_seconds(value) { nativeController.applyTimelineVisibleSeconds(value); reloadModels() }"
-    ));
-    assert!(lane_qml.contains("root.appController.timelineDurationSeconds > 0"));
-    assert!(!lane_qml.contains("root.appController.playback.sourcePath.length > 0"));
+    assert!(adapter_qml.contains("property real timelineMinPixelsPerSecond"));
+    assert!(adapter_qml.contains("property real timelineMaxPixelsPerSecond"));
+    assert!(main_qml.contains("function zoomSliderValueForPixels"));
+    assert!(main_qml.contains("Math.log"));
+    assert!(main_qml.contains("from: 0"));
+    assert!(main_qml.contains("to: 1"));
+    assert!(main_qml.contains("set_timeline_zoom_for_lane_width"));
+    assert!(main_qml.contains("fit_timeline_to_lane_width"));
+    assert!(main_qml.contains("followModeSelector"));
+    assert!(main_qml.contains("set_timeline_follow_mode"));
+    assert!(main_qml.contains("readonly property int markerInspectorWidth"));
+    assert!(main_qml.contains("Layout.preferredWidth: root.markerInspectorWidth"));
+    assert!(!main_qml.contains("from: 24"));
+    assert!(!main_qml.contains("to: 240"));
+    assert!(timeline_qml.contains("playbackPositionSeconds:"));
+    assert!(timeline_qml.contains("onScrubRequested"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("playheadX"));
+    assert!(scene_sources.contains("emit scrubRequested(timelineSecondsForPosition("));
 }
 
 #[test]
-fn qml_waveform_strip_renders_contiguous_bucket_spans() {
-    let waveform_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/WaveformStrip.qml"),
+fn qml_app_runtime_smooths_playback_follow_scroll_only_during_follow() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
     )
     .unwrap();
 
-    assert!(waveform_qml.contains("bucketWidth"));
-    assert!(waveform_qml.contains("ctx.fillRect"));
-    assert!(waveform_qml.contains("peakTop"));
-    assert!(waveform_qml.contains("rmsTop"));
-    assert!(!waveform_qml.contains("ctx.moveTo(peakSample.x"));
-    assert!(!waveform_qml.contains("ctx.lineTo(peakSample.x"));
+    assert!(adapter_qml.contains("import QtQuick"));
+    assert!(adapter_qml.contains("readonly property bool smoothTimelineFollow"));
+    assert!(adapter_qml.contains(
+        "nativeController.playbackIsPlaying && timelineFollowMode !== 0 && !timelineUserNavigationActive"
+    ));
+    assert!(adapter_qml.contains("Behavior on timelineScrollSeconds"));
+    assert!(adapter_qml.contains("enabled: appRuntime.smoothTimelineFollow"));
+    assert!(adapter_qml.contains("SmoothedAnimation {"));
+    assert!(adapter_qml.contains("velocity: 1.0"));
+    assert!(adapter_qml.contains("maximumEasingTime: 80"));
+    assert!(!adapter_qml.contains("NumberAnimation {"));
+    assert!(!adapter_qml.contains("duration: 120"));
 }
 
 #[test]
-fn qml_waveform_strip_selects_and_blends_lod_levels_during_zoom() {
-    let waveform_qml = std::fs::read_to_string(
+fn qml_timeline_polish_uses_editor_controls_badges_and_tick_marks() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+    let playback_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/WaveformStrip.qml"),
+            .join("../../UI/components/PlaybackBar.qml"),
     )
     .unwrap();
     let timeline_qml = std::fs::read_to_string(
@@ -2185,27 +2453,835 @@ fn qml_waveform_strip_selects_and_blends_lod_levels_during_zoom() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let track_row_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(main_qml.contains("id: timelineControlBand"));
+    assert!(main_qml.contains("import QtQuick.Controls.Basic as Basic"));
+    assert!(main_qml.contains("Basic.Slider {"));
+    assert!(main_qml.contains("Basic.ComboBox {"));
+    assert!(main_qml.contains("controlBandBackground"));
+    assert!(main_qml.contains("id: zoomFitButton"));
+    assert!(main_qml.contains("background: Rectangle"));
+    assert!(main_qml.contains("text: \"FOLLOW\""));
+    assert!(main_qml.contains("text: \"SCROLL\""));
+
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(scene_sources.contains("rulerBackground"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("selectionStripe"));
+    assert!(scene_sources.contains("selectionOutline"));
+    assert!(scene_sources.contains("laneEven"));
+    assert!(scene_sources.contains("laneOdd"));
+
+    assert!(playback_qml.contains("import QtQuick.Controls.Basic as Basic"));
+    assert!(playback_qml.contains("id: playPauseButton"));
+    assert!(playback_qml.contains("Basic.Slider {"));
+    assert!(playback_qml.contains("id: playbackScrubber"));
+}
+
+#[test]
+fn qml_timeline_uses_native_scene_waveform_refs_not_qml_waveform_geometry() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let lane_qml = std::fs::read_to_string(
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(timeline_qml.contains("sceneSnapshotJson:"));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["waveformRef"].is_object()));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["waveformPreview"]
+            .as_array()
+            .is_some_and(|samples| !samples.is_empty())));
+    assert!(scene_sources.contains("waveformPreview"));
+    assert!(scene_sources.contains("WaveformSampleSpec"));
+    assert!(scene_sources.contains("waveformCenterY"));
+    assert!(!timeline_qml.contains("TimelineWaveformItem"));
+    assert!(!timeline_qml.contains("renderTimelineWaveform"));
+    assert!(!timeline_qml.contains("geometryJson"));
+    assert!(!timeline_qml.contains("waveformLevels"));
+    assert!(!timeline_qml.contains("WaveformStrip"));
+    assert!(!timeline_qml.contains("Canvas"));
+    assert!(!timeline_qml.contains("selectedLevelPair"));
+    assert!(!timeline_qml.contains("targetBucketCount"));
+}
+
+#[test]
+fn active_rust_timeline_removes_legacy_geometry_invokables() {
+    let timeline_view_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let ui_components =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components");
+
+    assert!(timeline_view_qml.contains("TimelineSceneItem"));
+    assert!(!timeline_view_qml.contains("renderTimelineWaveform"));
+    assert!(!timeline_view_qml.contains("renderTimelineAnalysis"));
+    assert!(!timeline_view_qml.contains("TimelineWaveformItem"));
+    assert!(!timeline_view_qml.contains("TimelineAnalysisItem"));
+    assert!(!timeline_view_qml.contains("geometryJson"));
+    assert!(!ui_components.join("LegacyTimelineView.qml").exists());
+    assert!(!ui_components.join("TimelineLane.qml").exists());
+}
+
+#[test]
+fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(timeline_qml.contains("sceneSnapshotJson:"));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["analysisRefs"]
+            .as_array()
+            .is_some_and(|refs| !refs.is_empty())));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["analysisPreviews"]
+            .as_array()
+            .is_some_and(|previews| !previews.is_empty())));
+    assert!(scene_sources.contains("AnalysisPreviewSpec"));
+    assert!(scene_sources.contains("analysisPreviews"));
+    assert!(scene_sources.contains("appendAnalysisPreview"));
+    assert!(!timeline_qml.contains("TimelineAnalysisItem"));
+    assert!(!timeline_qml.contains("renderTimelineAnalysis"));
+    assert!(!timeline_qml.contains("geometryJson"));
+    assert!(!timeline_qml.contains("visibleEnergySamples"));
+    assert!(!timeline_qml.contains("visibleHarmonicColorSamples"));
+    assert!(!timeline_qml.contains("AnalysisStrip"));
+    assert!(!timeline_qml.contains("Canvas"));
+}
+
+#[test]
+fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
+    fn cpp_method_body<'a>(source: &'a str, signature: &str) -> &'a str {
+        let signature_start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} is missing"));
+        let body_start = signature_start
+            + source[signature_start..]
+                .find('{')
+                .unwrap_or_else(|| panic!("{signature} body is missing"));
+        let mut depth = 0_usize;
+        for (offset, character) in source[body_start..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let body_end = body_start + offset + character.len_utf8();
+                        return &source[body_start..body_end];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("{signature} body is unterminated");
+    }
+
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let update_paint_node =
+        cpp_method_body(&scene_cpp, "QSGNode* TimelineSceneItem::updatePaintNode");
+    let viewport_setters = [
+        "void TimelineSceneItem::setViewportScrollSeconds",
+        "void TimelineSceneItem::setViewportPixelsPerSecond",
+        "void TimelineSceneItem::setViewportVisibleSeconds",
+        "void TimelineSceneItem::setViewportTrackScrollPixels",
+        "void TimelineSceneItem::setPlaybackPositionSeconds",
+    ];
+
+    assert!(scene_cpp
+        .contains("m_snapshot->snapshot = parseTimelineSceneSnapshot(m_sceneSnapshotJson);"));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
+    for setter in viewport_setters {
+        assert!(
+            !cpp_method_body(&scene_cpp, setter).contains("parseTimelineSceneSnapshot("),
+            "{setter} must not parse scene snapshots"
+        );
+    }
+}
+
+#[test]
+fn timeline_scene_item_exposes_native_timing_counters_for_manual_profiling() {
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
     )
     .unwrap();
 
-    assert!(timeline_qml.contains("waveformLevels: rowData.waveformLevels || []"));
-    assert!(track_row_qml.contains("required property var waveformLevels"));
-    assert!(track_row_qml.contains("waveformLevels: root.waveformLevels"));
-    assert!(lane_qml.contains("property var waveformLevels: []"));
-    assert!(lane_qml.contains("levels: root.listOrEmpty(root.waveformLevels)"));
-    assert!(waveform_qml.contains("property var levels: []"));
-    assert!(waveform_qml.contains("function selectedLevelPair()"));
-    assert!(waveform_qml.contains("targetBucketCount"));
-    assert!(waveform_qml.contains("blend"));
-    assert!(waveform_qml.contains("ctx.globalAlpha"));
-    assert!(waveform_qml.contains("drawWaveformLevel"));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong sceneSnapshotParseCount READ sceneSnapshotParseCount NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong worstSceneSnapshotParseMicros READ worstSceneSnapshotParseMicros NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong worstSceneGraphUpdateMicros READ worstSceneGraphUpdateMicros NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains(
+        "Q_PROPERTY(qulonglong textTextureCreateCount READ textTextureCreateCount NOTIFY scenePerfCountersChanged)"
+    ));
+    assert!(scene_header.contains("qulonglong sceneSnapshotParseCount() const;"));
+    assert!(scene_header.contains("qulonglong worstSceneSnapshotParseMicros() const;"));
+    assert!(scene_header.contains("qulonglong worstSceneGraphUpdateMicros() const;"));
+    assert!(scene_header.contains("qulonglong textTextureCreateCount() const;"));
+    assert!(scene_header.contains("void scenePerfCountersChanged();"));
+    assert!(scene_header.contains("#include <atomic>"));
+    assert!(scene_header.contains("qulonglong m_sceneSnapshotParseCount = 0;"));
+    assert!(scene_header.contains("qulonglong m_worstSceneSnapshotParseMicros = 0;"));
+    assert!(scene_header.contains("std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};"));
+    assert!(scene_header.contains("std::atomic<qulonglong> m_textTextureCreateCount{0};"));
+    assert!(scene_cpp.contains("QElapsedTimer"));
+    assert!(scene_cpp.contains("QMetaObject::invokeMethod"));
+    assert!(scene_cpp.contains("Qt::QueuedConnection"));
+    assert!(scene_cpp.contains("m_sceneSnapshotParseCount"));
+    assert!(scene_cpp.contains("m_textTextureCreateCount"));
+
+    let update_paint_node = {
+        let update_paint_node_start = scene_cpp
+            .find("QSGNode* TimelineSceneItem::updatePaintNode")
+            .unwrap();
+        &scene_cpp[update_paint_node_start
+            ..scene_cpp[update_paint_node_start..]
+                .find("void TimelineSceneItem::mousePressEvent")
+                .unwrap()
+                + update_paint_node_start]
+    };
+    assert!(update_paint_node.contains("queueScenePerfCountersChanged();"));
+    assert!(!update_paint_node.contains("emit scenePerfCountersChanged();"));
+}
+
+#[test]
+fn qml_timeline_scroll_updates_native_viewport_without_per_frame_geometry_regeneration() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let update_paint_node_start = scene_cpp
+        .find("QSGNode* TimelineSceneItem::updatePaintNode")
+        .unwrap();
+    let update_paint_node = &scene_cpp[update_paint_node_start
+        ..scene_cpp[update_paint_node_start..]
+            .find("void TimelineSceneItem::mousePressEvent")
+            .unwrap()
+            + update_paint_node_start];
+
+    assert!(timeline_qml.contains("viewportScrollSeconds:"));
+    assert!(timeline_qml.contains("viewportPixelsPerSecond:"));
+    assert!(timeline_qml.contains("viewportVisibleSeconds:"));
+    assert!(!timeline_qml.contains("renderTimelineWaveform("));
+    assert!(!timeline_qml.contains("renderTimelineAnalysis("));
+    assert!(!timeline_qml.contains("geometryJson"));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
+}
+
+#[test]
+fn qml_timeline_uses_native_scene_item_instead_of_reactive_lanes() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+
+    assert!(timeline_view_qml.contains("TimelineSceneItem"));
+    assert!(timeline_view_qml.contains("sceneSnapshotJson:"));
+    assert!(timeline_view_qml.contains("viewportScrollSeconds:"));
+    assert!(timeline_view_qml.contains("viewportPixelsPerSecond:"));
+    assert!(!timeline_view_qml.contains("delegate: TrackRow"));
+    assert!(!timeline_view_qml.contains("TimelineLane"));
+    assert!(!timeline_view_qml.contains("TimelineRuler"));
+    assert!(!main_qml.contains("TimelineRuler"));
+}
+
+#[test]
+fn qml_timeline_scene_hot_path_has_no_geometry_json_or_qml_marker_repeaters() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let rust_app_main = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolight-app/src/main.rs"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+
+    assert!(!timeline_view_qml.contains("renderTimelineWaveform("));
+    assert!(!timeline_view_qml.contains("renderTimelineAnalysis("));
+    assert!(!timeline_view_qml.contains("geometryJson"));
+    assert!(!rust_app_main.contains("include_str!(\"../../../UI/components/TimelineLane.qml\")"));
+    assert!(!rust_app_main.contains("include_str!(\"../../../UI/components/MarkerBlock.qml\")"));
+    assert!(!rust_app_main.contains("include_str!(\"../../../UI/components/TimelineRuler.qml\")"));
+    assert!(!rust_app_main
+        .contains("include_str!(\"../../../UI/components/TimelineNavigationSurface.qml\")"));
+    assert!(!scene_header.contains("Q_PROPERTY(QString geometryJson"));
+}
+
+#[test]
+fn timeline_scene_snapshot_contains_static_tracks_without_waveform_geometry() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+
+    let snapshot_json = state.timeline_scene_snapshot_json_state();
+    let parsed: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+
+    assert!(parsed["tracks"].as_array().unwrap().len() >= 3);
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["waveformRef"].is_object()));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["waveformPreview"]
+            .as_array()
+            .is_some_and(|samples| !samples.is_empty() && samples.len() <= 4_096)));
+    assert!(!snapshot_json.contains("waveformLevels"));
+    assert!(!snapshot_json.contains("\"rects\""));
+    assert!(!snapshot_json.contains("\"bands\""));
+}
+
+#[test]
+fn timeline_scene_snapshot_uses_cache_backed_waveform_ref_without_inline_payload() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let waveform_track = state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_waveform")
+        .unwrap();
+    waveform_track.provenance.remove("waveform_payload");
+    waveform_track.provenance.remove("visible_waveform");
+
+    state.refresh_view_state();
+
+    let snapshot_json = state.timeline_scene_snapshot_json_state();
+    let parsed: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    let waveform_track = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == "track_waveform")
+        .unwrap();
+
+    assert!(waveform_track["waveformRef"].is_object());
+    assert!(waveform_track["waveformPreview"]
+        .as_array()
+        .is_some_and(|samples| !samples.is_empty() && samples.len() <= 4_096));
+    assert!(!state.is_dirty);
+}
+
+#[test]
+fn timeline_scene_snapshot_preserves_track_tree_metadata_for_native_rendering() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+
+    let snapshot_json = state.timeline_scene_snapshot_json_state();
+    let parsed: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    let drums = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == "track_drums")
+        .unwrap();
+    let drum_energy = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == "track_drum_energy")
+        .unwrap();
+
+    assert_eq!(drums["depth"], 1);
+    assert!(drums["hasChildren"].as_bool().unwrap());
+    assert!(drums["expanded"].as_bool().unwrap());
+    assert_eq!(drum_energy["depth"], 2);
+    assert!(!drum_energy["hasChildren"].as_bool().unwrap());
+}
+
+#[test]
+fn controller_viewport_changes_preserve_timeline_scene_snapshot_payload() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let before_snapshot = state.timeline_scene_snapshot_json_state();
+
+    state.set_timeline_zoom_state(240.0);
+    state.set_timeline_scroll_seconds_state(0.75);
+    state.set_timeline_visible_seconds_state(1.25);
+    state.apply_timeline_follow_state(1.4);
+    state.sync_playback_position_state(1.5);
+
+    assert_eq!(state.timeline_scene_snapshot_json_state(), before_snapshot);
+}
+
+#[test]
+fn timeline_scene_snapshot_preserves_marker_selection_for_native_rendering() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    state.select_track_state("track_edit");
+    state.toggle_marker_selection_state("marker_edit_2", false);
+
+    let snapshot_json = state.timeline_scene_snapshot_json_state();
+    let parsed: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    let editable_track = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == "track_edit")
+        .unwrap();
+    let selected_marker = editable_track["markers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|marker| marker["markerId"] == "marker_edit_2")
+        .unwrap();
+
+    assert!(editable_track["selected"].as_bool().unwrap());
+    assert!(selected_marker["selected"].as_bool().unwrap());
+    assert!(selected_marker["editable"].as_bool().unwrap());
+}
+
+#[test]
+fn timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_repeaters() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+    let update_paint_node_start = scene_cpp
+        .find("QSGNode* TimelineSceneItem::updatePaintNode")
+        .unwrap();
+    let update_paint_node = &scene_cpp[update_paint_node_start
+        ..scene_cpp[update_paint_node_start..]
+            .find("void TimelineSceneItem::mousePressEvent")
+            .unwrap()
+            + update_paint_node_start];
+
+    assert!(timeline_view_qml.contains("TimelineSceneItem"));
+    assert!(!timeline_view_qml.contains("Repeater"));
+    assert!(!timeline_view_qml.contains("TimelineNavigationSurface"));
+    assert!(scene_header.contains("void trackClicked(const QString& trackId);"));
+    assert!(scene_header.contains(
+        "void markerClicked(const QString& trackId, const QString& markerId, bool additive);"
+    ));
+    assert!(scene_header.contains("void scrubRequested(double seconds);"));
+    assert!(scene_header.contains("void mouseMoveEvent(QMouseEvent* event) override;"));
+    assert!(scene_header.contains("void mouseReleaseEvent(QMouseEvent* event) override;"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("QString markerId;"));
+    assert!(scene_sources.contains("marker.selected"));
+    assert!(scene_sources.contains("timelineMarkerRectForTrack"));
+    assert!(scene_cpp
+        .contains("emit markerClicked(trackId, marker.markerId, timelineAdditiveSelection(event->modifiers()));"));
+    assert!(scene_cpp.contains("emit scrubRequested(timelineSecondsForPosition("));
+    assert!(scene_cpp.contains("event->position().x()"));
+    assert!(scene_cpp.contains("m_scrubbingRuler"));
+    assert!(scene_sources.contains("selectionStripe"));
+    assert!(scene_sources.contains("playhead"));
+    assert!(scene_sources.contains("kWheelAngleToDeltaFactor"));
+    assert!(scene_sources.contains("kZoomSensitivityBase"));
+    assert!(scene_sources.contains("kWheelAngleUnitsPerNotch"));
+    assert!(scene_sources.contains("kScrollPixelsPerNotch"));
+    assert!(scene_cpp
+        .contains("m_snapshot->snapshot = parseTimelineSceneSnapshot(m_sceneSnapshotJson);"));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
+}
+
+#[test]
+fn qml_native_timeline_keeps_vertical_scroll_and_visible_track_range_current() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+
+    assert!(timeline_qml.contains("property real trackScrollPixels"));
+    assert!(timeline_qml.contains("function updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains("onAppControllerChanged: timelineRoot.updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains("onTrackCountChanged: timelineRoot.setTrackScrollPixels"));
+    assert!(timeline_qml.contains("viewportTrackScrollPixels: timelineRoot.trackScrollPixels"));
+    assert!(timeline_qml.contains("onViewportVerticalScrollRequested"));
+    assert!(scene_header.contains("Q_PROPERTY(double viewportTrackScrollPixels"));
+    assert!(scene_header.contains("void viewportVerticalScrollRequested(double pixelDelta);"));
+    assert!(scene_cpp.contains("trackScrollPixels"));
+    assert!(scene_cpp.contains("emit viewportVerticalScrollRequested(verticalDelta);"));
+}
+
+#[test]
+fn native_timeline_scene_applies_fractional_vertical_track_scroll() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains(
+        "return kRulerHeight + static_cast<double>(trackIndex) * kRowHeight\n    - finiteNonNegative(trackScrollPixels);"
+    ));
+    assert!(scene_sources.contains(
+        "const int trackIndex = static_cast<int>(std::floor(\n    (y - kRulerHeight + finiteNonNegative(trackScrollPixels)) / kRowHeight));"
+    ));
+    assert!(!scene_sources.contains(
+        "static_cast<double>(trackIndex - timelineFirstVisibleTrackIndex(trackScrollPixels)) * kRowHeight"
+    ));
+}
+
+#[test]
+fn native_timeline_scene_preserves_marker_labels() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("QString label;"));
+    assert!(scene_sources
+        .contains("marker.label = markerObject.value(QStringLiteral(\"label\")).toString();"));
+    assert!(scene_sources.contains("constexpr double kMinimumMarkerLabelWidth = 36.0;"));
+    assert!(scene_sources.contains(
+        "if (!marker.label.isEmpty() && visibleMarkerRect.width() >= kMinimumMarkerLabelWidth)"
+    ));
+    assert!(
+        scene_sources.contains("appendRowViewportText(\n          texts,\n          marker.label")
+    );
+}
+
+#[test]
+fn native_timeline_scene_restores_editable_marker_drag_and_resize() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("bool editable = false;"));
+    assert!(scene_sources.contains(
+        "marker.editable = markerObject.value(QStringLiteral(\"editable\")).toBool(false);"
+    ));
+    assert!(scene_header.contains(
+        "void markerMoveRequested(const QString& trackId, const QString& markerId, double deltaSeconds, bool bypassSnap, bool preserveSelection);"
+    ));
+    assert!(scene_header.contains(
+        "void markerResizeRequested(const QString& trackId, const QString& markerId, double durationSeconds);"
+    ));
+    assert!(scene_cpp.contains("m_markerDrag.mode = MarkerDragMode::Move;"));
+    assert!(scene_cpp.contains("m_markerDrag.mode = MarkerDragMode::Resize;"));
+    assert!(scene_cpp.contains("emit markerMoveRequested("));
+    assert!(scene_cpp.contains("emit markerResizeRequested("));
+    assert!(timeline_qml.contains("onMarkerMoveRequested: function(trackId, markerId, deltaSeconds, bypassSnap, preserveSelection)"));
+    assert!(timeline_qml
+        .contains("timelineRoot.appController.move_selected_markers(deltaSeconds, bypassSnap)"));
+    assert!(timeline_qml
+        .contains("onMarkerResizeRequested: function(trackId, markerId, durationSeconds)"));
+    assert!(timeline_qml
+        .contains("timelineRoot.appController.resize_marker(markerId, durationSeconds)"));
+}
+
+#[test]
+fn native_timeline_scene_keeps_ruler_label_clicks_from_scrubbing() {
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_cpp.contains("if (y < kRulerHeight && x >= timelineLaneOriginX())"));
+    assert!(!scene_cpp.contains("if (y < kRulerHeight) {\n    m_scrubbingRuler = true;"));
+}
+
+#[test]
+fn qml_native_timeline_refreshes_visible_range_when_scroll_value_is_unchanged() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(timeline_qml.contains("if (timelineRoot.trackScrollPixels === clampedValue)"));
+    assert!(timeline_qml.contains("timelineRoot.updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains(
+        "onHeightChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)"
+    ));
+    assert!(timeline_qml.contains(
+        "onTrackCountChanged: timelineRoot.setTrackScrollPixels(timelineRoot.trackScrollPixels)"
+    ));
+}
+
+#[test]
+fn qml_main_marks_scroll_slider_changes_as_user_navigation() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+
+    assert!(main_qml.contains("function extendTimelineControlNavigation()"));
+    assert!(main_qml.contains("root.controller.begin_timeline_user_navigation()"));
+    assert!(main_qml.contains("timelineControlNavigationQuietTimer.restart()"));
+    assert!(main_qml.contains("id: timelineControlNavigationQuietTimer"));
+    assert!(main_qml.contains("root.controller.end_timeline_user_navigation()"));
+    assert!(main_qml.contains("onMoved: root.setTimelineScrollSeconds(value)"));
+}
+
+#[test]
+fn qml_timeline_native_scrub_omits_label_width_with_rust_only_runtime() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+
+    assert!(main_qml.contains("function setTimelineZoomForLaneWidth"));
+    assert!(main_qml
+        .contains("typeof root.controller.set_timeline_zoom_for_lane_width === \"function\""));
+    assert!(main_qml.contains("typeof root.controller.fit_timeline_to_lane_width === \"function\""));
+    assert!(main_qml.contains("typeof root.controller.set_timeline_follow_mode === \"function\""));
+    assert!(
+        main_qml.contains("typeof root.controller.set_timeline_scroll_seconds === \"function\"")
+    );
+    assert!(main_qml.contains("onMoved: root.setTimelineZoomForLaneWidth("));
+    assert!(timeline_qml.contains("var x = (seconds - scene.viewportScrollSeconds)"));
+    assert!(timeline_qml.contains("+ timelineRoot.timelineLeftPadding"));
+    assert!(!timeline_qml
+        .contains("+ timelineRoot.timelineLabelWidth + timelineRoot.timelineLeftPadding"));
+    assert!(
+        timeline_qml.contains("typeof timelineRoot.appController.set_timeline_visible_track_range")
+    );
+    assert!(!main_qml.contains("pythonReferenceMode"));
+    assert!(!main_qml.contains("LegacyTimelineView"));
+    assert!(main_qml.contains("source: \"components/TimelineView.qml\""));
+}
+
+#[test]
+fn timeline_geometry_item_empty_reason_has_dedicated_notify_signal() {
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_renderer/scene_graph.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_renderer/scene_graph.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_header
+        .contains("Q_PROPERTY(QString emptyReason READ emptyReason NOTIFY emptyReasonChanged)"));
+    assert!(scene_header.contains("void emptyReasonChanged();"));
+    assert!(scene_cpp.contains("emptyReasonForGeometryJson"));
+    assert!(scene_cpp.contains("emit emptyReasonChanged();"));
+    assert!(!scene_cpp.contains("m_emptyReason = error;"));
+}
+
+#[test]
+fn timeline_scene_item_draws_track_labels_and_offsets_timeline_content() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("constexpr double kLabelWidth = 280.0;"));
+    assert!(scene_sources.contains("QString name;"));
+    assert!(scene_sources.contains(
+        "track.name = trackObject.value(QStringLiteral(\"name\")).toString(track.trackId);"
+    ));
+    assert!(scene_sources.contains("QSGSimpleTextureNode"));
+    assert!(scene_sources.contains("appendTrackLabel"));
+    assert!(scene_sources.contains("timelineLaneOriginX()"));
+    assert!(timeline_view_qml.contains(
+        "Math.max(0, width - timelineRoot.timelineLabelWidth - timelineRoot.timelineLeftPadding)"
+    ));
+    assert!(!timeline_view_qml.contains("zoom_timeline_by_factor(factor, anchorX, width)"));
+}
+
+#[test]
+fn native_timeline_scene_clips_scrolled_content_to_lane_origin() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("void appendLaneClippedRect("));
+    assert!(scene_sources.contains("QRectF timelineLaneClippedRect("));
+    assert!(scene_sources.contains("const double laneLeft = timelineLaneOriginX();"));
+    assert!(scene_sources.contains("const double left = std::max(laneLeft, rect.x());"));
+    assert!(scene_sources.contains(
+        "appendRowLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#1d4ed8\"))"
+    ));
+    assert!(scene_sources.contains(
+        "appendRowLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#60a5fa\"))"
+    ));
+    assert!(scene_sources
+        .contains("appendRowLaneClippedRect(\n      bands,\n      withAlpha(sampleColor"));
+    assert!(scene_sources.contains("appendRowLaneClippedRect(\n        bands,\n        markerFill"));
+    assert!(scene_sources
+        .contains("appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0"));
+}
+
+#[test]
+fn native_timeline_scene_clips_scrolled_rows_below_ruler() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("QRectF timelineRowViewportClippedRect("));
+    assert!(scene_sources.contains("QRectF timelineRowLaneClippedRect("));
+    assert!(scene_sources.contains("const double top = std::max(kRulerHeight, rect.y());"));
+    assert!(scene_sources.contains("void appendRowViewportClippedRect("));
+    assert!(scene_sources.contains("void appendRowLaneClippedRect("));
+    assert!(scene_sources.contains("void appendRowViewportText("));
+    assert!(scene_sources.contains("const QRectF clipped = timelineRowViewportClippedRect("));
+    assert!(scene_sources.contains("const QRectF clipped = timelineRowLaneClippedRect("));
+    assert!(scene_sources.contains(
+        "appendRowViewportClippedRect(\n      bands,\n      selected ? selectedLabelBackground : labelBackground"
+    ));
+    assert!(scene_sources.contains(
+        "const QRectF visibleMarkerRect = timelineRowLaneClippedRect(markerRect, width, height);"
+    ));
+}
+
+#[test]
+fn native_timeline_marker_hit_tests_are_clipped_to_visible_lane() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let scene_dir = manifest_dir.join("src/timeline_scene");
+    let scene_item_cpp =
+        std::fs::read_to_string(scene_dir.join("timeline_scene_item.cpp")).unwrap();
+    let frame_builder_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_frame_builder.cpp")).unwrap();
+    let frame_builder_h = std::fs::read_to_string(scene_dir.join("scene_frame_builder.h")).unwrap();
+
+    assert!(frame_builder_h.contains("QRectF timelineLaneClippedRect("));
+    assert!(frame_builder_cpp.contains("QRectF timelineLaneClippedRect("));
+    assert!(frame_builder_cpp.contains("const QRectF clipped = timelineLaneClippedRect("));
+    assert!(scene_item_cpp.contains("const QRectF visibleMarkerRect = timelineLaneClippedRect("));
+    assert!(scene_item_cpp.contains("visibleMarkerRect.contains(event->position())"));
+    assert!(!scene_item_cpp.contains(
+        "timelineMarkerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond)\n             .contains(event->position())"
+    ));
+}
+
+#[test]
+fn timeline_scene_item_draws_track_tree_indentation_and_disclosure() {
+    let timeline_view_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("int depth = 0;"));
+    assert!(scene_sources.contains("bool hasChildren = false;"));
+    assert!(scene_sources.contains(
+        "track.depth = std::max(0, trackObject.value(QStringLiteral(\"depth\")).toInt(0));"
+    ));
+    assert!(scene_sources.contains(
+        "track.hasChildren = trackObject.value(QStringLiteral(\"hasChildren\")).toBool(false);"
+    ));
+    assert!(scene_sources.contains("treeIndentForDepth(track.depth)"));
+    assert!(scene_sources.contains("appendTrackTreeChrome"));
+    assert!(
+        scene_sources.contains("track.expanded ? QStringLiteral(\"v\") : QStringLiteral(\">\")")
+    );
+    assert!(
+        scene_header.contains("void trackExpansionToggled(const QString& trackId, bool expanded);")
+    );
+    assert!(scene_sources.contains("emit trackExpansionToggled(trackId, !track.expanded);"));
+    assert!(timeline_view_qml.contains("onTrackExpansionToggled"));
+    assert!(timeline_view_qml
+        .contains("timelineRoot.appController.set_track_expanded(trackId, expanded)"));
+}
+
+#[test]
+fn timeline_scene_item_draws_visible_lane_rows_even_without_waveform_or_markers() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("appendTrackLaneChrome"));
+    assert!(scene_sources.contains("laneRowBackground"));
+    assert!(scene_sources.contains("laneRowBorder"));
+    assert!(scene_sources.contains("laneCenterGuide"));
+    assert!(scene_sources.contains("appendTimelineGridLines"));
 }
 
 #[test]
@@ -2222,6 +3298,255 @@ fn controller_viewport_changes_preserve_timeline_rows_payload() {
     assert_eq!(state.timeline_rows_json.to_string(), before_rows);
     assert_eq!(state.timeline_pixels_per_second, 180.0);
     assert_eq!(state.timeline_visible_seconds, 3.0);
+}
+
+#[test]
+fn controller_waveform_cache_reuses_parsed_artifact_for_viewport_changes() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let cache_ref = waveform_cache_ref(&state);
+
+    let first =
+        state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.0));
+    let second =
+        state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.5));
+
+    assert!(first.contains("\"bands\""));
+    assert!(second.contains("\"bands\""));
+    assert_eq!(state.waveform_cache.parse_count(), 1);
+}
+
+#[test]
+fn controller_waveform_cache_rejects_provenance_when_artifact_digest_mismatches() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let cache_ref = waveform_cache_ref(&state);
+
+    state
+        .project
+        .cache_entries
+        .iter_mut()
+        .find(|entry| entry.id == cache_ref)
+        .unwrap()
+        .payload_digest = "changed_digest".to_string();
+    let geometry =
+        state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.0));
+
+    assert_eq!(geometry, "{\"bands\":[]}");
+    assert_eq!(state.waveform_cache.parse_count(), 0);
+}
+
+#[test]
+fn controller_waveform_cache_is_cleared_when_project_is_replaced() {
+    let root = test_dir("waveform-cache-clears-on-project-replace");
+    let project_path = root.join("empty.autolight");
+    ProjectDocument::new("project_empty_test", "Empty")
+        .save_path(&project_path)
+        .unwrap();
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let cache_ref = waveform_cache_ref(&state);
+
+    state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.0));
+    assert_eq!(state.waveform_cache.parse_count(), 1);
+
+    assert!(state.open_project_state(project_path.to_str().unwrap()));
+    assert_eq!(state.waveform_cache.parse_count(), 0);
+
+    state.load_demo_project_state();
+    let cache_ref = waveform_cache_ref(&state);
+    state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.0));
+    assert_eq!(state.waveform_cache.parse_count(), 1);
+
+    state.clear_project_state();
+    assert_eq!(state.waveform_cache.parse_count(), 0);
+}
+
+#[test]
+fn controller_waveform_render_request_rejects_unknown_cache_ref() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+
+    let geometry =
+        state.render_timeline_waveform_state("track_waveform", "missing", waveform_request(0.0));
+
+    assert_eq!(geometry, "{\"bands\":[]}");
+}
+
+#[test]
+fn controller_waveform_render_request_does_not_mark_project_dirty() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let cache_ref = waveform_cache_ref(&state);
+    let before_rows = state.timeline_rows_json.to_string();
+    let was_dirty = state.is_dirty;
+
+    state.render_timeline_waveform_state("track_waveform", &cache_ref, waveform_request(0.0));
+
+    assert_eq!(state.timeline_rows_json.to_string(), before_rows);
+    assert_eq!(state.is_dirty, was_dirty);
+}
+
+#[test]
+fn controller_analysis_render_accepts_visible_energy_provenance_array() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let cache_ref = state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_drum_energy")
+        .and_then(|track| track.cache_refs.first())
+        .cloned()
+        .unwrap();
+
+    let geometry = state.render_timeline_analysis_state(
+        "track_drum_energy",
+        &cache_ref,
+        analysis_request(0.0),
+    );
+    let parsed: Value = serde_json::from_str(&geometry).unwrap();
+
+    assert!(!parsed["bands"][0]["rects"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn controller_analysis_render_groups_harmonic_color_provenance_array() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let entry =
+        cache_entry_for_bytes("harmonic-color", "dep_harmonic", b"{}", "1", "test").unwrap();
+    let cache_ref = entry.id.clone();
+    state.project.cache_entries.push(entry);
+    state.project.tracks.push(Track {
+        id: "track_harmonic".to_string(),
+        track_type: TrackType::Generated,
+        name: "Harmonic Color".to_string(),
+        input_track_ids: vec!["track_drums".to_string()],
+        transform_id: "music.harmonic_color".to_string(),
+        transform_params: serde_json::Map::default(),
+        transform_version: "1".to_string(),
+        output_schema: "artifact.harmonic_color.v1".to_string(),
+        dependency_hash: "dep_harmonic".to_string(),
+        result_state: ResultState::Complete,
+        cache_refs: vec![cache_ref.clone()],
+        provenance: serde_json::Map::from_iter([(
+            "visible_harmonic_color".to_string(),
+            serde_json::json!([
+                {"timestamp": 0.0, "color": "#ef4444"},
+                {"timestamp": 0.5, "color": "#22c55e"}
+            ]),
+        )]),
+        error: String::default(),
+    });
+
+    let geometry =
+        state.render_timeline_analysis_state("track_harmonic", &cache_ref, analysis_request(0.0));
+    let parsed: Value = serde_json::from_str(&geometry).unwrap();
+    let bands = parsed["bands"].as_array().unwrap();
+
+    assert!(bands.iter().any(|band| band["color"] == "#ef4444"));
+    assert!(bands.iter().any(|band| band["color"] == "#22c55e"));
+}
+
+#[test]
+fn controller_native_pixel_scroll_preserves_rows_and_suppresses_follow() {
+    let root = test_dir("native-scroll");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.set_timeline_visible_seconds_state(2.0);
+    let before_rows = state.timeline_rows_json.to_string();
+
+    state.scroll_timeline_by_pixels_state(192.0);
+
+    assert_eq!(state.timeline_rows_json.to_string(), before_rows);
+    assert_eq!(state.timeline_scroll_seconds, 2.0);
+    assert!(state.timeline_user_navigation_active);
+}
+
+#[test]
+fn controller_viewport_changes_refresh_playhead_offscreen_direction() {
+    let root = test_dir("playhead-offscreen-refresh");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    assert!(state.play_selected_track_state());
+    state.set_timeline_follow_mode_state(0);
+    state.set_timeline_visible_seconds_state(2.0);
+    state.sync_playback_position_state(5.0);
+
+    state.set_timeline_scroll_seconds_state(4.0);
+    assert_eq!(state.timeline_playhead_offscreen_direction, 0);
+
+    state.set_timeline_scroll_seconds_state(6.5);
+    assert_eq!(state.timeline_playhead_offscreen_direction, -1);
+
+    state.set_timeline_scroll_seconds_state(1.0);
+    assert_eq!(state.timeline_playhead_offscreen_direction, 1);
+}
+
+#[test]
+fn controller_native_zoom_preserves_anchor_and_rows() {
+    let root = test_dir("native-zoom");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.set_timeline_visible_lane_width_state(480.0);
+    state.set_timeline_scroll_seconds_state(1.0);
+    let before_rows = state.timeline_rows_json.to_string();
+
+    state.zoom_timeline_by_factor_state(2.0, 120.0, 480.0);
+
+    assert_eq!(state.timeline_rows_json.to_string(), before_rows);
+    assert_eq!(state.timeline_pixels_per_second, 192.0);
+    assert_eq!(state.timeline_scroll_seconds, 1.625);
+    assert_eq!(state.timeline_visible_seconds, 2.5);
+}
+
+#[test]
+fn controller_scrub_timeline_at_x_seeks_without_edit_history_or_row_rebuild() {
+    let root = test_dir("timeline-scrub");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.reset_history_clean();
+    let before_rows = state.timeline_rows_json.to_string();
+
+    let scrubbed_seconds = state.scrub_timeline_at_x_state(288.0, 480.0);
+
+    assert_eq!(scrubbed_seconds, 3.0);
+    assert_eq!(state.playback_position_seconds, 3.0);
+    assert_eq!(state.timeline_rows_json.to_string(), before_rows);
+    assert!(!state.is_dirty);
+    assert!(!state.can_undo);
+}
+
+#[test]
+fn controller_follow_mode_center_scrolls_unless_user_navigation_is_active() {
+    let root = test_dir("timeline-follow");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.set_timeline_visible_seconds_state(4.0);
+    state.set_timeline_follow_mode_state(2);
+
+    state.apply_timeline_follow_state(5.0);
+    assert_eq!(state.timeline_scroll_seconds, 3.0);
+
+    state.begin_timeline_user_navigation_state();
+    state.apply_timeline_follow_state(8.0);
+    assert_eq!(state.timeline_scroll_seconds, 3.0);
+    assert!(state.timeline_user_navigation_active);
+
+    state.end_timeline_user_navigation_state();
+    state.apply_timeline_follow_state(8.0);
+    assert_eq!(state.timeline_scroll_seconds, 6.0);
 }
 
 #[test]
@@ -2273,7 +3598,9 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("Failed to parse transformSpecsJson"));
     assert!(adapter_qml.contains("trackRows = rows"));
     assert!(!adapter_qml.contains("trackModel.append(rows[i])"));
-    assert!(adapter_qml.contains("function reloadModels() {\n        reloadSelectionModels()"));
+    assert!(adapter_qml.contains(
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()\n        reloadSelectionModels()"
+    ));
     assert!(adapter_qml.contains("nativeController.selectedTrackId"));
     assert!(adapter_qml.contains("nativeController.addTransformTrack"));
     assert!(adapter_qml.contains("nativeController.runTrack"));
@@ -2307,10 +3634,16 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("MediaPlayer.PlayingState"));
     assert!(adapter_qml.contains("AudioOutput"));
     assert!(adapter_qml.contains("mediaPlayer.play()"));
-    assert!(adapter_qml.contains("onPositionChanged:"));
-    assert!(adapter_qml.contains("nativeController.seekPlayback(position / 1000.0)"));
+    assert!(adapter_qml.contains("function seekMediaPlayerToSeconds(seconds)"));
+    assert!(adapter_qml.contains("mediaPlayer.position = positionMs"));
+    assert!(!adapter_qml.contains("mediaPlayer.seek("));
+    assert!(adapter_qml.contains("onPositionChanged: function(position)"));
+    assert!(adapter_qml.contains("nativeController.syncPlaybackPosition(position / 1000.0)"));
     assert!(adapter_qml.contains(
-        "if (source.toString().length > 0) {\n                nativeController.seekPlayback(position / 1000.0)\n                reloadViewportState()\n            }"
+        "onPositionChanged: function(position) {\n            if (source.toString().length > 0) {\n                nativeController.syncPlaybackPosition(position / 1000.0)\n                reloadViewportState()\n            }\n        }"
+    ));
+    assert!(!adapter_qml.contains(
+        "onPositionChanged: {\n            if (source.toString().length > 0) {\n                nativeController.syncPlaybackPosition(position / 1000.0)"
     ));
     assert!(!adapter_qml.contains(
         "onPositionChanged: { nativeController.seekPlayback(position / 1000.0); reloadModels() }"
@@ -2319,7 +3652,7 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("path.replace(/\\\\/g, \"/\")"));
     assert!(adapter_qml.contains("normalizedPath.match(/^[A-Za-z]:\\//)"));
     assert!(adapter_qml.contains("selectedTrackCanRerun = nativeController.selectedTrackCanRerun"));
-    assert!(adapter_qml.contains("function select_track(trackId) {\n        nativeController.selectTrack(trackId)\n        reloadSelectionModels()\n        reloadTrackModel()\n    }"));
+    assert!(adapter_qml.contains("function select_track(trackId) {\n        nativeController.selectTrack(trackId)\n        reloadSelectionModels()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n    }"));
     assert!(!adapter_qml.contains("function select_track(trackId) { nativeController.selectTrack(trackId); reloadSelectionModels() }"));
     assert!(!adapter_qml.contains("encodeURI(path)"));
     assert!(adapter_qml.contains("nativeController.timelinePixelsPerSecond"));
@@ -2344,24 +3677,219 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("transformModel.append"));
     assert!(adapter_qml.contains("function version_at(index)"));
 
-    assert!(main_qml.contains("TimelineView {"));
+    assert!(adapter_qml.contains("nativeController.timelineSceneSnapshotJson"));
+    assert!(main_qml.contains("source: \"components/TimelineView.qml\""));
+    assert!(!main_qml.contains("pythonReferenceMode"));
+    assert!(!main_qml.contains("LegacyTimelineView.qml"));
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    assert!(timeline_qml.contains("readonly property var safeTrackRows"));
-    assert!(timeline_qml.contains("model: timelineRows.safeTrackRows.length"));
-    assert!(
-        timeline_qml.contains("property var rowData: timelineRows.safeTrackRows[index] || ({})")
-    );
-    assert!(timeline_qml.contains("markerSpans: rowData.markerSpans || []"));
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(timeline_qml.contains("sceneSnapshotJson:"));
+    assert!(timeline_qml.contains("viewportScrollSeconds:"));
+    assert!(!timeline_qml.contains("readonly property var safeTrackRows"));
+    assert!(!timeline_qml.contains("delegate: TrackRow"));
+    assert!(!timeline_qml.contains("markerSpans: rowData.markerSpans || []"));
     assert!(!timeline_qml.contains("visibleWaveformSamples"));
     assert!(!timeline_qml.contains("model: timelineRows.appController.trackModel"));
 }
 
+#[test]
+fn qml_app_runtime_refreshes_native_timeline_scene_snapshot_after_model_changes() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(adapter_qml.contains(
+        "readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson"
+    ));
+    assert!(adapter_qml.contains("function reloadTimelineSceneSnapshot()"));
+    assert!(adapter_qml.contains(
+        "projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"
+    ));
+    assert!(adapter_qml.contains(
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()\n        reloadSelectionModels()\n        reloadViewportState()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n        reloadTransformModel()"
+    ));
+    assert!(adapter_qml.contains(
+        "function select_track(trackId) {\n        nativeController.selectTrack(trackId)\n        reloadSelectionModels()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n    }"
+    ));
+    assert!(adapter_qml.contains(
+        "function set_track_expanded(trackId, expanded) { var changed = nativeController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }"
+    ));
+    assert!(adapter_qml.contains(
+        "function toggle_marker_selection(markerId, extendSelection) { nativeController.toggleMarkerSelection(markerId, extendSelection); reloadModels() }"
+    ));
+    assert!(adapter_qml.contains(
+        "function move_selected_markers(delta, bypass) { var moved = nativeController.moveSelectedMarkers(delta, bypass); reloadModels(); return moved }"
+    ));
+    assert!(adapter_qml.contains(
+        "function resize_marker(markerId, duration) { var resized = nativeController.resizeMarker(markerId, duration); reloadModels(); return resized }"
+    ));
+}
+
+#[test]
+fn qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(adapter_qml.contains("function reloadProjectState()"));
+    assert!(adapter_qml.contains("projectStateMirror.projectName = nativeController.projectName"));
+    assert!(adapter_qml.contains("projectStateMirror.lastError = nativeController.lastError"));
+    assert!(adapter_qml.contains("projectStateMirror.projectPath = nativeController.projectPath"));
+    assert!(adapter_qml.contains("projectStateMirror.isDirty = nativeController.isDirty"));
+    assert!(adapter_qml.contains("projectStateMirror.canUndo = nativeController.canUndo"));
+    assert!(adapter_qml.contains("projectStateMirror.canRedo = nativeController.canRedo"));
+    assert!(adapter_qml.contains("function reloadPlaybackState()"));
+    assert!(adapter_qml.contains("playback.sourcePath = nativeController.playbackSourcePath"));
+    assert!(adapter_qml
+        .contains("playback.nativePositionSeconds = nativeController.playbackPositionSeconds"));
+    assert!(adapter_qml
+        .contains("playback.nativeDurationSeconds = nativeController.playbackDurationSeconds"));
+    assert!(adapter_qml.contains("playback.volume = nativeController.playbackVolume"));
+    assert!(adapter_qml.contains(
+        "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()"
+    ));
+    assert!(
+        !adapter_qml.contains("readonly property string projectName: nativeController.projectName")
+    );
+    assert!(!adapter_qml
+        .contains("readonly property string sourcePath: nativeController.playbackSourcePath"));
+}
+
+#[test]
+fn qml_app_runtime_keeps_public_native_state_mirrors_readonly() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(adapter_qml.contains("QtObject {\n        id: projectStateMirror"));
+    assert!(adapter_qml
+        .contains("readonly property string projectName: projectStateMirror.projectName"));
+    assert!(
+        adapter_qml.contains("readonly property string lastError: projectStateMirror.lastError")
+    );
+    assert!(adapter_qml.contains(
+        "readonly property string timelineRowsJson: projectStateMirror.timelineRowsJson"
+    ));
+    assert!(adapter_qml.contains(
+        "readonly property string transformSpecsJson: projectStateMirror.transformSpecsJson"
+    ));
+    assert!(adapter_qml
+        .contains("readonly property string projectPath: projectStateMirror.projectPath"));
+    assert!(adapter_qml.contains("readonly property bool isDirty: projectStateMirror.isDirty"));
+    assert!(adapter_qml.contains("readonly property bool canUndo: projectStateMirror.canUndo"));
+    assert!(adapter_qml.contains("readonly property bool canRedo: projectStateMirror.canRedo"));
+    assert!(adapter_qml.contains(
+        "readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson"
+    ));
+    assert!(adapter_qml.contains("projectStateMirror.projectName = nativeController.projectName"));
+    assert!(adapter_qml.contains(
+        "projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"
+    ));
+    assert!(
+        !adapter_qml.contains("\n    property string projectName: nativeController.projectName")
+    );
+    assert!(!adapter_qml.contains("\n    property bool isDirty: nativeController.isDirty"));
+}
+
+#[test]
+fn qml_main_initializes_rust_runtime_demo_after_runtime_is_owned() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(main_qml.contains("function initializeRustRuntime()"));
+    assert!(main_qml.contains("root.controller.start_default_project()"));
+    assert!(!main_qml.contains("pythonReferenceMode"));
+    assert!(main_qml.contains("Component.onCompleted: root.initializeRustRuntime()"));
+    assert!(adapter_qml.contains("function start_default_project()"));
+    assert!(!adapter_qml.contains("Component.onCompleted: load_demo_project()"));
+}
+
+#[test]
+fn repo_surface_is_rust_only_after_port_cleanup() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    for removed_path in [
+        ".python-version",
+        "autolight",
+        "tests",
+        "main.py",
+        "hello_qt.py",
+        "pyproject.toml",
+        "uv.lock",
+        "scripts/check_qml_screenshot.py",
+        "notebook",
+        "docs/superpowers",
+    ] {
+        assert!(!repo_root.join(removed_path).exists());
+    }
+}
+
+#[test]
+fn current_docs_describe_rust_only_runtime() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for doc_path in [
+        "README.md",
+        "AGENTS.md",
+        "docs/PROCESS.md",
+        "docs/ROADMAP.md",
+    ] {
+        let text = std::fs::read_to_string(repo_root.join(doc_path)).unwrap();
+        assert!(!text.contains("Python"));
+        assert!(!text.contains("PySide"));
+        assert!(!text.contains("uv run"));
+        assert!(!text.contains("reference implementation"));
+    }
+}
+
 fn json_array(payload: &str) -> Vec<Value> {
     serde_json::from_str(payload).unwrap()
+}
+
+fn waveform_cache_ref(state: &AppControllerState) -> String {
+    state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_waveform")
+        .and_then(|track| track.cache_refs.first())
+        .cloned()
+        .unwrap()
+}
+
+fn waveform_request(scroll_seconds: f64) -> WaveformRenderRequest {
+    WaveformRenderRequest {
+        scroll_seconds,
+        visible_seconds: 1.0,
+        pixels_per_second: 96.0,
+        width_pixels: 320.0,
+        height_pixels: 72.0,
+        left_padding_pixels: 24.0,
+        device_pixel_ratio: 1.0,
+    }
+}
+
+fn analysis_request(scroll_seconds: f64) -> AnalysisRenderRequest {
+    AnalysisRenderRequest {
+        scroll_seconds,
+        visible_seconds: 1.0,
+        pixels_per_second: 100.0,
+        width_pixels: 100.0,
+        height_pixels: 16.0,
+        left_padding_pixels: 0.0,
+    }
 }
 
 fn test_dir(name: &str) -> std::path::PathBuf {

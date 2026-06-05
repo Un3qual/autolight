@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Basic as Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import "components"
@@ -15,6 +16,7 @@ Window {
     readonly property real timelineLabelWidth: 280
     readonly property real timelineRulerHeight: 32
     readonly property int timelineRowHeight: 76
+    readonly property int markerInspectorWidth: 260
     readonly property int compactButtonHeight: 30
     readonly property real defaultMarkerDuration: 8.0
     readonly property real defaultMarkerInterval: 0.5
@@ -34,6 +36,12 @@ Window {
     readonly property color footerBackground: "#111318"
     readonly property color controlTextColor: root.textPrimary
     readonly property color controlMutedTextColor: root.textMuted
+    readonly property color controlBandBackground: "#151922"
+    readonly property color controlButtonBackground: "#242a35"
+    readonly property color controlButtonHover: "#2d3442"
+    readonly property color controlButtonPressed: "#353d4d"
+    readonly property color controlBorder: "#3a414f"
+    readonly property color controlTrack: "#2b313c"
     function createAppRuntime() {
         var component = Qt.createComponent(Qt.resolvedUrl("AppRuntime.qml"))
         if (component.status !== Component.Ready) {
@@ -60,39 +68,82 @@ Window {
     readonly property var markerColorOptions: root.controller.markerColorOptions
 
     function seekTimelineAtX(xValue) {
-        var laneSeconds = root.controller.timelineScrollSeconds
-            + Math.max(0, xValue - root.timelineLeftPadding) / root.controller.timelinePixelsPerSecond
-        root.controller.seek_playback(Math.min(root.controller.timelineDurationSeconds, laneSeconds))
+        root.controller.begin_timeline_user_navigation()
+        root.controller.scrub_timeline_at_x(Math.max(0, xValue - root.timelineLeftPadding), timelineLaneWidth())
+        root.controller.end_timeline_user_navigation()
+    }
+
+    function timelineLaneWidth() {
+        var laneWidth = Math.max(0, timelineView.rowsWidth - root.timelineLabelWidth - root.timelineLeftPadding)
+        return laneWidth
     }
 
     function updateTimelineVisibleSeconds() {
-        var laneWidth = Math.max(0, timelineView.rowsWidth - root.timelineLabelWidth - root.timelineLeftPadding)
-        root.controller.set_timeline_visible_seconds(laneWidth / root.controller.timelinePixelsPerSecond)
-    }
-
-    function scrollTimelineByPixels(pixelDelta) {
-        var pixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
-        var nextScroll = root.controller.timelineScrollSeconds + pixelDelta / pixelsPerSecond
-        root.controller.set_timeline_scroll_seconds(nextScroll)
-    }
-
-    function zoomTimelineAtX(xValue, wheelDelta) {
-        var delta = Number(wheelDelta)
-        if (!isFinite(delta) || delta === 0) {
-            return
+        if (typeof root.controller.set_timeline_visible_lane_width === "function") {
+            root.controller.set_timeline_visible_lane_width(root.timelineLaneWidth())
+        } else if (typeof root.controller.set_timeline_visible_seconds === "function") {
+            root.controller.set_timeline_visible_seconds(root.timelineLaneWidth() / Math.max(1, root.controller.timelinePixelsPerSecond))
         }
-        var currentPixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
-        var laneX = Math.max(root.timelineLeftPadding, xValue - root.timelineLabelWidth)
-        var anchorOffsetPixels = Math.max(0, laneX - root.timelineLeftPadding)
-        var anchorSeconds = root.controller.timelineScrollSeconds
-            + anchorOffsetPixels / currentPixelsPerSecond
-        var nextPixelsPerSecond = currentPixelsPerSecond * Math.pow(1.0015, delta)
-        root.controller.set_timeline_zoom(nextPixelsPerSecond)
-        var appliedPixelsPerSecond = Math.max(1, root.controller.timelinePixelsPerSecond)
-        root.controller.set_timeline_scroll_seconds(
-            anchorSeconds - anchorOffsetPixels / appliedPixelsPerSecond
-        )
-        root.updateTimelineVisibleSeconds()
+    }
+
+    function controllerNumber(propertyName, fallback) {
+        if (!root.controller) return fallback
+        var value = Number(root.controller[propertyName])
+        return isFinite(value) ? value : fallback
+    }
+
+    function zoomSliderValueForPixels(pixelsPerSecond) {
+        var minZoom = Math.max(0.001, root.controllerNumber("timelineMinPixelsPerSecond", 24))
+        var maxZoom = Math.max(minZoom * 1.001, root.controllerNumber("timelineMaxPixelsPerSecond", 240))
+        var currentZoom = Math.max(minZoom, Math.min(maxZoom, Number(pixelsPerSecond)))
+        return (Math.log(currentZoom) - Math.log(minZoom)) / (Math.log(maxZoom) - Math.log(minZoom))
+    }
+
+    function pixelsForZoomSliderValue(value) {
+        var minZoom = Math.max(0.001, root.controllerNumber("timelineMinPixelsPerSecond", 24))
+        var maxZoom = Math.max(minZoom * 1.001, root.controllerNumber("timelineMaxPixelsPerSecond", 240))
+        var normalized = Math.max(0, Math.min(1, Number(value)))
+        return Math.exp(Math.log(minZoom) + normalized * (Math.log(maxZoom) - Math.log(minZoom)))
+    }
+
+    function setTimelineZoomForLaneWidth(pixelsPerSecond, laneWidth) {
+        if (!root.controller) return
+        if (typeof root.controller.set_timeline_zoom_for_lane_width === "function") {
+            root.controller.set_timeline_zoom_for_lane_width(pixelsPerSecond, laneWidth)
+        } else if (typeof root.controller.set_timeline_zoom === "function") {
+            root.controller.set_timeline_zoom(pixelsPerSecond)
+            root.updateTimelineVisibleSeconds()
+        }
+    }
+
+    function fitTimelineToLaneWidth(laneWidth) {
+        if (!root.controller) return
+        if (typeof root.controller.fit_timeline_to_lane_width === "function") {
+            root.controller.fit_timeline_to_lane_width(laneWidth)
+        } else {
+            root.updateTimelineVisibleSeconds()
+        }
+    }
+
+    function setTimelineFollowMode(mode) {
+        if (root.controller && typeof root.controller.set_timeline_follow_mode === "function") {
+            root.controller.set_timeline_follow_mode(mode)
+        }
+    }
+
+    function extendTimelineControlNavigation() {
+        if (!root.controller) return
+        if (typeof root.controller.begin_timeline_user_navigation === "function") {
+            root.controller.begin_timeline_user_navigation()
+            timelineControlNavigationQuietTimer.restart()
+        }
+    }
+
+    function setTimelineScrollSeconds(seconds) {
+        if (root.controller && typeof root.controller.set_timeline_scroll_seconds === "function") {
+            root.extendTimelineControlNavigation()
+            root.controller.set_timeline_scroll_seconds(seconds)
+        }
     }
 
     function formatSeconds(seconds) {
@@ -100,6 +151,30 @@ Window {
         var minutes = Math.floor(safeSeconds / 60)
         var remaining = Math.floor(safeSeconds % 60)
         return minutes + ":" + (remaining < 10 ? "0" + remaining : remaining)
+    }
+
+    function configureTimelineSurface(item) {
+        if (!item) return
+        if ("appController" in item) item.appController = root.controller
+        if ("timelineLeftPadding" in item) item.timelineLeftPadding = root.timelineLeftPadding
+        if ("timelineLabelWidth" in item) item.timelineLabelWidth = root.timelineLabelWidth
+        if ("timelineRowHeight" in item) item.timelineRowHeight = root.timelineRowHeight
+        if ("timelineRulerHeight" in item) item.timelineRulerHeight = root.timelineRulerHeight
+        if ("panelBackground" in item) item.panelBackground = root.panelBackground
+        if ("laneBackground" in item) item.laneBackground = root.laneBackground
+        if ("laneBackgroundAlt" in item) item.laneBackgroundAlt = root.laneBackgroundAlt
+        if ("borderSubtle" in item) item.borderSubtle = root.borderSubtle
+        if ("textPrimary" in item) item.textPrimary = root.textPrimary
+        if ("textMuted" in item) item.textMuted = root.textMuted
+        if ("focusAccent" in item) item.focusAccent = root.focusAccent
+        if ("statusErrorColor" in item) item.statusErrorColor = root.statusErrorColor
+        if ("artifactAccent" in item) item.artifactAccent = root.artifactAccent
+        if ("markerLabelText" in item) item.markerLabelText = root.markerLabelText
+    }
+
+    function initializeRustRuntime() {
+        root.controller.start_default_project()
+        root.updateTimelineVisibleSeconds()
     }
 
     function togglePlayback() {
@@ -154,7 +229,7 @@ Window {
         discardChangesDialog.pendingPath = ""
     }
 
-    Component.onCompleted: root.updateTimelineVisibleSeconds()
+    Component.onCompleted: root.initializeRustRuntime()
 
     Connections {
         target: root.controller
@@ -215,6 +290,17 @@ Window {
         }
     }
 
+    Timer {
+        id: timelineControlNavigationQuietTimer
+        interval: 220
+        repeat: false
+        onTriggered: {
+            if (root.controller && typeof root.controller.end_timeline_user_navigation === "function") {
+                root.controller.end_timeline_user_navigation()
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -250,17 +336,6 @@ Window {
             onDeriveEditableRequested: root.controller.create_editable_track_from_track(root.controller.selectedTrackId)
         }
 
-        TimelineRuler {
-            appController: root.controller
-            timelineLeftPadding: root.timelineLeftPadding
-            timelineLabelWidth: root.timelineLabelWidth
-            timelineRulerHeight: root.timelineRulerHeight
-            panelBackground: root.panelBackground
-            borderSubtle: root.borderSubtle
-            textMuted: root.textMuted
-            Layout.fillWidth: true
-        }
-
         PlaybackBar {
             appController: root.controller
             controlTextColor: root.controlTextColor
@@ -274,35 +349,160 @@ Window {
             onSeekRequested: function(value) { root.controller.seek_playback(value) }
         }
 
-        RowLayout {
-            id: timelineControls
+        Rectangle {
+            id: timelineControlBand
             Layout.fillWidth: true
-            Layout.leftMargin: 12
-            Layout.rightMargin: 12
-            spacing: 10
+            Layout.preferredHeight: 44
+            color: root.controlBandBackground
+            border.color: root.borderSubtle
+            border.width: 1
 
-            Label { text: "Zoom"; color: root.secondaryText; font.pixelSize: 12 }
-            Slider {
-                id: timelineZoomSlider
-                from: 24
-                to: 240
-                value: root.controller.timelinePixelsPerSecond
-                Layout.preferredWidth: 180
-                onMoved: root.controller.set_timeline_zoom(value)
-            }
-            Label {
-                text: Math.round(root.controller.timelinePixelsPerSecond) + " px/s"
-                color: root.textMuted
-                font.pixelSize: 12
-                Layout.preferredWidth: 64
-            }
-            Slider {
-                id: timelineScrollSlider
-                from: 0
-                to: Math.max(0, root.controller.timelineDurationSeconds - root.controller.timelineVisibleSeconds)
-                value: root.controller.timelineScrollSeconds
-                Layout.fillWidth: true
-                onMoved: root.controller.set_timeline_scroll_seconds(value)
+            RowLayout {
+                id: timelineControls
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+
+                Label {
+                    text: "ZOOM"
+                    color: root.textMuted
+                    font.pixelSize: 10
+                    font.bold: true
+                    Layout.preferredWidth: 42
+                }
+                Basic.Slider {
+                    id: timelineZoomSlider
+                    from: 0
+                    to: 1
+                    value: root.zoomSliderValueForPixels(root.controller.timelinePixelsPerSecond)
+                    Layout.preferredWidth: 180
+                    onMoved: root.setTimelineZoomForLaneWidth(
+                        root.pixelsForZoomSliderValue(value),
+                        root.timelineLaneWidth()
+                    )
+                    background: Rectangle {
+                        x: timelineZoomSlider.leftPadding
+                        y: timelineZoomSlider.topPadding + timelineZoomSlider.availableHeight / 2 - height / 2
+                        width: timelineZoomSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: root.controlTrack
+
+                        Rectangle {
+                            width: timelineZoomSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: parent.radius
+                            color: root.focusAccent
+                        }
+                    }
+                    handle: Rectangle {
+                        x: timelineZoomSlider.leftPadding + timelineZoomSlider.visualPosition * (timelineZoomSlider.availableWidth - width)
+                        y: timelineZoomSlider.topPadding + timelineZoomSlider.availableHeight / 2 - height / 2
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: timelineZoomSlider.pressed ? "#fef08a" : root.focusAccent
+                        border.color: "#111318"
+                        border.width: 1
+                    }
+                }
+                Basic.Button {
+                    id: zoomFitButton
+                    text: "Fit"
+                    onClicked: root.fitTimelineToLaneWidth(root.timelineLaneWidth())
+                    contentItem: Text {
+                        text: zoomFitButton.text
+                        color: root.textPrimary
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: 4
+                        color: zoomFitButton.down ? root.controlButtonPressed : zoomFitButton.hovered ? root.controlButtonHover : root.controlButtonBackground
+                        border.color: root.controlBorder
+                    }
+                }
+                Label {
+                    text: Math.round(root.controller.timelinePixelsPerSecond) + " px/s"
+                    color: root.secondaryText
+                    font.pixelSize: 12
+                    Layout.preferredWidth: 64
+                }
+                Label {
+                    text: "FOLLOW"
+                    color: root.textMuted
+                    font.pixelSize: 10
+                    font.bold: true
+                    Layout.preferredWidth: 54
+                }
+                Basic.ComboBox {
+                    id: followModeSelector
+                    model: [
+                        { text: "Off", value: 0 },
+                        { text: "Band", value: 1 },
+                        { text: "Center", value: 2 }
+                    ]
+                    textRole: "text"
+                    valueRole: "value"
+                    currentIndex: Math.max(0, Math.min(2, root.controllerNumber("timelineFollowMode", 0)))
+                    Layout.preferredWidth: 112
+                    onActivated: root.setTimelineFollowMode(currentValue)
+                    contentItem: Text {
+                        text: followModeSelector.displayText
+                        color: root.textPrimary
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                        rightPadding: 24
+                    }
+                    background: Rectangle {
+                        radius: 4
+                        color: followModeSelector.down ? root.controlButtonPressed : followModeSelector.hovered ? root.controlButtonHover : root.controlButtonBackground
+                        border.color: root.controlBorder
+                    }
+                }
+                Label {
+                    text: "SCROLL"
+                    color: root.textMuted
+                    font.pixelSize: 10
+                    font.bold: true
+                    Layout.preferredWidth: 48
+                }
+                Basic.Slider {
+                    id: timelineScrollSlider
+                    from: 0
+                    to: Math.max(0, root.controller.timelineDurationSeconds - root.controller.timelineVisibleSeconds)
+                    value: root.controller.timelineScrollSeconds
+                    Layout.fillWidth: true
+                    onMoved: root.setTimelineScrollSeconds(value)
+                    background: Rectangle {
+                        x: timelineScrollSlider.leftPadding
+                        y: timelineScrollSlider.topPadding + timelineScrollSlider.availableHeight / 2 - height / 2
+                        width: timelineScrollSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: root.controlTrack
+
+                        Rectangle {
+                            width: timelineScrollSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: parent.radius
+                            color: root.artifactAccent
+                        }
+                    }
+                    handle: Rectangle {
+                        x: timelineScrollSlider.leftPadding + timelineScrollSlider.visualPosition * (timelineScrollSlider.availableWidth - width)
+                        y: timelineScrollSlider.topPadding + timelineScrollSlider.availableHeight / 2 - height / 2
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: timelineScrollSlider.pressed ? "#bfdbfe" : root.artifactAccent
+                        border.color: "#111318"
+                        border.width: 1
+                    }
+                }
             }
         }
 
@@ -311,29 +511,38 @@ Window {
             Layout.fillHeight: true
             spacing: 0
 
-            TimelineView {
+            Loader {
                 id: timelineView
-                appController: root.controller
-                timelineLeftPadding: root.timelineLeftPadding
-                timelineLabelWidth: root.timelineLabelWidth
-                timelineRowHeight: root.timelineRowHeight
-                panelBackground: root.panelBackground
-                laneBackground: root.laneBackground
-                laneBackgroundAlt: root.laneBackgroundAlt
-                borderSubtle: root.borderSubtle
-                textPrimary: root.textPrimary
-                textMuted: root.textMuted
-                focusAccent: root.focusAccent
-                statusErrorColor: root.statusErrorColor
-                artifactAccent: root.artifactAccent
-                markerLabelText: root.markerLabelText
+                property real rowsWidth: item && "rowsWidth" in item ? item.rowsWidth : width
+                signal layoutWidthChanged()
+                signal trackSelected(string trackId)
+                signal seekRequested(real x)
+                source: "components/TimelineView.qml"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                onWidthChanged: timelineView.layoutWidthChanged()
                 onLayoutWidthChanged: root.updateTimelineVisibleSeconds()
                 onTrackSelected: function(trackId) { root.controller.select_track(trackId) }
                 onSeekRequested: function(x) { root.seekTimelineAtX(x) }
-                onScrollPixelsRequested: function(pixels) { root.scrollTimelineByPixels(pixels) }
-                onZoomRequested: function(x, wheelDelta) { root.zoomTimelineAtX(x, wheelDelta) }
+                onLoaded: {
+                    root.configureTimelineSurface(item)
+                    if (item.layoutWidthChanged) {
+                        item.layoutWidthChanged.connect(function() {
+                            timelineView.layoutWidthChanged()
+                        })
+                    }
+                    if (item.trackSelected) {
+                        item.trackSelected.connect(function(trackId) {
+                            timelineView.trackSelected(trackId)
+                        })
+                    }
+                    if (item.seekRequested) {
+                        item.seekRequested.connect(function(x) {
+                            timelineView.seekRequested(x)
+                        })
+                    }
+                    timelineView.layoutWidthChanged()
+                }
             }
 
             MarkerInspector {
@@ -345,7 +554,7 @@ Window {
                 textPrimary: root.textPrimary
                 textMuted: root.textMuted
                 selectedMarkerBackground: root.selectedMarkerBackground
-                Layout.preferredWidth: 260
+                Layout.preferredWidth: root.markerInspectorWidth
                 Layout.fillHeight: true
                 onAddCueRequested: function(timestamp, duration, label, category, colorKey) {
                     root.controller.add_marker_to_selected_track_with_duration(timestamp, duration, label, category, colorKey)

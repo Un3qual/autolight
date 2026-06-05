@@ -1,3 +1,4 @@
+import QtQuick
 import QtQml
 import QtQml.Models
 import QtMultimedia
@@ -7,17 +8,30 @@ QtObject {
     id: appRuntime
 
     property var nativeController: AppController {}
-    readonly property string projectName: nativeController.projectName
-    readonly property string lastError: nativeController.lastError
-    readonly property string timelineRowsJson: nativeController.timelineRowsJson
-    readonly property string transformSpecsJson: nativeController.transformSpecsJson
+    readonly property var __projectStateMirror: QtObject {
+        id: projectStateMirror
+        property string projectName: nativeController.projectName
+        property string lastError: nativeController.lastError
+        property string timelineRowsJson: nativeController.timelineRowsJson
+        property string timelineSceneSnapshotJson: nativeController.timelineSceneSnapshotJson
+        property string transformSpecsJson: nativeController.transformSpecsJson
+        property string projectPath: nativeController.projectPath
+        property bool isDirty: nativeController.isDirty
+        property bool canUndo: nativeController.canUndo
+        property bool canRedo: nativeController.canRedo
+    }
+    readonly property string projectName: projectStateMirror.projectName
+    readonly property string lastError: projectStateMirror.lastError
+    readonly property string timelineRowsJson: projectStateMirror.timelineRowsJson
+    readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson
+    readonly property string transformSpecsJson: projectStateMirror.transformSpecsJson
     readonly property string selectedMarkerIdsJson: nativeController.selectedMarkerIdsJson
     readonly property string selectedTrackMarkersJson: nativeController.selectedTrackMarkersJson
     readonly property string markerColorOptionsJson: nativeController.markerColorOptionsJson
-    readonly property string projectPath: nativeController.projectPath
-    readonly property bool isDirty: nativeController.isDirty
-    readonly property bool canUndo: nativeController.canUndo
-    readonly property bool canRedo: nativeController.canRedo
+    readonly property string projectPath: projectStateMirror.projectPath
+    readonly property bool isDirty: projectStateMirror.isDirty
+    readonly property bool canUndo: projectStateMirror.canUndo
+    readonly property bool canRedo: projectStateMirror.canRedo
     property string selectedTrackId: nativeController.selectedTrackId
     property bool selectedTrackCanPlay: nativeController.selectedTrackCanPlay
     property bool selectedTrackCanRerun: nativeController.selectedTrackCanRerun
@@ -27,9 +41,23 @@ QtObject {
     property var selectedTrackMarkers: []
     property var markerColorOptions: []
     property real timelinePixelsPerSecond: nativeController.timelinePixelsPerSecond
+    property real timelineMinPixelsPerSecond: nativeController.timelineMinPixelsPerSecond
+    property real timelineMaxPixelsPerSecond: nativeController.timelineMaxPixelsPerSecond
     property real timelineScrollSeconds: nativeController.timelineScrollSeconds
     property real timelineVisibleSeconds: nativeController.timelineVisibleSeconds
     property real timelineDurationSeconds: nativeController.timelineDurationSeconds
+    property int timelineFollowMode: nativeController.timelineFollowMode
+    property bool timelineUserNavigationActive: nativeController.timelineUserNavigationActive
+    property int timelinePlayheadOffscreenDirection: nativeController.timelinePlayheadOffscreenDirection
+    readonly property bool smoothTimelineFollow: nativeController.playbackIsPlaying && timelineFollowMode !== 0 && !timelineUserNavigationActive
+
+    Behavior on timelineScrollSeconds {
+        enabled: appRuntime.smoothTimelineFollow
+        SmoothedAnimation {
+            velocity: 1.0
+            maximumEasingTime: 80
+        }
+    }
 
     property var trackRows: []
     property var transformModel: ListModel {
@@ -41,9 +69,9 @@ QtObject {
     property var audioOutput: AudioOutput { volume: nativeController.playbackVolume }
     property var mediaPlayer: MediaPlayer {
         audioOutput: appRuntime.audioOutput
-        onPositionChanged: {
+        onPositionChanged: function(position) {
             if (source.toString().length > 0) {
-                nativeController.seekPlayback(position / 1000.0)
+                nativeController.syncPlaybackPosition(position / 1000.0)
                 reloadViewportState()
             }
         }
@@ -56,12 +84,15 @@ QtObject {
         onTriggered: appRuntime.poll_jobs()
     }
     property var playback: QtObject {
-        readonly property string lastError: nativeController.playbackLastError.length > 0 ? nativeController.playbackLastError : appRuntime.mediaPlayer.errorString
+        property string nativeLastError: nativeController.playbackLastError
+        property real nativePositionSeconds: nativeController.playbackPositionSeconds
+        property real nativeDurationSeconds: nativeController.playbackDurationSeconds
+        property string lastError: nativeLastError.length > 0 ? nativeLastError : appRuntime.mediaPlayer.errorString
         readonly property bool isPlaying: appRuntime.mediaPlayer.playbackState === MediaPlayer.PlayingState
-        readonly property string sourcePath: nativeController.playbackSourcePath
-        readonly property real positionSeconds: appRuntime.mediaPlayer.source.toString().length > 0 ? appRuntime.mediaPlayer.position / 1000.0 : nativeController.playbackPositionSeconds
-        readonly property real durationSeconds: appRuntime.mediaPlayer.duration > 0 ? appRuntime.mediaPlayer.duration / 1000.0 : nativeController.playbackDurationSeconds
-        readonly property real volume: appRuntime.audioOutput.volume
+        property string sourcePath: nativeController.playbackSourcePath
+        readonly property real positionSeconds: appRuntime.mediaPlayer.source.toString().length > 0 ? appRuntime.mediaPlayer.position / 1000.0 : nativePositionSeconds
+        readonly property real durationSeconds: appRuntime.mediaPlayer.duration > 0 ? appRuntime.mediaPlayer.duration / 1000.0 : nativeDurationSeconds
+        property real volume: appRuntime.audioOutput.volume
 
         function play() {
             var played = nativeController.playLoadedPlayback()
@@ -73,6 +104,7 @@ QtObject {
         function set_volume(value) {
             nativeController.setPlaybackVolumeValue(value)
             appRuntime.audioOutput.volume = nativeController.playbackVolume
+            volume = nativeController.playbackVolume
             appRuntime.reloadModels()
         }
     }
@@ -91,7 +123,7 @@ QtObject {
     }
 
     function syncPlaybackSource() {
-        var path = nativeController.playbackSourcePath
+        var path = playback.sourcePath
         if (path.length === 0) {
             mediaPlayer.stop()
             mediaPlayer.source = ""
@@ -100,6 +132,31 @@ QtObject {
         var sourceUrl = playbackSourceUrl(path)
         if (mediaPlayer.source.toString() !== sourceUrl) mediaPlayer.source = sourceUrl
         return true
+    }
+
+    function reloadProjectState() {
+        projectStateMirror.projectName = nativeController.projectName
+        projectStateMirror.lastError = nativeController.lastError
+        projectStateMirror.timelineRowsJson = nativeController.timelineRowsJson
+        projectStateMirror.transformSpecsJson = nativeController.transformSpecsJson
+        projectStateMirror.projectPath = nativeController.projectPath
+        projectStateMirror.isDirty = nativeController.isDirty
+        projectStateMirror.canUndo = nativeController.canUndo
+        projectStateMirror.canRedo = nativeController.canRedo
+    }
+
+    function reloadPlaybackState() {
+        playback.nativeLastError = nativeController.playbackLastError
+        playback.sourcePath = nativeController.playbackSourcePath
+        playback.nativePositionSeconds = nativeController.playbackPositionSeconds
+        playback.nativeDurationSeconds = nativeController.playbackDurationSeconds
+        playback.volume = nativeController.playbackVolume
+    }
+
+    function seekMediaPlayerToSeconds(seconds) {
+        var positionMs = Math.max(0, Number(seconds) * 1000)
+        if (!isFinite(positionMs)) positionMs = 0
+        mediaPlayer.position = positionMs
     }
 
     function reloadTrackModel() {
@@ -112,6 +169,10 @@ QtObject {
             return
         }
         trackRows = rows
+    }
+
+    function reloadTimelineSceneSnapshot() {
+        projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson
     }
 
     function parseJsonArray(payload) {
@@ -152,19 +213,28 @@ QtObject {
 
     function reloadViewportState() {
         timelinePixelsPerSecond = nativeController.timelinePixelsPerSecond
+        timelineMinPixelsPerSecond = nativeController.timelineMinPixelsPerSecond
+        timelineMaxPixelsPerSecond = nativeController.timelineMaxPixelsPerSecond
         timelineScrollSeconds = nativeController.timelineScrollSeconds
         timelineVisibleSeconds = nativeController.timelineVisibleSeconds
         timelineDurationSeconds = nativeController.timelineDurationSeconds
+        timelineFollowMode = nativeController.timelineFollowMode
+        timelineUserNavigationActive = nativeController.timelineUserNavigationActive
+        timelinePlayheadOffscreenDirection = nativeController.timelinePlayheadOffscreenDirection
     }
 
     function reloadModels() {
+        reloadProjectState()
+        reloadPlaybackState()
         reloadSelectionModels()
         reloadViewportState()
         reloadTrackModel()
+        reloadTimelineSceneSnapshot()
         reloadTransformModel()
         syncPlaybackSource()
         audioOutput.volume = nativeController.playbackVolume
     }
+    function start_default_project() { load_demo_project() }
     function new_project() { nativeController.newProject(); reloadModels() }
     function open_project(path) { var opened = nativeController.openProject(path); reloadModels(); return opened }
     function save_project(path) { var saved = nativeController.saveProject(path || ""); reloadModels(); return saved }
@@ -187,11 +257,15 @@ QtObject {
     function create_editable_track_from_track(trackId) { var id = nativeController.createEditableTrackFromTrack(trackId); reloadModels(); return id }
     function pause_playback() { nativeController.pausePlayback(); mediaPlayer.pause(); reloadModels() }
     function play_selected_track() { var played = nativeController.playSelectedTrack(); reloadModels(); if (played && syncPlaybackSource()) mediaPlayer.play(); return played }
-    function stop_playback() { nativeController.stopPlayback(); mediaPlayer.stop(); mediaPlayer.seek(0); reloadModels() }
+    function stop_playback() { nativeController.stopPlayback(); mediaPlayer.stop(); seekMediaPlayerToSeconds(0); reloadModels() }
     function nudge_playback(delta) { seek_playback(playback.positionSeconds + delta) }
-    function seek_playback(value) { nativeController.seekPlayback(value); reloadModels(); if (syncPlaybackSource()) mediaPlayer.seek(nativeController.playbackPositionSeconds * 1000) }
+    function seek_playback(value) { nativeController.seekPlayback(value); reloadModels(); if (syncPlaybackSource()) seekMediaPlayerToSeconds(nativeController.playbackPositionSeconds) }
     function set_timeline_zoom(value) {
         nativeController.setTimelineZoom(value)
+        reloadViewportState()
+    }
+    function set_timeline_zoom_for_lane_width(value, laneWidth) {
+        nativeController.setTimelineZoomForLaneWidth(value, laneWidth)
         reloadViewportState()
     }
     function set_timeline_scroll_seconds(value) {
@@ -202,6 +276,40 @@ QtObject {
         nativeController.applyTimelineVisibleSeconds(value)
         reloadViewportState()
     }
+    function set_timeline_visible_lane_width(laneWidth) {
+        nativeController.setTimelineVisibleLaneWidth(laneWidth)
+        reloadViewportState()
+    }
+    function fit_timeline_to_lane_width(laneWidth) {
+        nativeController.fitTimelineToLaneWidth(laneWidth)
+        reloadViewportState()
+    }
+    function scroll_timeline_by_pixels(pixelDelta) {
+        nativeController.scrollTimelineByPixels(pixelDelta)
+        reloadViewportState()
+    }
+    function zoom_timeline_by_factor(factor, anchorX, laneWidth) {
+        nativeController.zoomTimelineByFactor(factor, anchorX, laneWidth)
+        reloadViewportState()
+    }
+    function begin_timeline_user_navigation() {
+        nativeController.beginTimelineUserNavigation()
+        reloadViewportState()
+    }
+    function end_timeline_user_navigation() {
+        nativeController.endTimelineUserNavigation()
+        reloadViewportState()
+    }
+    function scrub_timeline_at_x(x, laneWidth) {
+        var seconds = nativeController.scrubTimelineAtX(x, laneWidth)
+        reloadViewportState()
+        if (syncPlaybackSource()) seekMediaPlayerToSeconds(nativeController.playbackPositionSeconds)
+        return seconds
+    }
+    function set_timeline_follow_mode(mode) {
+        nativeController.applyTimelineFollowMode(mode)
+        reloadViewportState()
+    }
     function set_timeline_visible_track_range(firstRow, rowCount) {
         nativeController.setTimelineVisibleTrackRange(firstRow, rowCount)
         reloadViewportState()
@@ -210,6 +318,7 @@ QtObject {
         nativeController.selectTrack(trackId)
         reloadSelectionModels()
         reloadTrackModel()
+        reloadTimelineSceneSnapshot()
     }
     function set_track_expanded(trackId, expanded) { var changed = nativeController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }
     function snap_timeline_time(seconds, bypassSnap) { return nativeController.snapTimelineTime(seconds, bypassSnap) }
@@ -222,5 +331,4 @@ QtObject {
     function move_selected_markers(delta, bypass) { var moved = nativeController.moveSelectedMarkers(delta, bypass); reloadModels(); return moved }
     function resize_marker(markerId, duration) { var resized = nativeController.resizeMarker(markerId, duration); reloadModels(); return resized }
 
-    Component.onCompleted: load_demo_project()
 }

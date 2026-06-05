@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-pub const MAX_WAVEFORM_LOD_BUCKETS: usize = 4_096;
+pub const MAX_WAVEFORM_LOD_BUCKETS: usize = 32_768;
 const MAX_VISIBLE_WAVEFORM_SAMPLES: usize = 16;
+const MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS: usize = 2;
 
 #[derive(Debug, Error)]
 pub enum WaveformError {
@@ -63,6 +64,22 @@ pub fn build_waveform_payload_from_mono_samples(
     sample_rate: u32,
     mono_samples: &[f32],
     buckets: usize,
+    cancel_requested: impl FnMut() -> bool,
+) -> Result<WaveformPayload, WaveformError> {
+    build_waveform_payload_from_mono_samples_with_max_bytes(
+        sample_rate,
+        mono_samples,
+        buckets,
+        None,
+        cancel_requested,
+    )
+}
+
+pub fn build_waveform_payload_from_mono_samples_with_max_bytes(
+    sample_rate: u32,
+    mono_samples: &[f32],
+    buckets: usize,
+    max_bytes: Option<usize>,
     mut cancel_requested: impl FnMut() -> bool,
 ) -> Result<WaveformPayload, WaveformError> {
     if buckets == 0 {
@@ -74,10 +91,15 @@ pub fn build_waveform_payload_from_mono_samples(
     let mut levels = Vec::new();
     if frame_count > 0 {
         let base_bucket_count = buckets.min(frame_count);
-        let level_bucket_counts = waveform_level_bucket_counts(base_bucket_count, frame_count);
-        let finest_bucket_count = *level_bucket_counts
-            .last()
-            .expect("level count is non-empty for non-empty audio");
+        let level_bucket_counts = max_bytes.map_or_else(
+            || waveform_level_bucket_counts(base_bucket_count, frame_count),
+            |max_bytes| {
+                waveform_level_bucket_counts_for_budget(base_bucket_count, frame_count, max_bytes)
+            },
+        );
+        let Some(&finest_bucket_count) = level_bucket_counts.last() else {
+            return Err(WaveformError::InvalidBucketCount);
+        };
         let finest_samples =
             summarize_mono_samples(mono_samples, finest_bucket_count, &mut cancel_requested)?;
         for bucket_count in level_bucket_counts {
@@ -108,14 +130,42 @@ pub fn build_waveform_payload_from_mono_samples(
 pub fn waveform_level_bucket_counts(base_bucket_count: usize, frame_count: usize) -> Vec<usize> {
     let maximum = MAX_WAVEFORM_LOD_BUCKETS.min(frame_count.max(1));
     let mut counts = vec![base_bucket_count.max(1).min(maximum)];
-    while *counts.last().unwrap() < maximum {
-        let current = *counts.last().unwrap();
+    let mut current = counts[0];
+    while current < maximum {
         let next_count = maximum.min(current * 4);
         if next_count == current {
             break;
         }
         counts.push(next_count);
+        current = next_count;
     }
+    counts
+}
+
+/// Returns waveform LOD counts bounded by estimated loaded `WaveformSample` storage.
+///
+/// The estimate includes both `levels` and the legacy `payload.samples`
+/// duplicate of the first/coarsest level. Nonempty inputs have a best-effort
+/// one-bucket floor even when `max_bytes` is smaller than that two-slot minimum.
+pub fn waveform_level_bucket_counts_for_budget(
+    base_bucket_count: usize,
+    frame_count: usize,
+    max_bytes: usize,
+) -> Vec<usize> {
+    let maximum = MAX_WAVEFORM_LOD_BUCKETS.min(frame_count.max(1));
+    let requested_base_count = base_bucket_count.clamp(1, maximum);
+    let sample_budget = max_bytes / std::mem::size_of::<WaveformSample>().max(1);
+    let budgeted_base_count = if sample_budget < MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS {
+        1
+    } else {
+        requested_base_count.min(sample_budget / MIN_NONEMPTY_PAYLOAD_SAMPLE_SLOTS)
+    };
+    let mut counts = waveform_level_bucket_counts(budgeted_base_count, frame_count);
+
+    while counts.len() > 1 && estimated_waveform_payload_sample_count(&counts) > sample_budget {
+        counts.pop();
+    }
+
     counts
 }
 
@@ -289,6 +339,14 @@ fn normalize_bucket_count(level: &WaveformLevel) -> usize {
     }
 }
 
+fn estimated_waveform_payload_sample_count(level_bucket_counts: &[usize]) -> usize {
+    level_bucket_counts
+        .iter()
+        .copied()
+        .fold(0_usize, usize::saturating_add)
+        .saturating_add(level_bucket_counts.first().copied().unwrap_or(0))
+}
+
 fn visible_sample(
     level: &WaveformLevel,
     index: usize,
@@ -429,9 +487,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        build_waveform_payload_from_mono_samples, derive_waveform_level, visible_samples,
-        visible_samples_from_json, waveform_level_bucket_counts, WaveformError, WaveformPayload,
-        WaveformSample,
+        build_waveform_payload_from_mono_samples,
+        build_waveform_payload_from_mono_samples_with_max_bytes, derive_waveform_level,
+        visible_samples, visible_samples_from_json, waveform_level_bucket_counts,
+        waveform_level_bucket_counts_for_budget, WaveformError, WaveformPayload, WaveformSample,
     };
 
     #[test]
@@ -454,8 +513,88 @@ mod tests {
         assert_eq!(waveform_level_bucket_counts(2, 8), [2, 8]);
         assert_eq!(
             *waveform_level_bucket_counts(512, 100_000).last().unwrap(),
-            4_096
+            32_768
         );
+    }
+
+    #[test]
+    fn waveform_level_counts_keep_existing_behavior_without_budget() {
+        assert_eq!(
+            waveform_level_bucket_counts(512, 100_000),
+            [512, 2_048, 8_192, 32_768]
+        );
+    }
+
+    #[test]
+    fn waveform_level_counts_respect_memory_budget() {
+        let counts = waveform_level_bucket_counts_for_budget(4_096, 1_000_000, 1_000_000);
+        let estimated_samples = estimated_payload_sample_count(&counts);
+
+        assert!(estimated_samples <= 1_000_000 / std::mem::size_of::<WaveformSample>());
+        assert_eq!(counts.first(), Some(&4_096));
+    }
+
+    #[test]
+    fn waveform_level_counts_clamp_requested_base_when_budget_is_smaller_than_base() {
+        let max_bytes = std::mem::size_of::<WaveformSample>() * 64;
+
+        let counts = waveform_level_bucket_counts_for_budget(4_096, 1_000_000, max_bytes);
+
+        assert_eq!(counts, [32]);
+        assert!(estimated_payload_sample_count(&counts) <= 64);
+    }
+
+    #[test]
+    fn waveform_level_counts_keep_one_bucket_floor_for_tiny_positive_budget() {
+        let counts = waveform_level_bucket_counts_for_budget(4_096, 1_000_000, 1);
+
+        assert_eq!(counts, [1]);
+        assert_eq!(estimated_payload_sample_count(&counts), 2);
+    }
+
+    #[test]
+    fn waveform_payload_build_uses_budgeted_lod_counts() {
+        let samples = vec![0.25; 1_024];
+        let max_bytes = std::mem::size_of::<WaveformSample>() * 64;
+
+        let payload = build_waveform_payload_from_mono_samples_with_max_bytes(
+            1_024,
+            &samples,
+            128,
+            Some(max_bytes),
+            || false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            payload
+                .levels
+                .iter()
+                .map(|level| level.bucket_count)
+                .collect::<Vec<_>>(),
+            [32]
+        );
+        assert_eq!(payload.samples.len(), 32);
+        assert!(payload_sample_count(&payload) <= 64);
+    }
+
+    #[test]
+    fn waveform_payload_build_documents_minimum_floor_for_tiny_budget() {
+        let samples = vec![0.25; 1_024];
+
+        let payload = build_waveform_payload_from_mono_samples_with_max_bytes(
+            1_024,
+            &samples,
+            128,
+            Some(1),
+            || false,
+        )
+        .unwrap();
+
+        assert_eq!(payload.levels.len(), 1);
+        assert_eq!(payload.levels[0].bucket_count, 1);
+        assert_eq!(payload.samples.len(), 1);
+        assert_eq!(payload_sample_count(&payload), 2);
     }
 
     #[test]
@@ -657,6 +796,23 @@ mod tests {
             count,
             sum_squares,
         }
+    }
+
+    fn estimated_payload_sample_count(counts: &[usize]) -> usize {
+        counts
+            .iter()
+            .copied()
+            .sum::<usize>()
+            .saturating_add(counts.first().copied().unwrap_or(0))
+    }
+
+    fn payload_sample_count(payload: &WaveformPayload) -> usize {
+        payload
+            .levels
+            .iter()
+            .map(|level| level.samples.len())
+            .sum::<usize>()
+            .saturating_add(payload.samples.len())
     }
 
     fn payload_with_levels(duration: f64, bucket_counts: &[usize]) -> WaveformPayload {

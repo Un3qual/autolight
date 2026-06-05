@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolight_analysis::waveform::visible_samples_from_json;
-use autolight_core::cache::cache_entry_for_bytes;
+use autolight_core::cache::{cache_entry_for_bytes, cache_entry_matches_payload};
 use autolight_core::graph::{default_expanded_track_ids, find_track, mark_dependents_stale};
 use autolight_core::history::{
     DependentTrackSnapshot, EditHistory, MarkerSnapshotCommand, ProjectSnapshotCommand,
@@ -27,6 +27,10 @@ use cxx_qt_lib::QString;
 use serde_json::{json, Value};
 
 use crate::timeline_model::{rust_demo_project, RUST_DEMO_PROJECT_NAME};
+use crate::timeline_renderer::cache::{
+    analysis_geometry_from_payload, empty_geometry, AnalysisRenderRequest, WaveformArtifactCache,
+};
+use crate::timeline_renderer::waveform::WaveformRenderRequest;
 use crate::transform_model::transform_specs_json;
 
 mod audio;
@@ -39,6 +43,7 @@ mod project_state;
 #[cfg(test)]
 mod tests;
 mod timeline_controller;
+mod timeline_viewport;
 
 #[cfg(test)]
 use audio::WAVE_SUBFORMAT_PCM;
@@ -62,11 +67,6 @@ use project_state::{
 use timeline_controller::TimelineControllerState;
 
 const SMOKE_PROJECT_NAME: &str = "Autolight Rust Smoke";
-const TIMELINE_DEFAULT_PIXELS_PER_SECOND: f64 = 96.0;
-const TIMELINE_MIN_PIXELS_PER_SECOND: f64 = 24.0;
-const TIMELINE_MAX_PIXELS_PER_SECOND: f64 = 240.0;
-const TIMELINE_DEFAULT_VISIBLE_SECONDS: f64 = 8.0;
-const TIMELINE_MIN_VISIBLE_SECONDS: f64 = 0.01;
 const SNAP_THRESHOLD_PIXELS: f64 = 10.0;
 static NEXT_DEMO_TEMP_DIR: AtomicU64 = AtomicU64::new(1);
 
@@ -75,13 +75,19 @@ pub struct AppControllerState {
     project_path: QString,
     last_error: QString,
     timeline_rows_json: QString,
+    timeline_scene_snapshot_json: QString,
     transform_specs_json: QString,
     selected_track_id: QString,
     timeline: TimelineControllerState,
     timeline_duration_seconds: f64,
     timeline_pixels_per_second: f64,
+    timeline_min_pixels_per_second: f64,
+    timeline_max_pixels_per_second: f64,
     timeline_scroll_seconds: f64,
     timeline_visible_seconds: f64,
+    timeline_follow_mode: i32,
+    timeline_user_navigation_active: bool,
+    timeline_playhead_offscreen_direction: i32,
     is_dirty: bool,
     selected_track_can_rerun: bool,
     selected_track_has_running_job: bool,
@@ -101,6 +107,7 @@ pub struct AppControllerState {
     playback_is_playing: bool,
     playback_last_error: QString,
     playback_volume: f64,
+    waveform_cache: WaveformArtifactCache,
     project: ProjectDocument,
     transform_registry: TransformRegistry,
     job_queue: LocalJobQueue,
@@ -134,12 +141,18 @@ impl Default for AppControllerState {
             project_path: QString::default(),
             last_error: QString::default(),
             timeline_rows_json: QString::from("[]"),
+            timeline_scene_snapshot_json: QString::from(r#"{"tracks":[],"durationSeconds":0.0}"#),
             transform_specs_json: QString::from(&transform_specs),
             selected_track_id: QString::default(),
             timeline_duration_seconds: timeline.duration_seconds(),
             timeline_pixels_per_second: timeline.pixels_per_second(),
+            timeline_min_pixels_per_second: timeline.min_pixels_per_second(),
+            timeline_max_pixels_per_second: timeline.max_pixels_per_second(),
             timeline_scroll_seconds: timeline.scroll_seconds(),
             timeline_visible_seconds: timeline.visible_seconds(),
+            timeline_follow_mode: timeline.follow_mode().as_i32(),
+            timeline_user_navigation_active: timeline.user_navigation_active(),
+            timeline_playhead_offscreen_direction: timeline.playhead_offscreen_direction().as_i32(),
             is_dirty: false,
             selected_track_can_rerun: false,
             selected_track_has_running_job: false,
@@ -158,6 +171,7 @@ impl Default for AppControllerState {
             playback_is_playing: playback.is_playing(),
             playback_last_error: playback.last_error().clone(),
             playback_volume: playback.volume(),
+            waveform_cache: WaveformArtifactCache::default(),
             project: ProjectDocument::new("project_empty", SMOKE_PROJECT_NAME),
             transform_registry,
             job_queue: LocalJobQueue::new(job_registry()),
@@ -208,6 +222,7 @@ impl AppControllerState {
     fn load_demo_project_state(&mut self) {
         self.reset_job_runtime_state();
         self.clear_demo_temp_dir();
+        self.waveform_cache = WaveformArtifactCache::default();
         self.project = rust_demo_project();
         let demo_setup_error = self.prepare_demo_audio_asset().err();
         self.project_name = QString::from(RUST_DEMO_PROJECT_NAME);
@@ -235,6 +250,7 @@ impl AppControllerState {
     fn clear_project_state(&mut self) {
         self.reset_job_runtime_state();
         self.clear_demo_temp_dir();
+        self.waveform_cache = WaveformArtifactCache::default();
         self.project = ProjectDocument::new("project_empty", SMOKE_PROJECT_NAME);
         self.project_name = QString::from(SMOKE_PROJECT_NAME);
         self.project_path = QString::default();
@@ -937,6 +953,153 @@ impl AppControllerState {
         Ok(())
     }
 
+    fn render_timeline_waveform_state(
+        &mut self,
+        track_id: &str,
+        cache_ref: &str,
+        request: WaveformRenderRequest,
+    ) -> String {
+        if !self
+            .ensure_waveform_cache_entry(track_id, cache_ref)
+            .unwrap_or(false)
+        {
+            return empty_geometry();
+        }
+        self.waveform_cache
+            .render(cache_ref, request)
+            .map_or_else(empty_geometry, |geometry| geometry.to_string())
+    }
+
+    fn render_timeline_analysis_state(
+        &self,
+        track_id: &str,
+        cache_ref: &str,
+        request: AnalysisRenderRequest,
+    ) -> String {
+        let Some(artifact_kind) = self
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == cache_ref)
+            .map(|entry| entry.artifact_kind.as_str())
+        else {
+            return empty_geometry();
+        };
+        if artifact_kind != "energy" && artifact_kind != "harmonic-color" {
+            return empty_geometry();
+        }
+        if !self.track_owns_valid_cache_ref(track_id, cache_ref, artifact_kind) {
+            return empty_geometry();
+        }
+        let Some(payload) = self.analysis_payload_for_ref(track_id, cache_ref, artifact_kind)
+        else {
+            return empty_geometry();
+        };
+        analysis_geometry_from_payload(artifact_kind, &payload, request)
+    }
+
+    fn ensure_waveform_cache_entry(
+        &mut self,
+        track_id: &str,
+        cache_ref: &str,
+    ) -> Result<bool, String> {
+        if !self.track_owns_valid_cache_ref(track_id, cache_ref, "waveform") {
+            return Ok(false);
+        }
+        let Some(entry) = self
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == cache_ref)
+            .cloned()
+        else {
+            return Ok(false);
+        };
+        let bytes = self.cache_entry_payload_bytes(&entry)?;
+        if !cache_entry_matches_payload(&entry, &bytes).unwrap_or(false) {
+            return Ok(false);
+        }
+        let payload: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        self.waveform_cache
+            .insert_or_update(cache_ref, &entry.payload_digest, &payload)
+            .map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    fn track_owns_valid_cache_ref(
+        &self,
+        track_id: &str,
+        cache_ref: &str,
+        artifact_kind: &str,
+    ) -> bool {
+        let Some(track) = self
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+        else {
+            return false;
+        };
+        track.result_state == ResultState::Complete
+            && track
+                .cache_refs
+                .iter()
+                .any(|reference| reference == cache_ref)
+            && self.project.cache_entries.iter().any(|entry| {
+                entry.id == cache_ref
+                    && entry.artifact_kind == artifact_kind
+                    && entry.validation_status == CacheValidationStatus::Valid
+                    && cache_entry_path_is_safe(Path::new(&entry.path))
+            })
+    }
+
+    fn cache_entry_payload_bytes(
+        &self,
+        entry: &autolight_core::project::CacheEntry,
+    ) -> Result<Vec<u8>, String> {
+        if !cache_entry_path_is_safe(Path::new(&entry.path)) {
+            return Err("unsafe cache entry path".to_string());
+        }
+        let artifact_dir = self
+            .current_artifact_dir()
+            .ok_or_else(|| "project path is required before loading cache artifact".to_string())?;
+        let payload_path = artifact_dir.join(&entry.path);
+        std::fs::read(payload_path).map_err(|error| error.to_string())
+    }
+
+    fn analysis_payload_for_ref(
+        &self,
+        track_id: &str,
+        cache_ref: &str,
+        artifact_kind: &str,
+    ) -> Option<Value> {
+        let provenance_key = match artifact_kind {
+            "energy" => "visible_energy",
+            "harmonic-color" => "visible_harmonic_color",
+            _ => return None,
+        };
+        if let Some(payload) = self
+            .project
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.provenance.get(provenance_key))
+            .cloned()
+        {
+            return Some(payload);
+        }
+        let entry = self
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == cache_ref)?;
+        let payload = self.cache_entry_payload_bytes(entry).ok()?;
+        if !cache_entry_matches_payload(entry, &payload).unwrap_or(false) {
+            return None;
+        }
+        serde_json::from_slice(&payload).ok()
+    }
+
     fn cancel_selected_job_state(&mut self) {
         let selected_track_id = self.selected_track_id.to_string();
         let Some(job_id) = latest_active_job_id(&self.project, &selected_track_id) else {
@@ -990,10 +1153,31 @@ impl AppControllerState {
         &mut self,
         project_dir: Option<&Path>,
     ) -> Vec<String> {
-        self.job_queue
+        let invalid_refs = self
+            .job_queue
             .refresh_cache_validity(&mut self.project, |entry| {
                 cache_entry_is_valid(entry, project_dir)
+            });
+        self.prune_waveform_cache();
+        invalid_refs
+    }
+
+    fn prune_waveform_cache(&mut self) {
+        let valid_waveform_entries = self
+            .project
+            .cache_entries
+            .iter()
+            .filter(|entry| {
+                entry.artifact_kind == "waveform"
+                    && entry.validation_status == CacheValidationStatus::Valid
             })
+            .map(|entry| (entry.id.clone(), entry.payload_digest.clone()))
+            .collect::<Vec<_>>();
+        self.waveform_cache.invalidate_missing_or_changed(
+            valid_waveform_entries
+                .iter()
+                .map(|(cache_ref, digest)| (cache_ref.as_str(), digest.as_str())),
+        );
     }
 
     fn current_artifact_dir(&self) -> Option<PathBuf> {
@@ -1012,6 +1196,7 @@ impl AppControllerState {
         };
         self.reset_job_runtime_state();
         self.clear_demo_temp_dir();
+        self.waveform_cache = WaveformArtifactCache::default();
         self.project = project;
         self.project_name = QString::from(&self.project.name);
         self.project_path = QString::from(project_path.to_string_lossy().to_string());
@@ -1914,6 +2099,11 @@ impl AppControllerState {
         self.selected_marker_ids.iter().cloned().collect()
     }
 
+    #[cfg(test)]
+    fn timeline_scene_snapshot_json_state(&self) -> String {
+        self.timeline_scene_snapshot_json.to_string()
+    }
+
     fn selected_track_marker_payloads(&self) -> Vec<Value> {
         let selected_track_id = self.selected_track_id.to_string();
         let selected_marker_ids = self.selected_marker_ids_set();
@@ -1980,12 +2170,18 @@ impl AppControllerState {
             project_path: self.project_path.clone(),
             last_error: self.last_error.clone(),
             timeline_rows_json: self.timeline_rows_json.clone(),
+            timeline_scene_snapshot_json: self.timeline_scene_snapshot_json.clone(),
             transform_specs_json: self.transform_specs_json.clone(),
             selected_track_id: self.selected_track_id.clone(),
             timeline_duration_seconds: self.timeline_duration_seconds,
             timeline_pixels_per_second: self.timeline_pixels_per_second,
+            timeline_min_pixels_per_second: self.timeline_min_pixels_per_second,
+            timeline_max_pixels_per_second: self.timeline_max_pixels_per_second,
             timeline_scroll_seconds: self.timeline_scroll_seconds,
             timeline_visible_seconds: self.timeline_visible_seconds,
+            timeline_follow_mode: self.timeline_follow_mode,
+            timeline_user_navigation_active: self.timeline_user_navigation_active,
+            timeline_playhead_offscreen_direction: self.timeline_playhead_offscreen_direction,
             is_dirty: self.is_dirty,
             selected_track_can_rerun: self.selected_track_can_rerun,
             selected_track_has_running_job: self.selected_track_has_running_job,
@@ -2009,8 +2205,13 @@ impl AppControllerState {
         ViewportPropertyValues {
             timeline_duration_seconds: self.timeline_duration_seconds,
             timeline_pixels_per_second: self.timeline_pixels_per_second,
+            timeline_min_pixels_per_second: self.timeline_min_pixels_per_second,
+            timeline_max_pixels_per_second: self.timeline_max_pixels_per_second,
             timeline_scroll_seconds: self.timeline_scroll_seconds,
             timeline_visible_seconds: self.timeline_visible_seconds,
+            timeline_follow_mode: self.timeline_follow_mode,
+            timeline_user_navigation_active: self.timeline_user_navigation_active,
+            timeline_playhead_offscreen_direction: self.timeline_playhead_offscreen_direction,
         }
     }
 
@@ -2047,11 +2248,28 @@ pub(crate) fn is_runnable_transform_id(transform_id: &str) -> bool {
     runnable_transform_ids().contains(&transform_id)
 }
 
+fn visible_seconds_for_width(width_pixels: f64, pixels_per_second: f64) -> f64 {
+    if width_pixels.is_finite()
+        && pixels_per_second.is_finite()
+        && width_pixels > 0.0
+        && pixels_per_second > 0.0
+    {
+        width_pixels / pixels_per_second
+    } else {
+        0.0
+    }
+}
+
 struct ViewportPropertyValues {
     timeline_duration_seconds: f64,
     timeline_pixels_per_second: f64,
+    timeline_min_pixels_per_second: f64,
+    timeline_max_pixels_per_second: f64,
     timeline_scroll_seconds: f64,
     timeline_visible_seconds: f64,
+    timeline_follow_mode: i32,
+    timeline_user_navigation_active: bool,
+    timeline_playhead_offscreen_direction: i32,
 }
 
 struct SelectionPropertyValues {
@@ -2079,12 +2297,18 @@ struct ControllerPropertyValues {
     project_path: QString,
     last_error: QString,
     timeline_rows_json: QString,
+    timeline_scene_snapshot_json: QString,
     transform_specs_json: QString,
     selected_track_id: QString,
     timeline_duration_seconds: f64,
     timeline_pixels_per_second: f64,
+    timeline_min_pixels_per_second: f64,
+    timeline_max_pixels_per_second: f64,
     timeline_scroll_seconds: f64,
     timeline_visible_seconds: f64,
+    timeline_follow_mode: i32,
+    timeline_user_navigation_active: bool,
+    timeline_playhead_offscreen_direction: i32,
     is_dirty: bool,
     selected_track_can_rerun: bool,
     selected_track_has_running_job: bool,
@@ -2118,12 +2342,38 @@ pub mod qobject {
         #[qproperty(QString, project_path, cxx_name = "projectPath")]
         #[qproperty(QString, last_error, cxx_name = "lastError")]
         #[qproperty(QString, timeline_rows_json, cxx_name = "timelineRowsJson")]
+        #[qproperty(
+            QString,
+            timeline_scene_snapshot_json,
+            cxx_name = "timelineSceneSnapshotJson"
+        )]
         #[qproperty(QString, transform_specs_json, cxx_name = "transformSpecsJson")]
         #[qproperty(QString, selected_track_id, cxx_name = "selectedTrackId")]
         #[qproperty(f64, timeline_duration_seconds, cxx_name = "timelineDurationSeconds")]
         #[qproperty(f64, timeline_pixels_per_second, cxx_name = "timelinePixelsPerSecond")]
+        #[qproperty(
+            f64,
+            timeline_min_pixels_per_second,
+            cxx_name = "timelineMinPixelsPerSecond"
+        )]
+        #[qproperty(
+            f64,
+            timeline_max_pixels_per_second,
+            cxx_name = "timelineMaxPixelsPerSecond"
+        )]
         #[qproperty(f64, timeline_scroll_seconds, cxx_name = "timelineScrollSeconds")]
         #[qproperty(f64, timeline_visible_seconds, cxx_name = "timelineVisibleSeconds")]
+        #[qproperty(i32, timeline_follow_mode, cxx_name = "timelineFollowMode")]
+        #[qproperty(
+            bool,
+            timeline_user_navigation_active,
+            cxx_name = "timelineUserNavigationActive"
+        )]
+        #[qproperty(
+            i32,
+            timeline_playhead_offscreen_direction,
+            cxx_name = "timelinePlayheadOffscreenDirection"
+        )]
         #[qproperty(bool, is_dirty, cxx_name = "isDirty")]
         #[qproperty(bool, selected_track_can_rerun, cxx_name = "selectedTrackCanRerun")]
         #[qproperty(
@@ -2333,6 +2583,79 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "snapTimelineTime"]
         fn snap_timeline_time(self: Pin<&mut Self>, seconds: f64, bypass_snap: bool) -> f64;
+
+        #[qinvokable]
+        #[cxx_name = "renderTimelineWaveform"]
+        fn render_timeline_waveform(
+            self: Pin<&mut Self>,
+            track_id: QString,
+            cache_ref: QString,
+            scroll_seconds: f64,
+            pixels_per_second: f64,
+            width_pixels: f64,
+            height_pixels: f64,
+        ) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "renderTimelineAnalysis"]
+        fn render_timeline_analysis(
+            self: Pin<&mut Self>,
+            track_id: QString,
+            cache_ref: QString,
+            scroll_seconds: f64,
+            pixels_per_second: f64,
+            width_pixels: f64,
+            height_pixels: f64,
+        ) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "scrollTimelineByPixels"]
+        fn scroll_timeline_by_pixels(self: Pin<&mut Self>, pixel_delta_x: f64);
+
+        #[qinvokable]
+        #[cxx_name = "zoomTimelineByFactor"]
+        fn zoom_timeline_by_factor(
+            self: Pin<&mut Self>,
+            factor: f64,
+            anchor_x: f64,
+            lane_width: f64,
+        );
+
+        #[qinvokable]
+        #[cxx_name = "setTimelineVisibleLaneWidth"]
+        fn set_timeline_visible_lane_width(self: Pin<&mut Self>, lane_width: f64);
+
+        #[qinvokable]
+        #[cxx_name = "setTimelineZoomForLaneWidth"]
+        fn set_timeline_zoom_for_lane_width(
+            self: Pin<&mut Self>,
+            pixels_per_second: f64,
+            lane_width: f64,
+        );
+
+        #[qinvokable]
+        #[cxx_name = "fitTimelineToLaneWidth"]
+        fn fit_timeline_to_lane_width(self: Pin<&mut Self>, lane_width: f64);
+
+        #[qinvokable]
+        #[cxx_name = "beginTimelineUserNavigation"]
+        fn begin_timeline_user_navigation(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "endTimelineUserNavigation"]
+        fn end_timeline_user_navigation(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "scrubTimelineAtX"]
+        fn scrub_timeline_at_x(self: Pin<&mut Self>, x: f64, lane_width: f64) -> f64;
+
+        #[qinvokable]
+        #[cxx_name = "applyTimelineFollowMode"]
+        fn set_timeline_follow_mode_invokable(self: Pin<&mut Self>, mode: i32);
+
+        #[qinvokable]
+        #[cxx_name = "syncPlaybackPosition"]
+        fn sync_playback_position(self: Pin<&mut Self>, seconds: f64);
     }
 }
 
@@ -2825,12 +3148,192 @@ impl qobject::AppController {
         snapped
     }
 
+    pub fn render_timeline_waveform(
+        mut self: Pin<&mut Self>,
+        track_id: QString,
+        cache_ref: QString,
+        scroll_seconds: f64,
+        pixels_per_second: f64,
+        width_pixels: f64,
+        height_pixels: f64,
+    ) -> QString {
+        let visible_seconds = visible_seconds_for_width(width_pixels, pixels_per_second);
+        let geometry = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.render_timeline_waveform_state(
+                &track_id.to_string(),
+                &cache_ref.to_string(),
+                WaveformRenderRequest {
+                    scroll_seconds,
+                    visible_seconds,
+                    pixels_per_second,
+                    width_pixels,
+                    height_pixels,
+                    left_padding_pixels: 0.0,
+                    device_pixel_ratio: 1.0,
+                },
+            )
+        };
+        QString::from(&geometry)
+    }
+
+    pub fn render_timeline_analysis(
+        mut self: Pin<&mut Self>,
+        track_id: QString,
+        cache_ref: QString,
+        scroll_seconds: f64,
+        pixels_per_second: f64,
+        width_pixels: f64,
+        height_pixels: f64,
+    ) -> QString {
+        let visible_seconds = visible_seconds_for_width(width_pixels, pixels_per_second);
+        let geometry = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.render_timeline_analysis_state(
+                &track_id.to_string(),
+                &cache_ref.to_string(),
+                AnalysisRenderRequest {
+                    scroll_seconds,
+                    visible_seconds,
+                    pixels_per_second,
+                    width_pixels,
+                    height_pixels,
+                    left_padding_pixels: 0.0,
+                },
+            )
+        };
+        QString::from(&geometry)
+    }
+
+    pub fn scroll_timeline_by_pixels(mut self: Pin<&mut Self>, pixel_delta_x: f64) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.scroll_timeline_by_pixels_state(pixel_delta_x);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn zoom_timeline_by_factor(
+        mut self: Pin<&mut Self>,
+        factor: f64,
+        anchor_x: f64,
+        lane_width: f64,
+    ) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.zoom_timeline_by_factor_state(factor, anchor_x, lane_width);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn set_timeline_visible_lane_width(mut self: Pin<&mut Self>, lane_width: f64) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.set_timeline_visible_lane_width_state(lane_width);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn set_timeline_zoom_for_lane_width(
+        mut self: Pin<&mut Self>,
+        pixels_per_second: f64,
+        lane_width: f64,
+    ) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.set_timeline_zoom_for_lane_width_state(pixels_per_second, lane_width);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn fit_timeline_to_lane_width(mut self: Pin<&mut Self>, lane_width: f64) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.fit_timeline_to_lane_width_state(lane_width);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn begin_timeline_user_navigation(mut self: Pin<&mut Self>) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.begin_timeline_user_navigation_state();
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn end_timeline_user_navigation(mut self: Pin<&mut Self>) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.end_timeline_user_navigation_state();
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn scrub_timeline_at_x(mut self: Pin<&mut Self>, x: f64, lane_width: f64) -> f64 {
+        let (playback_values, viewport_values, seconds) = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            let seconds = state.scrub_timeline_at_x_state(x, lane_width);
+            (
+                state.playback_property_values(),
+                state.viewport_property_values(),
+                seconds,
+            )
+        };
+        self.as_mut().apply_playback_values(playback_values);
+        self.apply_viewport_values(viewport_values);
+        seconds
+    }
+
+    pub fn set_timeline_follow_mode_invokable(mut self: Pin<&mut Self>, mode: i32) {
+        let viewport_values = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.set_timeline_follow_mode_state(mode);
+            state.viewport_property_values()
+        };
+        self.apply_viewport_values(viewport_values);
+    }
+
+    pub fn sync_playback_position(mut self: Pin<&mut Self>, seconds: f64) {
+        let (playback_values, viewport_values) = {
+            let mut rust = self.as_mut().rust_mut();
+            let state = rust.as_mut().get_mut();
+            state.sync_playback_position_state(seconds);
+            (
+                state.playback_property_values(),
+                state.viewport_property_values(),
+            )
+        };
+        self.as_mut().apply_playback_values(playback_values);
+        self.apply_viewport_values(viewport_values);
+    }
+
     fn apply_values(mut self: Pin<&mut Self>, values: ControllerPropertyValues) {
         self.as_mut().set_project_name(values.project_name);
         self.as_mut().set_project_path(values.project_path);
         self.as_mut().set_last_error(values.last_error);
         self.as_mut()
             .set_timeline_rows_json(values.timeline_rows_json);
+        self.as_mut()
+            .set_timeline_scene_snapshot_json(values.timeline_scene_snapshot_json);
         self.as_mut()
             .set_transform_specs_json(values.transform_specs_json);
         self.as_mut()
@@ -2840,9 +3343,20 @@ impl qobject::AppController {
         self.as_mut()
             .set_timeline_pixels_per_second(values.timeline_pixels_per_second);
         self.as_mut()
+            .set_timeline_min_pixels_per_second(values.timeline_min_pixels_per_second);
+        self.as_mut()
+            .set_timeline_max_pixels_per_second(values.timeline_max_pixels_per_second);
+        self.as_mut()
             .set_timeline_scroll_seconds(values.timeline_scroll_seconds);
         self.as_mut()
             .set_timeline_visible_seconds(values.timeline_visible_seconds);
+        self.as_mut()
+            .set_timeline_follow_mode(values.timeline_follow_mode);
+        self.as_mut()
+            .set_timeline_user_navigation_active(values.timeline_user_navigation_active);
+        self.as_mut().set_timeline_playhead_offscreen_direction(
+            values.timeline_playhead_offscreen_direction,
+        );
         self.as_mut().set_is_dirty(values.is_dirty);
         self.as_mut()
             .set_selected_track_can_rerun(values.selected_track_can_rerun);
@@ -2879,9 +3393,20 @@ impl qobject::AppController {
         self.as_mut()
             .set_timeline_pixels_per_second(values.timeline_pixels_per_second);
         self.as_mut()
+            .set_timeline_min_pixels_per_second(values.timeline_min_pixels_per_second);
+        self.as_mut()
+            .set_timeline_max_pixels_per_second(values.timeline_max_pixels_per_second);
+        self.as_mut()
             .set_timeline_scroll_seconds(values.timeline_scroll_seconds);
         self.as_mut()
             .set_timeline_visible_seconds(values.timeline_visible_seconds);
+        self.as_mut()
+            .set_timeline_follow_mode(values.timeline_follow_mode);
+        self.as_mut()
+            .set_timeline_user_navigation_active(values.timeline_user_navigation_active);
+        self.as_mut().set_timeline_playhead_offscreen_direction(
+            values.timeline_playhead_offscreen_direction,
+        );
     }
 
     fn apply_selection_values(mut self: Pin<&mut Self>, values: SelectionPropertyValues) {

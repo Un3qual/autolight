@@ -94,7 +94,11 @@ impl PlaybackControllerState {
     }
 
     fn seek(&mut self, seconds: f64) -> f64 {
-        let position = finite_non_negative(seconds).min(self.duration_seconds.max(0.0));
+        self.seek_with_limit(seconds, self.duration_seconds)
+    }
+
+    fn seek_with_limit(&mut self, seconds: f64, limit_seconds: f64) -> f64 {
+        let position = finite_non_negative(seconds).min(limit_seconds.max(0.0));
         self.position_seconds = position;
         position
     }
@@ -175,6 +179,22 @@ impl AppControllerState {
         self.sync_playback_bridge_state();
         self.keep_timeline_time_visible(position);
         self.refresh_selected_state();
+    }
+
+    pub(super) fn seek_timeline_position_state(&mut self, seconds: f64) {
+        let limit = self
+            .playback
+            .duration_seconds()
+            .max(self.timeline_duration_seconds);
+        let position = self.playback.seek_with_limit(seconds, limit);
+        self.sync_playback_bridge_state();
+        self.apply_timeline_follow_state(position);
+    }
+
+    pub(super) fn sync_playback_position_state(&mut self, seconds: f64) {
+        let position = self.playback.seek(seconds);
+        self.sync_playback_bridge_state();
+        self.apply_timeline_follow_state(position);
     }
 
     pub(super) fn nudge_playback_state(&mut self, delta_seconds: f64) {
