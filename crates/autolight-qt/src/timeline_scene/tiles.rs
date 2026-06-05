@@ -53,7 +53,7 @@ pub struct TimelineTileBuffer {
 impl TimelineTileBuffer {
     pub fn set_active_tiles(&mut self, tiles: impl IntoIterator<Item = PreparedTimelineTile>) {
         self.active_tiles = tiles.into_iter().map(|tile| (tile.key, tile)).collect();
-        self.last_good_tiles = self.active_tiles.clone();
+        self.last_good_tiles.clone_from(&self.active_tiles);
     }
 
     pub fn queue_pending_tile(&mut self, tile: PreparedTimelineTile) {
@@ -66,7 +66,7 @@ impl TimelineTileBuffer {
         }
         self.active_tiles
             .extend(std::mem::take(&mut self.pending_tiles));
-        self.last_good_tiles = self.active_tiles.clone();
+        self.last_good_tiles.clone_from(&self.active_tiles);
     }
 
     pub fn active_tile(&self, key: TimelineTileKey) -> Option<&PreparedTimelineTile> {
