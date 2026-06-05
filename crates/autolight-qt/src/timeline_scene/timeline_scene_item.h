@@ -7,9 +7,12 @@
 #include <QtQuick/QSGNode>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <memory>
 
+namespace autolight::qt::timeline_scene {
 struct TimelineSceneSnapshotData;
+}
 
 class TimelineSceneItem : public QQuickItem
 {
@@ -22,6 +25,10 @@ class TimelineSceneItem : public QQuickItem
   Q_PROPERTY(double viewportTrackScrollPixels READ viewportTrackScrollPixels WRITE setViewportTrackScrollPixels NOTIFY viewportTrackScrollPixelsChanged)
   Q_PROPERTY(double playbackPositionSeconds READ playbackPositionSeconds WRITE setPlaybackPositionSeconds NOTIFY playbackPositionSecondsChanged)
   Q_PROPERTY(int selectedTrackIndex READ selectedTrackIndex WRITE setSelectedTrackIndex NOTIFY selectedTrackIndexChanged)
+  Q_PROPERTY(qulonglong sceneSnapshotParseCount READ sceneSnapshotParseCount NOTIFY scenePerfCountersChanged)
+  Q_PROPERTY(qulonglong worstSceneSnapshotParseMicros READ worstSceneSnapshotParseMicros NOTIFY scenePerfCountersChanged)
+  Q_PROPERTY(qulonglong worstSceneGraphUpdateMicros READ worstSceneGraphUpdateMicros NOTIFY scenePerfCountersChanged)
+  Q_PROPERTY(qulonglong textTextureCreateCount READ textTextureCreateCount NOTIFY scenePerfCountersChanged)
 
 public:
   explicit TimelineSceneItem(QQuickItem* parent = nullptr);
@@ -48,6 +55,11 @@ public:
   int selectedTrackIndex() const;
   void setSelectedTrackIndex(int selectedTrackIndex);
 
+  qulonglong sceneSnapshotParseCount() const;
+  qulonglong worstSceneSnapshotParseMicros() const;
+  qulonglong worstSceneGraphUpdateMicros() const;
+  qulonglong textTextureCreateCount() const;
+
 signals:
   void sceneSnapshotJsonChanged();
   void viewportScrollSecondsChanged();
@@ -56,6 +68,7 @@ signals:
   void viewportTrackScrollPixelsChanged();
   void playbackPositionSecondsChanged();
   void selectedTrackIndexChanged();
+  void scenePerfCountersChanged();
   void trackClicked(const QString& trackId);
   void markerClicked(const QString& trackId, const QString& markerId, bool additive);
   void trackExpansionToggled(const QString& trackId, bool expanded);
@@ -72,6 +85,8 @@ protected:
   void wheelEvent(QWheelEvent* event) override;
 
 private:
+  void queueScenePerfCountersChanged();
+
   QString m_sceneSnapshotJson;
   double m_viewportScrollSeconds = 0.0;
   double m_viewportPixelsPerSecond = 100.0;
@@ -80,5 +95,10 @@ private:
   double m_playbackPositionSeconds = 0.0;
   int m_selectedTrackIndex = -1;
   bool m_scrubbingRuler = false;
-  std::unique_ptr<TimelineSceneSnapshotData> m_snapshot;
+  qulonglong m_sceneSnapshotParseCount = 0;
+  qulonglong m_worstSceneSnapshotParseMicros = 0;
+  std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};
+  std::atomic<qulonglong> m_textTextureCreateCount{0};
+  std::atomic_bool m_scenePerfCountersNotifyQueued{false};
+  std::unique_ptr<autolight::qt::timeline_scene::TimelineSceneSnapshotData> m_snapshot;
 };

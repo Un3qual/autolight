@@ -64,7 +64,6 @@ Window {
     readonly property var controller: typeof appController === "undefined"
         ? root.appRuntime
         : appController
-    readonly property bool pythonReferenceMode: typeof appController !== "undefined"
     readonly property string statusError: root.controller.lastError.length > 0 ? root.controller.lastError : root.controller.playback.lastError
     readonly property var markerColorOptions: root.controller.markerColorOptions
 
@@ -165,9 +164,7 @@ Window {
     }
 
     function initializeRustRuntime() {
-        if (!root.pythonReferenceMode) {
-            root.controller.start_default_project()
-        }
+        root.controller.start_default_project()
         root.updateTimelineVisibleSeconds()
     }
 
@@ -317,37 +314,6 @@ Window {
             }
             onRefreshCacheRequested: root.controller.refresh_cache_status()
             onDeriveEditableRequested: root.controller.create_editable_track_from_track(root.controller.selectedTrackId)
-        }
-
-        RowLayout {
-            visible: root.pythonReferenceMode
-            Layout.fillWidth: true
-            Layout.minimumHeight: root.pythonReferenceMode ? root.timelineRulerHeight : 0
-            Layout.preferredHeight: root.pythonReferenceMode ? root.timelineRulerHeight : 0
-            Layout.maximumHeight: root.pythonReferenceMode ? root.timelineRulerHeight : 0
-            spacing: 0
-
-            Loader {
-                id: legacyRulerLoader
-                active: root.pythonReferenceMode
-                source: root.pythonReferenceMode ? "components/" + "Timeline" + "Ruler.qml" : ""
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onLoaded: {
-                    root.configureTimelineSurface(item)
-                    if ("timelineRulerHeight" in item) item.timelineRulerHeight = root.timelineRulerHeight
-                    if (item.scrubRequested) {
-                        item.scrubRequested.connect(function(x, laneWidth) {
-                            root.controller.scrub_timeline_at_x(x, laneWidth)
-                        })
-                    }
-                }
-            }
-
-            Item {
-                Layout.preferredWidth: root.markerInspectorWidth
-                Layout.fillHeight: true
-            }
         }
 
         PlaybackBar {
@@ -531,7 +497,7 @@ Window {
                 signal layoutWidthChanged()
                 signal trackSelected(string trackId)
                 signal seekRequested(real x)
-                source: root.pythonReferenceMode ? "components/LegacyTimelineView.qml" : "components/TimelineView.qml"
+                source: "components/TimelineView.qml"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onWidthChanged: timelineView.layoutWidthChanged()

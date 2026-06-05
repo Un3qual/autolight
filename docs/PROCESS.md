@@ -7,8 +7,6 @@ This repo uses a small active dispatcher instead of long live plans.
 - `AGENTS.md` is the repo-level prompt.
 - `docs/NOW.md` is the only active implementation dispatcher.
 - `docs/ROADMAP.md` is the ordered queue.
-- `docs/superpowers/specs/` contains behavior and architecture references.
-- `docs/superpowers/plans/` contains historical plans or background migration plans, not the active execution queue.
 - `docs/templates/HANDOFF.md` is the handoff format for end-of-batch updates.
 
 ## Batch Shape
@@ -27,11 +25,8 @@ If a batch needs multiple unrelated target areas, split it before implementation
 ## Planning Rules
 
 - Prefer `docs/NOW.md` updates over new long plans.
-- Keep specs focused on durable behavior and architecture decisions.
 - Keep implementation plans short enough to execute without reading historical code snippets.
 - Do not paste full source files into plans.
-- Do not mark dozens of historical checkboxes as a primary progress signal.
-- Historical Superpowers plans can remain for provenance, but should not drive new work unless explicitly referenced by NOW.
 
 ## Handoff Rules
 
@@ -63,21 +58,12 @@ When `docs/NOW.md` is stale:
 
 Use the narrowest command that proves the batch first. Run broader checks only at cutover points or when the batch touches shared contracts.
 
-For Rust batches, prefer:
+Prefer:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --locked
-QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo fmt --all -- --check
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
+QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
 git diff --check
 ```
-
-For Python reference-app checks, use:
-
-```bash
-uv run python -m unittest discover -s tests -v
-QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
-```
-
-Python checks are reference/parity checks after the Rust direction is locked. They do not justify new product work in Python.

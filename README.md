@@ -4,11 +4,7 @@ Autolight is a desktop app for building graph-backed audio analysis timelines.
 
 ## Runtime Direction
 
-The primary application runtime is the Rust/CXX-Qt binary. It keeps the existing Qt Quick/QML UI while moving project, timeline, transform, marker-editing, file, and playback controller ownership into Rust.
-
-The Python/PySide6 app remains checked in as the reference implementation and parity baseline. Python changes should be limited to preserving that reference app, fixing parity blockers, or adding tests that define behavior the Rust version must match.
-
-See `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md` and `docs/superpowers/plans/2026-06-03-autolight-rust-cxx-qt-port.md`.
+Autolight runs through the Rust/CXX-Qt binary. Qt Quick/QML remains the UI layer, while Rust owns project, timeline, transform, marker-editing, file, job, cache, and playback controller behavior.
 
 ## Working On The Repo
 
@@ -16,48 +12,26 @@ Start from `docs/NOW.md`. It contains the one active implementation batch, targe
 
 Use `docs/ROADMAP.md` only when `docs/NOW.md` is complete, blocked, or stale. Use `docs/PROCESS.md` for the lightweight batch and handoff rules.
 
-## Rust App
+## App
 
 Install or expose a Qt 6 development package that provides `qmake`. On this machine Homebrew Qt 6 is used.
 
-Run the primary app:
+Run the app:
 
 ```bash
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo run -p autolight-app
 ```
 
-For headless Rust launch verification:
+For headless launch verification:
 
 ```bash
 QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
 ```
 
-Run the Rust test suite:
+Run the test suite:
 
 ```bash
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
-```
-
-## Python Reference App
-
-Use the Python/PySide6 app when checking reference behavior against the Rust runtime.
-
-Run the reference app:
-
-```bash
-uv run python main.py
-```
-
-For headless launch verification:
-
-```bash
-QT_QPA_PLATFORM=offscreen uv run python main.py --smoke
-```
-
-## Test
-
-```bash
-uv run python -m unittest discover -s tests -v
 ```
 
 ## Current Scope

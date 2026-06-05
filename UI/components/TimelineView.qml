@@ -24,6 +24,7 @@ Item {
     signal trackSelected(string trackId)
     signal seekRequested(real x)
 
+    readonly property int nativeViewportGestureQuietMillis: 220
     readonly property int trackCount: timelineRoot.appController && Array.isArray(timelineRoot.appController.trackRows)
         ? timelineRoot.appController.trackRows.length
         : 0
@@ -110,7 +111,7 @@ Item {
 
     Timer {
         id: nativeViewportGestureQuietTimer
-        interval: 220
+        interval: timelineRoot.nativeViewportGestureQuietMillis
         repeat: false
         onTriggered: {
             if (timelineRoot.appController) timelineRoot.appController.end_timeline_user_navigation()
