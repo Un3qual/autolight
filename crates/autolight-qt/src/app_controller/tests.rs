@@ -2429,25 +2429,54 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
 
 #[test]
 fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
+    fn cpp_method_body<'a>(source: &'a str, signature: &str) -> &'a str {
+        let signature_start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} is missing"));
+        let body_start = signature_start
+            + source[signature_start..]
+                .find('{')
+                .unwrap_or_else(|| panic!("{signature} body is missing"));
+        let mut depth = 0_usize;
+        for (offset, character) in source[body_start..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let body_end = body_start + offset + character.len_utf8();
+                        return &source[body_start..body_end];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("{signature} body is unterminated");
+    }
+
     let scene_cpp = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/timeline_scene/timeline_scene_item.cpp"),
     )
     .unwrap();
-    let update_paint_node_start = scene_cpp
-        .find("QSGNode* TimelineSceneItem::updatePaintNode")
-        .unwrap();
-    let update_paint_node = &scene_cpp[update_paint_node_start
-        ..scene_cpp[update_paint_node_start..]
-            .find("void TimelineSceneItem::mousePressEvent")
-            .unwrap()
-            + update_paint_node_start];
+    let update_paint_node =
+        cpp_method_body(&scene_cpp, "QSGNode* TimelineSceneItem::updatePaintNode");
+    let viewport_setters = [
+        "void TimelineSceneItem::setViewportScrollSeconds",
+        "void TimelineSceneItem::setViewportPixelsPerSecond",
+        "void TimelineSceneItem::setViewportVisibleSeconds",
+        "void TimelineSceneItem::setViewportTrackScrollPixels",
+        "void TimelineSceneItem::setPlaybackPositionSeconds",
+    ];
 
     assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
     assert!(!update_paint_node.contains("parseSnapshot("));
-    assert!(scene_cpp.contains("void TimelineSceneItem::setViewportScrollSeconds"));
-    assert!(scene_cpp.contains("void TimelineSceneItem::setViewportPixelsPerSecond"));
-    assert!(scene_cpp.contains("void TimelineSceneItem::setPlaybackPositionSeconds"));
+    for setter in viewport_setters {
+        assert!(
+            !cpp_method_body(&scene_cpp, setter).contains("parseSnapshot("),
+            "{setter} must not parse scene snapshots"
+        );
+    }
 }
 
 #[test]

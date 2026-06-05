@@ -46,7 +46,7 @@
 - Modify: `docs/manual-testing/native-timeline-risk-hardening.md`
 - Modify: `docs/NOW.md`
 
-- [ ] **Step 1: Add a QML/static regression proving viewport-only changes do not reparse snapshots**
+- [x] **Step 1: Add a QML/static regression proving viewport-only changes do not reparse snapshots**
 
 Add or tighten this test in `crates/autolight-qt/src/app_controller/tests.rs`:
 
@@ -71,7 +71,7 @@ fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test**
+- [x] **Step 2: Run the focused test**
 
 Run:
 
@@ -81,7 +81,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_
 
 Expected: pass. If it fails, fix `TimelineSceneItem` before proceeding.
 
-- [ ] **Step 3: Create the manual testing checklist**
+- [x] **Step 3: Create the manual testing checklist**
 
 Create `docs/manual-testing/native-timeline-risk-hardening.md`:
 
@@ -122,7 +122,7 @@ Qt:
 | 10-minute memory stability | | |
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
