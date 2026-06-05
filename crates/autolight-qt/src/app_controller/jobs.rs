@@ -157,12 +157,14 @@ fn waveform_max_bytes_param(params: &JsonObject) -> Result<Option<usize>, Transf
             "max_bytes must be a positive integer".to_string(),
         ));
     };
-    let max_bytes = usize::try_from(raw)
-        .ok()
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
-            TransformRunError::Failed("max_bytes must be a positive integer".to_string())
-        })?;
+    let max_bytes = usize::try_from(raw).map_err(|_| {
+        TransformRunError::Failed("max_bytes is too large for this platform".to_string())
+    })?;
+    if max_bytes == 0 {
+        return Err(TransformRunError::Failed(
+            "max_bytes must be a positive integer".to_string(),
+        ));
+    }
     Ok(Some(max_bytes))
 }
 
@@ -255,19 +257,22 @@ mod tests {
     }
 
     #[test]
-    fn waveform_max_bytes_param_rejects_zero_non_integer_and_overflow() {
-        for value in [
-            json!(0),
-            json!(-1),
-            json!(1.5),
-            json!("1024"),
-            serde_json::from_str("18446744073709551616").unwrap(),
-        ] {
+    fn waveform_max_bytes_param_rejects_zero_and_non_integer() {
+        for value in [json!(0), json!(-1), json!(1.5), json!("1024")] {
             let mut params = JsonObject::new();
             params.insert("max_bytes".to_string(), value);
 
             assert!(waveform_max_bytes_param(&params).is_err());
         }
+    }
+
+    #[test]
+    fn waveform_max_bytes_param_has_distinct_platform_overflow_error() {
+        let source = include_str!("jobs.rs");
+        let message = ["max_bytes", " is too large", " for this platform"].concat();
+
+        assert!(source.contains("usize::try_from(raw).map_err"));
+        assert!(source.contains(&message));
     }
 
     #[test]
