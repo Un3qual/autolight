@@ -8,6 +8,22 @@ Updated: 2026-06-05
 
 **Goal:** Replace the reactive QML timeline lane/ruler/rendering stack with one native CXX-Qt timeline scene item so playback follow, scroll, and zoom are transform-only on the hot path and waveform/analysis detail rebuilds never block UI motion.
 
+## Planned Follow-Up Batch: Native Timeline Risk Hardening
+
+**Status:** in progress, Task 1 complete
+
+**Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
+
+**Plan:** `docs/superpowers/plans/2026-06-05-autolight-timeline-risk-hardening.md`
+
+**Task 1:** Completed 2026-06-05. Added the native scene snapshot lifecycle regression
+`native_timeline_viewport_changes_do_not_reparse_scene_snapshot` and the manual macOS
+hardening gate at `docs/manual-testing/native-timeline-risk-hardening.md`.
+
+**Task 1 Verification:** `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_viewport_changes_do_not_reparse_scene_snapshot` passed with 1 test.
+
+**Next Task:** Add native scene timing counters for manual profiling.
+
 ## Batch Plan
 
 1. Add failing architecture regressions proving the Rust runtime no longer instantiates QML timeline lanes/ruler/navigation/marker repeaters or JSON geometry render paths.

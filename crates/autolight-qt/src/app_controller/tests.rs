@@ -2428,6 +2428,29 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
 }
 
 #[test]
+fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+    let update_paint_node_start = scene_cpp
+        .find("QSGNode* TimelineSceneItem::updatePaintNode")
+        .unwrap();
+    let update_paint_node = &scene_cpp[update_paint_node_start
+        ..scene_cpp[update_paint_node_start..]
+            .find("void TimelineSceneItem::mousePressEvent")
+            .unwrap()
+            + update_paint_node_start];
+
+    assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
+    assert!(!update_paint_node.contains("parseSnapshot("));
+    assert!(scene_cpp.contains("void TimelineSceneItem::setViewportScrollSeconds"));
+    assert!(scene_cpp.contains("void TimelineSceneItem::setViewportPixelsPerSecond"));
+    assert!(scene_cpp.contains("void TimelineSceneItem::setPlaybackPositionSeconds"));
+}
+
+#[test]
 fn qml_timeline_scroll_updates_native_viewport_without_per_frame_geometry_regeneration() {
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
