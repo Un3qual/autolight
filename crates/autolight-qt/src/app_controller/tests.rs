@@ -1399,7 +1399,7 @@ fn controller_import_audio_updates_native_timeline_scene_snapshot() {
     assert_eq!(parsed["durationSeconds"], 2.0);
     assert_eq!(imported_track["name"], "song");
     assert_eq!(imported_track["trackType"], "source");
-    assert_eq!(imported_track["selected"], true);
+    assert!(imported_track["selected"].as_bool().unwrap());
 }
 
 #[test]
@@ -2367,6 +2367,11 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
     state.load_demo_project_state();
     let parsed: serde_json::Value =
         serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
 
     assert!(timeline_qml.contains("TimelineSceneItem"));
     assert!(timeline_qml.contains("sceneSnapshotJson:"));
@@ -2377,6 +2382,16 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
         .any(|track| track["analysisRefs"]
             .as_array()
             .is_some_and(|refs| !refs.is_empty())));
+    assert!(parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|track| track["analysisPreviews"]
+            .as_array()
+            .is_some_and(|previews| !previews.is_empty())));
+    assert!(scene_cpp.contains("AnalysisPreviewSpec"));
+    assert!(scene_cpp.contains("analysisPreviews"));
+    assert!(scene_cpp.contains("appendAnalysisPreview"));
     assert!(!timeline_qml.contains("TimelineAnalysisItem"));
     assert!(!timeline_qml.contains("renderTimelineAnalysis"));
     assert!(!timeline_qml.contains("geometryJson"));
@@ -2513,10 +2528,10 @@ fn timeline_scene_snapshot_preserves_track_tree_metadata_for_native_rendering() 
         .unwrap();
 
     assert_eq!(drums["depth"], 1);
-    assert_eq!(drums["hasChildren"], true);
-    assert_eq!(drums["expanded"], true);
+    assert!(drums["hasChildren"].as_bool().unwrap());
+    assert!(drums["expanded"].as_bool().unwrap());
     assert_eq!(drum_energy["depth"], 2);
-    assert_eq!(drum_energy["hasChildren"], false);
+    assert!(!drum_energy["hasChildren"].as_bool().unwrap());
 }
 
 #[test]
@@ -2556,9 +2571,9 @@ fn timeline_scene_snapshot_preserves_marker_selection_for_native_rendering() {
         .find(|marker| marker["markerId"] == "marker_edit_2")
         .unwrap();
 
-    assert_eq!(editable_track["selected"], true);
-    assert_eq!(selected_marker["selected"], true);
-    assert_eq!(selected_marker["editable"], true);
+    assert!(editable_track["selected"].as_bool().unwrap());
+    assert!(selected_marker["selected"].as_bool().unwrap());
+    assert!(selected_marker["editable"].as_bool().unwrap());
 }
 
 #[test]
@@ -2591,13 +2606,94 @@ fn timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_re
     assert!(!timeline_view_qml.contains("Repeater"));
     assert!(!timeline_view_qml.contains("TimelineNavigationSurface"));
     assert!(scene_header.contains("void trackClicked(const QString& trackId);"));
+    assert!(scene_header.contains(
+        "void markerClicked(const QString& trackId, const QString& markerId, bool additive);"
+    ));
     assert!(scene_header.contains("void scrubRequested(double seconds);"));
+    assert!(scene_header.contains("void mouseMoveEvent(QMouseEvent* event) override;"));
+    assert!(scene_header.contains("void mouseReleaseEvent(QMouseEvent* event) override;"));
     assert!(scene_cpp.contains("appendRulerTicks"));
+    assert!(scene_cpp.contains("QString markerId;"));
     assert!(scene_cpp.contains("marker.selected"));
+    assert!(scene_cpp.contains("markerRectForTrack"));
+    assert!(scene_cpp
+        .contains("emit markerClicked(trackId, marker.markerId, additiveSelection(*event));"));
+    assert!(scene_cpp.contains("emit scrubRequested(secondsForPosition("));
+    assert!(scene_cpp.contains("event->position().x()"));
+    assert!(scene_cpp.contains("m_scrubbingRuler"));
     assert!(scene_cpp.contains("selectionStripe"));
     assert!(scene_cpp.contains("playhead"));
     assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
     assert!(!update_paint_node.contains("parseSnapshot("));
+}
+
+#[test]
+fn qml_native_timeline_keeps_vertical_scroll_and_visible_track_range_current() {
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/timeline_scene_item.cpp"),
+    )
+    .unwrap();
+
+    assert!(timeline_qml.contains("property real trackScrollPixels"));
+    assert!(timeline_qml.contains("function updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains("onAppControllerChanged: timelineRoot.updateVisibleTrackRange()"));
+    assert!(timeline_qml.contains("onTrackCountChanged: timelineRoot.setTrackScrollPixels"));
+    assert!(timeline_qml.contains("viewportTrackScrollPixels: timelineRoot.trackScrollPixels"));
+    assert!(timeline_qml.contains("onViewportVerticalScrollRequested"));
+    assert!(scene_header.contains("Q_PROPERTY(double viewportTrackScrollPixels"));
+    assert!(scene_header.contains("void viewportVerticalScrollRequested(double pixelDelta);"));
+    assert!(scene_cpp.contains("trackScrollPixels"));
+    assert!(scene_cpp.contains("emit viewportVerticalScrollRequested(verticalDelta);"));
+}
+
+#[test]
+fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarded() {
+    let main_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
+    )
+    .unwrap();
+    let timeline_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineView.qml"),
+    )
+    .unwrap();
+    let legacy_lane_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineLane.qml"),
+    )
+    .unwrap();
+    let track_row_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
+    )
+    .unwrap();
+
+    assert!(main_qml.contains("function setTimelineZoomForLaneWidth"));
+    assert!(main_qml
+        .contains("typeof root.controller.set_timeline_zoom_for_lane_width === \"function\""));
+    assert!(main_qml.contains("typeof root.controller.fit_timeline_to_lane_width === \"function\""));
+    assert!(main_qml.contains("typeof root.controller.set_timeline_follow_mode === \"function\""));
+    assert!(
+        main_qml.contains("typeof root.controller.set_timeline_scroll_seconds === \"function\"")
+    );
+    assert!(main_qml.contains("onMoved: root.setTimelineZoomForLaneWidth("));
+    assert!(timeline_qml.contains("var x = (seconds - scene.viewportScrollSeconds)"));
+    assert!(timeline_qml.contains("+ timelineRoot.timelineLeftPadding"));
+    assert!(!timeline_qml
+        .contains("+ timelineRoot.timelineLabelWidth + timelineRoot.timelineLeftPadding"));
+    assert!(legacy_lane_qml.contains("allowScrub: true"));
+    assert!(legacy_lane_qml.contains("onScrubRequested: function(x, laneWidth)"));
+    assert!(track_row_qml.contains("onScrubRequested: function(x, laneWidth)"));
 }
 
 #[test]

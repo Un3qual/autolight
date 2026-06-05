@@ -64,6 +64,7 @@ struct SceneFrameSpec
 
 struct MarkerSpec
 {
+  QString markerId;
   double timestamp = 0.0;
   double duration = 0.0;
   QColor color = QColor(QStringLiteral("#f59e0b"));
@@ -75,6 +76,19 @@ struct WaveformSampleSpec
   double time = 0.0;
   double peak = 0.0;
   double rms = 0.0;
+};
+
+struct AnalysisSampleSpec
+{
+  double time = 0.0;
+  double intensity = 1.0;
+  QColor color = QColor(QStringLiteral("#93c5fd"));
+};
+
+struct AnalysisPreviewSpec
+{
+  QString artifactKind;
+  QVector<AnalysisSampleSpec> samples;
 };
 
 struct TrackSpec
@@ -89,6 +103,7 @@ struct TrackSpec
   bool expanded = false;
   QVector<MarkerSpec> markers;
   QVector<WaveformSampleSpec> waveformPreview;
+  QVector<AnalysisPreviewSpec> analysisPreviews;
 };
 
 struct SceneSnapshot
@@ -144,6 +159,16 @@ QRectF disclosureRectForTrack(const TrackSpec& track, double y)
   return QRectF(12.0 + treeIndentForDepth(track.depth), y + 9.0, 20.0, 20.0);
 }
 
+int firstVisibleTrackIndex(double trackScrollPixels)
+{
+  return std::max(0, static_cast<int>(std::floor(finiteNonNegative(trackScrollPixels) / kRowHeight)));
+}
+
+double visibleTrackY(int trackIndex, double trackScrollPixels)
+{
+  return kRulerHeight + static_cast<double>(trackIndex - firstVisibleTrackIndex(trackScrollPixels)) * kRowHeight;
+}
+
 QColor parseColor(const QString& value, const QColor& fallback)
 {
   const QColor color(value);
@@ -191,6 +216,7 @@ SceneSnapshot parseSnapshot(const QString& sceneSnapshotJson)
     for (const QJsonValue& markerValue : markers) {
       const QJsonObject markerObject = markerValue.toObject();
       MarkerSpec marker;
+      marker.markerId = markerObject.value(QStringLiteral("markerId")).toString();
       marker.timestamp = finiteNonNegative(
         finiteJsonNumber(markerObject.value(QStringLiteral("timestamp")), 0.0));
       marker.duration = finiteNonNegative(
@@ -214,6 +240,29 @@ SceneSnapshot parseSnapshot(const QString& sceneSnapshotJson)
       sample.rms = std::clamp(
         finiteJsonNumber(sampleObject.value(QStringLiteral("rms")), 0.0), 0.0, 1.0);
       track.waveformPreview.push_back(sample);
+    }
+
+    const QJsonArray analysisPreviews = trackObject.value(QStringLiteral("analysisPreviews")).toArray();
+    track.analysisPreviews.reserve(analysisPreviews.size());
+    for (const QJsonValue& previewValue : analysisPreviews) {
+      const QJsonObject previewObject = previewValue.toObject();
+      AnalysisPreviewSpec preview;
+      preview.artifactKind = previewObject.value(QStringLiteral("artifactKind")).toString();
+      const QJsonArray samples = previewObject.value(QStringLiteral("samples")).toArray();
+      preview.samples.reserve(samples.size());
+      for (const QJsonValue& sampleValue : samples) {
+        const QJsonObject sampleObject = sampleValue.toObject();
+        AnalysisSampleSpec sample;
+        sample.time = finiteNonNegative(
+          finiteJsonNumber(sampleObject.value(QStringLiteral("time")), 0.0));
+        sample.intensity = std::clamp(
+          finiteJsonNumber(sampleObject.value(QStringLiteral("intensity")), 1.0), 0.0, 1.0);
+        sample.color = parseColor(
+          sampleObject.value(QStringLiteral("color")).toString(QStringLiteral("#93c5fd")),
+          QColor(QStringLiteral("#93c5fd")));
+        preview.samples.push_back(sample);
+      }
+      track.analysisPreviews.push_back(preview);
     }
     snapshot.tracks.push_back(track);
   }
@@ -541,6 +590,50 @@ double secondsToX(double seconds, double scrollSeconds, double pixelsPerSecond)
   return (seconds - scrollSeconds) * pixelsPerSecond;
 }
 
+double secondsForPosition(
+  double x,
+  double scrollSeconds,
+  double pixelsPerSecond,
+  const SceneSnapshot& snapshot)
+{
+  double seconds = finiteNonNegative(scrollSeconds + std::max(0.0, x - laneOriginX()) / pixelsPerSecond);
+  if (snapshot.durationSeconds > 0.0) {
+    seconds = std::min(seconds, snapshot.durationSeconds);
+  }
+  return seconds;
+}
+
+bool additiveSelection(const QMouseEvent& event)
+{
+  return event.modifiers().testFlag(Qt::ShiftModifier);
+}
+
+QRectF markerRectForTrack(
+  const MarkerSpec& marker,
+  double y,
+  double rowHeight,
+  double scrollSeconds,
+  double pixelsPerSecond)
+{
+  const double markerX = laneOriginX() + secondsToX(marker.timestamp, scrollSeconds, pixelsPerSecond);
+  const double markerWidth = std::max(kMinimumMarkerWidth, marker.duration * pixelsPerSecond);
+  return QRectF(
+    markerX,
+    y + (marker.selected ? 7.0 : 10.0),
+    markerWidth,
+    rowHeight - (marker.selected ? 14.0 : 20.0));
+}
+
+int trackIndexForY(double y, double trackScrollPixels, const SceneSnapshot& snapshot)
+{
+  if (y < kRulerHeight) {
+    return -1;
+  }
+  const int visibleRow = static_cast<int>(std::floor((y - kRulerHeight) / kRowHeight));
+  const int trackIndex = firstVisibleTrackIndex(trackScrollPixels) + visibleRow;
+  return trackIndex >= 0 && trackIndex < snapshot.tracks.size() ? trackIndex : -1;
+}
+
 void appendTimelineGridLines(
   QVector<BandSpec>& bands,
   double scrollSeconds,
@@ -615,12 +708,53 @@ void appendRulerTicks(
   }
 }
 
+void appendAnalysisPreview(
+  QVector<BandSpec>& bands,
+  const AnalysisPreviewSpec& preview,
+  double scrollSeconds,
+  double pixelsPerSecond,
+  double y,
+  double rowHeight,
+  double originX,
+  double width,
+  double height)
+{
+  if (preview.samples.isEmpty()) {
+    return;
+  }
+  const bool energy = preview.artifactKind == QStringLiteral("energy");
+  const double stripHeight = energy ? 18.0 : 14.0;
+  const double stripBottomMargin = energy ? 14.0 : 4.0;
+  const double stripTop = y + rowHeight - stripBottomMargin - stripHeight;
+  for (int sampleIndex = 0; sampleIndex < preview.samples.size(); ++sampleIndex) {
+    const AnalysisSampleSpec& sample = preview.samples[sampleIndex];
+    const double nextTime = sampleIndex + 1 < preview.samples.size()
+      ? preview.samples[sampleIndex + 1].time
+      : sample.time + 0.05;
+    const double sampleX = secondsToX(sample.time, scrollSeconds, pixelsPerSecond);
+    const double nextX = secondsToX(nextTime, scrollSeconds, pixelsPerSecond);
+    const double sampleWidth = std::max(1.0, nextX - sampleX);
+    const double sampleHeight = energy ? std::max(1.0, sample.intensity * stripHeight) : stripHeight;
+    const QColor sampleColor = energy ? QColor(QStringLiteral("#facc15")) : sample.color;
+    appendClippedRect(
+      bands,
+      withAlpha(sampleColor, energy ? 170 : 150),
+      originX + sampleX,
+      stripTop + (stripHeight - sampleHeight),
+      sampleWidth,
+      sampleHeight,
+      width,
+      height);
+  }
+}
+
 SceneFrameSpec buildSceneFrame(
   const SceneSnapshot& snapshot,
   double scrollSeconds,
   double pixelsPerSecond,
   double visibleSeconds,
   double playbackPositionSeconds,
+  double trackScrollPixels,
   int selectedTrackIndex,
   double width,
   double height)
@@ -650,8 +784,9 @@ SceneFrameSpec buildSceneFrame(
   appendText(texts, QStringLiteral("TRACKS"), QColor(QStringLiteral("#94a3b8")), 14.0, 6.0, kLabelWidth - 28.0, 20.0, 10, true);
 
   const int selectedIndex = resolvedSelectedTrackIndex(snapshot, selectedTrackIndex);
-  for (int trackIndex = 0; trackIndex < snapshot.tracks.size(); ++trackIndex) {
-    const double y = kRulerHeight + static_cast<double>(trackIndex) * kRowHeight;
+  const int firstTrackIndex = firstVisibleTrackIndex(trackScrollPixels);
+  for (int trackIndex = firstTrackIndex; trackIndex < snapshot.tracks.size(); ++trackIndex) {
+    const double y = visibleTrackY(trackIndex, trackScrollPixels);
     if (y >= height) {
       break;
     }
@@ -728,26 +863,37 @@ SceneFrameSpec buildSceneFrame(
         width,
         height);
     }
+    for (const AnalysisPreviewSpec& preview : track.analysisPreviews) {
+      appendAnalysisPreview(
+        bands,
+        preview,
+        scrollSeconds,
+        pixelsPerSecond,
+        y,
+        rowHeight,
+        originX,
+        width,
+        height);
+    }
     for (const MarkerSpec& marker : track.markers) {
-      const double markerX = originX + secondsToX(marker.timestamp, scrollSeconds, pixelsPerSecond);
-      const double markerWidth = std::max(kMinimumMarkerWidth, marker.duration * pixelsPerSecond);
+      const QRectF markerRect = markerRectForTrack(marker, y, rowHeight, scrollSeconds, pixelsPerSecond);
       QColor markerFill = marker.color;
       markerFill.setAlpha(marker.selected ? 230 : 155);
       appendClippedRect(
         bands,
         markerFill,
-        markerX,
-        y + (marker.selected ? 7.0 : 10.0),
-        markerWidth,
-        rowHeight - (marker.selected ? 14.0 : 20.0),
+        markerRect.x(),
+        markerRect.y(),
+        markerRect.width(),
+        markerRect.height(),
         width,
         height);
       appendClippedRect(
         bands,
         withAlpha(marker.color, marker.selected ? 230 : 140),
-        markerX,
+        markerRect.x(),
         kRulerHeight - 7.0,
-        std::max(1.5, std::min(markerWidth, 5.0)),
+        std::max(1.5, std::min(markerRect.width(), 5.0)),
         6.0,
         width,
         height);
@@ -1031,6 +1177,22 @@ void TimelineSceneItem::setViewportVisibleSeconds(double viewportVisibleSeconds)
   emit viewportVisibleSecondsChanged();
 }
 
+double TimelineSceneItem::viewportTrackScrollPixels() const
+{
+  return m_viewportTrackScrollPixels;
+}
+
+void TimelineSceneItem::setViewportTrackScrollPixels(double viewportTrackScrollPixels)
+{
+  viewportTrackScrollPixels = finiteNonNegative(viewportTrackScrollPixels);
+  if (sameDouble(m_viewportTrackScrollPixels, viewportTrackScrollPixels)) {
+    return;
+  }
+  m_viewportTrackScrollPixels = viewportTrackScrollPixels;
+  update();
+  emit viewportTrackScrollPixelsChanged();
+}
+
 double TimelineSceneItem::playbackPositionSeconds() const
 {
   return m_playbackPositionSeconds;
@@ -1083,6 +1245,7 @@ QSGNode* TimelineSceneItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeDat
     pixelsPerSecond,
     visibleSeconds,
     playbackPositionSeconds,
+    m_viewportTrackScrollPixels,
     m_selectedTrackIndex,
     itemWidth,
     itemHeight);
@@ -1101,37 +1264,81 @@ void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
   const double y = event->position().y();
   const double pixelsPerSecond = finitePositive(m_viewportPixelsPerSecond, 100.0);
   const double scrollSeconds = finiteNonNegative(m_viewportScrollSeconds);
+  const double trackScrollPixels = finiteNonNegative(m_viewportTrackScrollPixels);
   const SceneSnapshot emptySnapshot;
   const SceneSnapshot& snapshot = m_snapshot != nullptr ? m_snapshot->snapshot : emptySnapshot;
 
   if (y < kRulerHeight) {
-    double seconds = finiteNonNegative(scrollSeconds + std::max(0.0, x - laneOriginX()) / pixelsPerSecond);
-    if (snapshot.durationSeconds > 0.0) {
-      seconds = std::min(seconds, snapshot.durationSeconds);
-    }
+    const double seconds = secondsForPosition(x, scrollSeconds, pixelsPerSecond, snapshot);
+    m_scrubbingRuler = true;
     emit scrubRequested(seconds);
     event->accept();
     return;
   }
 
-  const int trackIndex = static_cast<int>(std::floor((y - kRulerHeight) / kRowHeight));
-  if (trackIndex >= 0 && trackIndex < snapshot.tracks.size()) {
+  const int trackIndex = trackIndexForY(y, trackScrollPixels, snapshot);
+  if (trackIndex >= 0) {
     const TrackSpec& track = snapshot.tracks[trackIndex];
     const QString& trackId = track.trackId;
     if (!trackId.isEmpty()) {
-      const QRectF disclosureRect = disclosureRectForTrack(track, kRulerHeight + static_cast<double>(trackIndex) * kRowHeight);
+      const double rowY = visibleTrackY(trackIndex, trackScrollPixels);
+      const double rowHeight = std::min(kRowHeight, height() - rowY);
+      for (int markerIndex = static_cast<int>(track.markers.size()) - 1; markerIndex >= 0; --markerIndex) {
+        const MarkerSpec& marker = track.markers[markerIndex];
+        if (!marker.markerId.isEmpty()
+            && markerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond).contains(event->position())) {
+          emit markerClicked(trackId, marker.markerId, additiveSelection(*event));
+          event->accept();
+          return;
+        }
+      }
+      const QRectF disclosureRect = disclosureRectForTrack(track, rowY);
       if (track.hasChildren && disclosureRect.contains(event->position())) {
         emit trackExpansionToggled(trackId, !track.expanded);
         event->accept();
         return;
       }
       emit trackClicked(trackId);
+      if (x >= laneOriginX()) {
+        emit scrubRequested(secondsForPosition(x, scrollSeconds, pixelsPerSecond, snapshot));
+      }
       event->accept();
       return;
     }
   }
 
   event->ignore();
+}
+
+void TimelineSceneItem::mouseMoveEvent(QMouseEvent* event)
+{
+  if (event == nullptr || !m_scrubbingRuler) {
+    return;
+  }
+  const SceneSnapshot emptySnapshot;
+  const SceneSnapshot& snapshot = m_snapshot != nullptr ? m_snapshot->snapshot : emptySnapshot;
+  emit scrubRequested(secondsForPosition(
+    event->position().x(),
+    finiteNonNegative(m_viewportScrollSeconds),
+    finitePositive(m_viewportPixelsPerSecond, 100.0),
+    snapshot));
+  event->accept();
+}
+
+void TimelineSceneItem::mouseReleaseEvent(QMouseEvent* event)
+{
+  if (event == nullptr || !m_scrubbingRuler) {
+    return;
+  }
+  const SceneSnapshot emptySnapshot;
+  const SceneSnapshot& snapshot = m_snapshot != nullptr ? m_snapshot->snapshot : emptySnapshot;
+  emit scrubRequested(secondsForPosition(
+    event->position().x(),
+    finiteNonNegative(m_viewportScrollSeconds),
+    finitePositive(m_viewportPixelsPerSecond, 100.0),
+    snapshot));
+  m_scrubbingRuler = false;
+  event->accept();
 }
 
 void TimelineSceneItem::wheelEvent(QWheelEvent* event)
@@ -1173,6 +1380,18 @@ void TimelineSceneItem::wheelEvent(QWheelEvent* event)
     emit viewportScrollRequested(scrollDelta);
     event->accept();
     return;
+  }
+
+  if (!modifiers.testFlag(Qt::ShiftModifier)) {
+    double verticalDelta = -static_cast<double>(pixelDelta.y());
+    if (std::abs(verticalDelta) <= 0.000001) {
+      verticalDelta = -static_cast<double>(angleDelta.y()) / 120.0 * 48.0;
+    }
+    if (std::abs(verticalDelta) > 0.000001) {
+      emit viewportVerticalScrollRequested(verticalDelta);
+      event->accept();
+      return;
+    }
   }
 
   event->ignore();

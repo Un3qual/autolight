@@ -87,18 +87,55 @@ Window {
         }
     }
 
+    function controllerNumber(propertyName, fallback) {
+        if (!root.controller) return fallback
+        var value = Number(root.controller[propertyName])
+        return isFinite(value) ? value : fallback
+    }
+
     function zoomSliderValueForPixels(pixelsPerSecond) {
-        var minZoom = Math.max(0.001, Number(root.controller.timelineMinPixelsPerSecond))
-        var maxZoom = Math.max(minZoom * 1.001, Number(root.controller.timelineMaxPixelsPerSecond))
+        var minZoom = Math.max(0.001, root.controllerNumber("timelineMinPixelsPerSecond", 24))
+        var maxZoom = Math.max(minZoom * 1.001, root.controllerNumber("timelineMaxPixelsPerSecond", 240))
         var currentZoom = Math.max(minZoom, Math.min(maxZoom, Number(pixelsPerSecond)))
         return (Math.log(currentZoom) - Math.log(minZoom)) / (Math.log(maxZoom) - Math.log(minZoom))
     }
 
     function pixelsForZoomSliderValue(value) {
-        var minZoom = Math.max(0.001, Number(root.controller.timelineMinPixelsPerSecond))
-        var maxZoom = Math.max(minZoom * 1.001, Number(root.controller.timelineMaxPixelsPerSecond))
+        var minZoom = Math.max(0.001, root.controllerNumber("timelineMinPixelsPerSecond", 24))
+        var maxZoom = Math.max(minZoom * 1.001, root.controllerNumber("timelineMaxPixelsPerSecond", 240))
         var normalized = Math.max(0, Math.min(1, Number(value)))
         return Math.exp(Math.log(minZoom) + normalized * (Math.log(maxZoom) - Math.log(minZoom)))
+    }
+
+    function setTimelineZoomForLaneWidth(pixelsPerSecond, laneWidth) {
+        if (!root.controller) return
+        if (typeof root.controller.set_timeline_zoom_for_lane_width === "function") {
+            root.controller.set_timeline_zoom_for_lane_width(pixelsPerSecond, laneWidth)
+        } else if (typeof root.controller.set_timeline_zoom === "function") {
+            root.controller.set_timeline_zoom(pixelsPerSecond)
+            root.updateTimelineVisibleSeconds()
+        }
+    }
+
+    function fitTimelineToLaneWidth(laneWidth) {
+        if (!root.controller) return
+        if (typeof root.controller.fit_timeline_to_lane_width === "function") {
+            root.controller.fit_timeline_to_lane_width(laneWidth)
+        } else {
+            root.updateTimelineVisibleSeconds()
+        }
+    }
+
+    function setTimelineFollowMode(mode) {
+        if (root.controller && typeof root.controller.set_timeline_follow_mode === "function") {
+            root.controller.set_timeline_follow_mode(mode)
+        }
+    }
+
+    function setTimelineScrollSeconds(seconds) {
+        if (root.controller && typeof root.controller.set_timeline_scroll_seconds === "function") {
+            root.controller.set_timeline_scroll_seconds(seconds)
+        }
     }
 
     function formatSeconds(seconds) {
@@ -114,6 +151,7 @@ Window {
         if ("timelineLeftPadding" in item) item.timelineLeftPadding = root.timelineLeftPadding
         if ("timelineLabelWidth" in item) item.timelineLabelWidth = root.timelineLabelWidth
         if ("timelineRowHeight" in item) item.timelineRowHeight = root.timelineRowHeight
+        if ("timelineRulerHeight" in item) item.timelineRulerHeight = root.timelineRulerHeight
         if ("panelBackground" in item) item.panelBackground = root.panelBackground
         if ("laneBackground" in item) item.laneBackground = root.laneBackground
         if ("laneBackgroundAlt" in item) item.laneBackgroundAlt = root.laneBackgroundAlt
@@ -353,7 +391,7 @@ Window {
                     to: 1
                     value: root.zoomSliderValueForPixels(root.controller.timelinePixelsPerSecond)
                     Layout.preferredWidth: 180
-                    onMoved: root.controller.set_timeline_zoom_for_lane_width(
+                    onMoved: root.setTimelineZoomForLaneWidth(
                         root.pixelsForZoomSliderValue(value),
                         root.timelineLaneWidth()
                     )
@@ -386,7 +424,7 @@ Window {
                 Basic.Button {
                     id: zoomFitButton
                     text: "Fit"
-                    onClicked: root.controller.fit_timeline_to_lane_width(root.timelineLaneWidth())
+                    onClicked: root.fitTimelineToLaneWidth(root.timelineLaneWidth())
                     contentItem: Text {
                         text: zoomFitButton.text
                         color: root.textPrimary
@@ -422,9 +460,9 @@ Window {
                     ]
                     textRole: "text"
                     valueRole: "value"
-                    currentIndex: Math.max(0, Math.min(2, root.controller.timelineFollowMode))
+                    currentIndex: Math.max(0, Math.min(2, root.controllerNumber("timelineFollowMode", 0)))
                     Layout.preferredWidth: 112
-                    onActivated: root.controller.set_timeline_follow_mode(currentValue)
+                    onActivated: root.setTimelineFollowMode(currentValue)
                     contentItem: Text {
                         text: followModeSelector.displayText
                         color: root.textPrimary
@@ -452,7 +490,7 @@ Window {
                     to: Math.max(0, root.controller.timelineDurationSeconds - root.controller.timelineVisibleSeconds)
                     value: root.controller.timelineScrollSeconds
                     Layout.fillWidth: true
-                    onMoved: root.controller.set_timeline_scroll_seconds(value)
+                    onMoved: root.setTimelineScrollSeconds(value)
                     background: Rectangle {
                         x: timelineScrollSlider.leftPadding
                         y: timelineScrollSlider.topPadding + timelineScrollSlider.availableHeight / 2 - height / 2

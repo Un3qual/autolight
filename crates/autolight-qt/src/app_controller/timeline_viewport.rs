@@ -132,9 +132,9 @@ impl TimelineViewport {
         pixels_per_second: PixelsPerSecond,
         lane_width: Option<TimelinePixels>,
     ) -> Self {
-        let visible = lane_width
-            .map(|width| visible_seconds_for_lane(width, pixels_per_second))
-            .unwrap_or(self.visible);
+        let visible = lane_width.map_or(self.visible, |width| {
+            visible_seconds_for_lane(width, pixels_per_second)
+        });
         Self::new(
             self.duration.value(),
             pixels_per_second.value(),

@@ -74,7 +74,10 @@ Rectangle {
         appController: root.appController
         laneWidth: width
         contentLeftPadding: root.timelineLeftPadding
-        allowScrub: false
+        allowScrub: true
+        onScrubRequested: function(x, laneWidth) {
+            root.scrubRequested(x, laneWidth)
+        }
     }
 
     TimelineWaveformItem {

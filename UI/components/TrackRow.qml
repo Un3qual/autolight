@@ -255,5 +255,9 @@ Row {
             root.trackSelected(root.trackId)
             root.seekRequested(x)
         }
+        onScrubRequested: function(x, laneWidth) {
+            root.trackSelected(root.trackId)
+            root.seekRequested(x)
+        }
     }
 }
