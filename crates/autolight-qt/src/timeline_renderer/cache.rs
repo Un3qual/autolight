@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use super::waveform::{WaveformPeakPyramid, WaveformRenderFrame, WaveformRenderRequest};
 
 const MAX_RENDER_RECTS: usize = 2_048;
+// Keeps legacy analysis overlays readable as timeline zoom changes.
+const ANALYSIS_RECT_WIDTH_ZOOM_DIVISOR: f64 = 30.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisRenderRequest {
@@ -299,7 +301,7 @@ fn analysis_rect(
     json!({
         "x": x.max(request.left_padding_pixels),
         "y": (safe_height - height).max(0.0),
-        "width": (request.pixels_per_second / 30.0).clamp(1.0, 8.0),
+        "width": (request.pixels_per_second / ANALYSIS_RECT_WIDTH_ZOOM_DIVISOR).clamp(1.0, 8.0),
         "height": height.max(1.0),
     })
 }

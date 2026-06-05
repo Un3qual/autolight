@@ -31,6 +31,10 @@ constexpr double kLabelWidth = 280.0;
 constexpr double kLeftPadding = 24.0;
 constexpr double kSelectionStripeWidth = 4.0;
 constexpr double kMinimumMarkerWidth = 2.0;
+constexpr double kWheelAngleToDeltaFactor = 8.0;
+constexpr double kZoomSensitivityBase = 1.0015;
+constexpr double kWheelAngleUnitsPerNotch = 120.0;
+constexpr double kScrollPixelsPerNotch = 48.0;
 
 struct RectSpec
 {
@@ -1356,10 +1360,10 @@ void TimelineSceneItem::wheelEvent(QWheelEvent* event)
   if (zoomGesture) {
     double zoomDelta = pixelDelta.y();
     if (std::abs(zoomDelta) <= 0.000001) {
-      zoomDelta = static_cast<double>(angleDelta.y()) / 8.0;
+      zoomDelta = static_cast<double>(angleDelta.y()) / kWheelAngleToDeltaFactor;
     }
     if (std::abs(zoomDelta) > 0.000001) {
-      const double factor = std::pow(1.0015, zoomDelta);
+      const double factor = std::pow(kZoomSensitivityBase, zoomDelta);
       emit viewportZoomRequested(factor, std::max(0.0, event->position().x() - laneOriginX()));
       event->accept();
       return;
@@ -1368,12 +1372,14 @@ void TimelineSceneItem::wheelEvent(QWheelEvent* event)
 
   double scrollDelta = -static_cast<double>(pixelDelta.x());
   if (std::abs(scrollDelta) <= 0.000001) {
-    scrollDelta = -static_cast<double>(angleDelta.x()) / 120.0 * 48.0;
+    scrollDelta =
+      -static_cast<double>(angleDelta.x()) / kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch;
   }
   if (std::abs(scrollDelta) <= 0.000001 && modifiers.testFlag(Qt::ShiftModifier)) {
     scrollDelta = -static_cast<double>(pixelDelta.y());
     if (std::abs(scrollDelta) <= 0.000001) {
-      scrollDelta = -static_cast<double>(angleDelta.y()) / 120.0 * 48.0;
+      scrollDelta =
+        -static_cast<double>(angleDelta.y()) / kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch;
     }
   }
   if (std::abs(scrollDelta) > 0.000001) {
@@ -1385,7 +1391,8 @@ void TimelineSceneItem::wheelEvent(QWheelEvent* event)
   if (!modifiers.testFlag(Qt::ShiftModifier)) {
     double verticalDelta = -static_cast<double>(pixelDelta.y());
     if (std::abs(verticalDelta) <= 0.000001) {
-      verticalDelta = -static_cast<double>(angleDelta.y()) / 120.0 * 48.0;
+      verticalDelta =
+        -static_cast<double>(angleDelta.y()) / kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch;
     }
     if (std::abs(verticalDelta) > 0.000001) {
       emit viewportVerticalScrollRequested(verticalDelta);

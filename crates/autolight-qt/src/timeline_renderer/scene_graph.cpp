@@ -78,6 +78,13 @@ QVector<BandSpec> parseBands(const QString& geometryJson, QString* error)
   return bands;
 }
 
+QString emptyReasonForGeometryJson(const QString& geometryJson)
+{
+  QString error;
+  parseBands(geometryJson, &error);
+  return error;
+}
+
 void addRect(QSGGeometry::Point2D* vertices, int offset, const RectSpec& rect)
 {
   const float left = rect.x;
@@ -203,8 +210,14 @@ void TimelineGeometryItem::setGeometryJson(const QString& geometryJson)
   if (m_geometryJson == geometryJson) {
     return;
   }
+  const QString nextEmptyReason = emptyReasonForGeometryJson(geometryJson);
+  const bool emptyReasonWasChanged = m_emptyReason != nextEmptyReason;
   m_geometryJson = geometryJson;
+  m_emptyReason = nextEmptyReason;
   update();
+  if (emptyReasonWasChanged) {
+    emit emptyReasonChanged();
+  }
   emit geometryJsonChanged();
 }
 
@@ -217,7 +230,6 @@ QSGNode* TimelineGeometryItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNode
 {
   QString error;
   const QVector<BandSpec> bands = parseBands(m_geometryJson, &error);
-  m_emptyReason = error;
   if (bands.isEmpty()) {
     delete oldNode;
     return nullptr;

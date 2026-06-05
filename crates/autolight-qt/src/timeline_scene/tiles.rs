@@ -64,7 +64,9 @@ impl TimelineTileBuffer {
         if self.pending_tiles.is_empty() {
             return;
         }
-        self.active_tiles = std::mem::take(&mut self.pending_tiles);
+        self.active_tiles
+            .extend(std::mem::take(&mut self.pending_tiles));
+        self.last_good_tiles = self.active_tiles.clone();
     }
 
     pub fn active_tile(&self, key: TimelineTileKey) -> Option<&PreparedTimelineTile> {
@@ -153,6 +155,8 @@ mod tests {
 
         buffer.promote_pending_tiles();
 
+        assert_eq!(buffer.active_tiles.len(), 2);
+        assert!(buffer.pending_tiles.is_empty());
         assert_eq!(buffer.active_tile(pending_key), Some(&pending));
         assert_eq!(buffer.active_tile(active_key), Some(&active));
     }

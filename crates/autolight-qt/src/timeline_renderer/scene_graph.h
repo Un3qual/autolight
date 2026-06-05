@@ -10,7 +10,7 @@ class TimelineGeometryItem : public QQuickItem
 {
   Q_OBJECT
   Q_PROPERTY(QString geometryJson READ geometryJson WRITE setGeometryJson NOTIFY geometryJsonChanged)
-  Q_PROPERTY(QString emptyReason READ emptyReason NOTIFY geometryJsonChanged)
+  Q_PROPERTY(QString emptyReason READ emptyReason NOTIFY emptyReasonChanged)
 
 public:
   explicit TimelineGeometryItem(QQuickItem* parent = nullptr);
@@ -21,6 +21,7 @@ public:
 
 signals:
   void geometryJsonChanged();
+  void emptyReasonChanged();
 
 protected:
   QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* updateData) override;

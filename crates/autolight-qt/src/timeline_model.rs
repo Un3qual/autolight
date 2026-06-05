@@ -662,6 +662,7 @@ fn waveform_sample_rate(context: &TimelineProjectionContext<'_>, track: &Track) 
         .get("waveform_payload")
         .and_then(|value| value.get("sample_rate").or_else(|| value.get("sampleRate")))
         .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
         .and_then(|value| u32::try_from(value).ok())
         .unwrap_or_else(|| context.source_audio_sample_rate(track))
 }
@@ -968,6 +969,26 @@ mod tests {
         assert_eq!(waveform_ref.duration_seconds, 4.0);
         assert_eq!(waveform_ref.cache_ref, "cache_waveform");
         assert_eq!(waveform_ref.sample_rate, 4);
+    }
+
+    #[test]
+    fn timeline_rows_treat_zero_waveform_sample_rate_as_missing() {
+        let mut project = rust_demo_project();
+        let waveform = project
+            .tracks
+            .iter_mut()
+            .find(|track| track.id == "track_waveform")
+            .unwrap();
+        let payload = waveform.provenance.get_mut("waveform_payload").unwrap();
+        payload["sample_rate"] = json!(0);
+
+        let rows = timeline_rows_for_project(&project);
+        let waveform = rows
+            .iter()
+            .find(|row| row.track_id == "track_waveform")
+            .unwrap();
+
+        assert_eq!(waveform.waveform_ref.as_ref().unwrap().sample_rate, 44_100);
     }
 
     #[test]

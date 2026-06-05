@@ -2005,6 +2005,33 @@ fn controller_persists_timeline_viewport_state() {
 }
 
 #[test]
+fn controller_restore_timeline_view_clamps_scroll_and_clears_navigation_state() {
+    let root = test_dir("restore-viewport");
+    let audio_path = root.join("song.wav");
+    write_test_wav(&audio_path, 8_000, 1, 120_000);
+    let mut state = AppControllerState::default();
+    state.import_audio_state(audio_path.to_str().unwrap());
+    state.sync_playback_position_state(2.0);
+    state.begin_timeline_user_navigation_state();
+    state.project.ui_state.insert(
+        "timeline".to_string(),
+        serde_json::json!({
+            "pixels_per_second": 144.0,
+            "scroll_seconds": 999.0,
+            "follow_mode": 1
+        }),
+    );
+
+    state.restore_timeline_view_state();
+
+    assert_eq!(state.timeline_pixels_per_second, 144.0);
+    assert_eq!(state.timeline_visible_seconds, 8.0);
+    assert_eq!(state.timeline_scroll_seconds, 7.0);
+    assert!(!state.timeline_user_navigation_active);
+    assert_eq!(state.timeline_playhead_offscreen_direction, -1);
+}
+
+#[test]
 fn controller_snaps_single_marker_moves_to_visible_timing_markers() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
@@ -2175,9 +2202,8 @@ fn native_timeline_trackpad_scroll_uses_natural_horizontal_direction() {
     .unwrap();
 
     assert!(scene_cpp.contains("scrollDelta = -static_cast<double>(pixelDelta.x());"));
-    assert!(
-        scene_cpp.contains("scrollDelta = -static_cast<double>(angleDelta.x()) / 120.0 * 48.0;")
-    );
+    assert!(scene_cpp.contains("-static_cast<double>(angleDelta.x())"));
+    assert!(scene_cpp.contains("kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch"));
     assert!(scene_cpp.contains("scrollDelta = -static_cast<double>(pixelDelta.y());"));
 }
 
@@ -2623,6 +2649,10 @@ fn timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_re
     assert!(scene_cpp.contains("m_scrubbingRuler"));
     assert!(scene_cpp.contains("selectionStripe"));
     assert!(scene_cpp.contains("playhead"));
+    assert!(scene_cpp.contains("kWheelAngleToDeltaFactor"));
+    assert!(scene_cpp.contains("kZoomSensitivityBase"));
+    assert!(scene_cpp.contains("kWheelAngleUnitsPerNotch"));
+    assert!(scene_cpp.contains("kScrollPixelsPerNotch"));
     assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
     assert!(!update_paint_node.contains("parseSnapshot("));
 }
@@ -2673,6 +2703,16 @@ fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarde
             .join("../../UI/components/TimelineLane.qml"),
     )
     .unwrap();
+    let legacy_analysis_item_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineAnalysisItem.qml"),
+    )
+    .unwrap();
+    let navigation_surface_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../UI/components/TimelineNavigationSurface.qml"),
+    )
+    .unwrap();
     let track_row_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
     )
@@ -2691,9 +2731,40 @@ fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarde
     assert!(timeline_qml.contains("+ timelineRoot.timelineLeftPadding"));
     assert!(!timeline_qml
         .contains("+ timelineRoot.timelineLabelWidth + timelineRoot.timelineLeftPadding"));
+    assert!(
+        timeline_qml.contains("typeof timelineRoot.appController.set_timeline_visible_track_range")
+    );
     assert!(legacy_lane_qml.contains("allowScrub: true"));
     assert!(legacy_lane_qml.contains("onScrubRequested: function(x, laneWidth)"));
+    assert!(legacy_analysis_item_qml.contains("Canvas"));
+    assert!(legacy_analysis_item_qml.contains("JSON.parse(root.geometryJson)"));
+    assert!(legacy_analysis_item_qml.contains("context.fillRect"));
+    assert!(navigation_surface_qml.contains("property bool pinchActive"));
+    assert!(navigation_surface_qml.contains("property bool scrubActive"));
+    assert!(navigation_surface_qml.contains("function finishWheelNavigationQuietPeriod()"));
+    assert!(navigation_surface_qml.contains("wheelNavigationQuietTimer.stop()"));
     assert!(track_row_qml.contains("onScrubRequested: function(x, laneWidth)"));
+}
+
+#[test]
+fn timeline_geometry_item_empty_reason_has_dedicated_notify_signal() {
+    let scene_header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_renderer/scene_graph.h"),
+    )
+    .unwrap();
+    let scene_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_renderer/scene_graph.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_header
+        .contains("Q_PROPERTY(QString emptyReason READ emptyReason NOTIFY emptyReasonChanged)"));
+    assert!(scene_header.contains("void emptyReasonChanged();"));
+    assert!(scene_cpp.contains("emptyReasonForGeometryJson"));
+    assert!(scene_cpp.contains("emit emptyReasonChanged();"));
+    assert!(!scene_cpp.contains("m_emptyReason = error;"));
 }
 
 #[test]

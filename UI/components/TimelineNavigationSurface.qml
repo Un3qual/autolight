@@ -7,6 +7,8 @@ Item {
     property real contentLeftPadding: 0
     property bool allowScrub: false
     property real lastPinchScale: 1
+    property bool pinchActive: false
+    property bool scrubActive: false
     signal scrubRequested(real x, real laneWidth)
 
     function finiteNumber(value) {
@@ -44,6 +46,12 @@ Item {
     function extendWheelNavigationQuietPeriod() {
         root.beginNavigation()
         wheelNavigationQuietTimer.restart()
+    }
+
+    function finishWheelNavigationQuietPeriod() {
+        if (!root.pinchActive && !root.scrubActive) {
+            root.endNavigation()
+        }
     }
 
     function scrubAt(x) {
@@ -103,7 +111,7 @@ Item {
         id: wheelNavigationQuietTimer
         interval: 220
         repeat: false
-        onTriggered: root.endNavigation()
+        onTriggered: root.finishWheelNavigationQuietPeriod()
     }
 
     PinchHandler {
@@ -112,9 +120,12 @@ Item {
 
         onActiveChanged: {
             if (active) {
+                wheelNavigationQuietTimer.stop()
+                root.pinchActive = true
                 root.lastPinchScale = 1
                 root.beginNavigation()
             } else {
+                root.pinchActive = false
                 root.lastPinchScale = 1
                 root.endNavigation()
             }
@@ -139,6 +150,8 @@ Item {
         acceptedButtons: Qt.LeftButton
         hoverEnabled: false
         onPressed: function(mouse) {
+            wheelNavigationQuietTimer.stop()
+            root.scrubActive = true
             root.beginNavigation()
             root.scrubAt(mouse.x)
         }
@@ -147,8 +160,12 @@ Item {
         }
         onReleased: function(mouse) {
             root.scrubAt(mouse.x)
+            root.scrubActive = false
             root.endNavigation()
         }
-        onCanceled: root.endNavigation()
+        onCanceled: {
+            root.scrubActive = false
+            root.endNavigation()
+        }
     }
 }

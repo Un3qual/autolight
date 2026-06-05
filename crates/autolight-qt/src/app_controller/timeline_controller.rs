@@ -188,20 +188,32 @@ impl TimelineControllerState {
             TimelineZoomBounds::default_for_duration(TimelineSeconds::new(self.duration_seconds)),
         )
         .value();
-        self.scroll_seconds = ui_state
+        let restored_scroll_seconds = ui_state
             .get("timeline")
             .and_then(|timeline| timeline.get("scroll_seconds"))
             .and_then(Value::as_f64)
             .filter(|value| value.is_finite())
             .map(finite_non_negative)
             .unwrap_or(0.0);
-        self.visible_seconds = DEFAULT_VISIBLE_SECONDS;
+        if self.duration_seconds > 0.0 {
+            self.apply_viewport(TimelineViewport::new(
+                self.duration_seconds,
+                self.pixels_per_second,
+                restored_scroll_seconds,
+                DEFAULT_VISIBLE_SECONDS,
+            ));
+        } else {
+            self.scroll_seconds = restored_scroll_seconds;
+            self.visible_seconds = DEFAULT_VISIBLE_SECONDS;
+        }
         self.follow_mode = ui_state
             .get("timeline")
             .and_then(|timeline| timeline.get("follow_mode"))
             .and_then(Value::as_i64)
             .map(|value| TimelineFollowMode::from_i32(value as i32))
             .unwrap_or(TimelineFollowMode::Center);
+        self.user_navigation_active = false;
+        self.playhead_offscreen_direction = PlayheadOffscreenDirection::Visible;
     }
 
     fn capture_ui_state(&self, selected_track_id: &str) -> Value {
@@ -509,6 +521,8 @@ impl AppControllerState {
     pub(super) fn restore_timeline_view_state(&mut self) {
         self.timeline
             .restore_view(&Value::Object(self.project.ui_state.clone()));
+        self.timeline
+            .refresh_playhead_offscreen_direction(self.playback_position_seconds);
         self.sync_timeline_bridge_state();
     }
 
