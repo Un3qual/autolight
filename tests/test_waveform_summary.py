@@ -673,34 +673,36 @@ class WaveformSummaryTest(unittest.TestCase):
         qml = "\n".join(
             [
                 (ui_root / "components" / "TimelineLane.qml").read_text(encoding="utf-8"),
-                (ui_root / "components" / "WaveformStrip.qml").read_text(encoding="utf-8"),
+                (ui_root / "components" / "TrackRow.qml").read_text(encoding="utf-8"),
             ]
         )
         self.assertNotIn("waveformSamples", qml)
         self.assertIn("waveformDurationSeconds", qml)
-        self.assertIn("visibleWaveformSamples", qml)
-        self.assertIn("sample.peak", qml)
+        self.assertIn("waveformRef", qml)
+        self.assertIn("renderTimelineWaveform", qml)
+        self.assertIn("root.waveformRef.cacheRef", qml)
         self.assertIn("clip: true", qml)
         self.assertIn("root.timelineLeftPadding", qml)
-        self.assertIn("scrollSeconds: root.appController.timelineScrollSeconds", qml)
-        self.assertIn("pixelsPerSecond: root.appController.timelinePixelsPerSecond", qml)
+        self.assertIn("root.appController.timelineScrollSeconds", qml)
+        self.assertIn("root.appController.timelinePixelsPerSecond", qml)
         self.assertNotIn(
             "root.timelineX(index / Math.max(1, waveformSamples.length - 1) * appController.timelineDurationSeconds)",
             qml,
         )
         self.assertNotIn("model: waveformSamples", qml)
-        self.assertIn("visible: root.visibleWaveformSamples.length > 0", qml)
+        self.assertIn("visible: root.waveformRef !== null", qml)
 
-    def test_qml_waveform_uses_peak_and_rms_layers(self):
+    def test_qml_waveform_uses_retained_renderer(self):
         qml = (
-            Path(__file__).resolve().parents[1] / "UI" / "components" / "WaveformStrip.qml"
+            Path(__file__).resolve().parents[1] / "UI" / "components" / "TimelineLane.qml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Canvas", qml)
-        self.assertIn("sample.peak", qml)
-        self.assertIn("sample.rms", qml)
-        self.assertIn("ctx.strokeStyle = peakColor", qml)
-        self.assertIn("ctx.strokeStyle = rmsColor", qml)
+        self.assertIn("TimelineWaveformItem", qml)
+        self.assertIn("renderTimelineWaveform", qml)
+        self.assertIn("TimelineAnalysisItem", qml)
+        self.assertIn("renderTimelineAnalysis", qml)
+        self.assertNotIn("Canvas", qml)
+        self.assertNotIn("ctx.stroke", qml)
 
     def _track_row(self, controller, track_id: str) -> int:
         for index, track in enumerate(controller._project.tracks):

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-pub const MAX_WAVEFORM_LOD_BUCKETS: usize = 4_096;
+pub const MAX_WAVEFORM_LOD_BUCKETS: usize = 32_768;
 const MAX_VISIBLE_WAVEFORM_SAMPLES: usize = 16;
 
 #[derive(Debug, Error)]
@@ -75,9 +75,9 @@ pub fn build_waveform_payload_from_mono_samples(
     if frame_count > 0 {
         let base_bucket_count = buckets.min(frame_count);
         let level_bucket_counts = waveform_level_bucket_counts(base_bucket_count, frame_count);
-        let finest_bucket_count = *level_bucket_counts
-            .last()
-            .expect("level count is non-empty for non-empty audio");
+        let Some(&finest_bucket_count) = level_bucket_counts.last() else {
+            return Err(WaveformError::InvalidBucketCount);
+        };
         let finest_samples =
             summarize_mono_samples(mono_samples, finest_bucket_count, &mut cancel_requested)?;
         for bucket_count in level_bucket_counts {
@@ -108,13 +108,14 @@ pub fn build_waveform_payload_from_mono_samples(
 pub fn waveform_level_bucket_counts(base_bucket_count: usize, frame_count: usize) -> Vec<usize> {
     let maximum = MAX_WAVEFORM_LOD_BUCKETS.min(frame_count.max(1));
     let mut counts = vec![base_bucket_count.max(1).min(maximum)];
-    while *counts.last().unwrap() < maximum {
-        let current = *counts.last().unwrap();
+    let mut current = counts[0];
+    while current < maximum {
         let next_count = maximum.min(current * 4);
         if next_count == current {
             break;
         }
         counts.push(next_count);
+        current = next_count;
     }
     counts
 }
@@ -454,7 +455,7 @@ mod tests {
         assert_eq!(waveform_level_bucket_counts(2, 8), [2, 8]);
         assert_eq!(
             *waveform_level_bucket_counts(512, 100_000).last().unwrap(),
-            4_096
+            32_768
         );
     }
 

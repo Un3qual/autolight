@@ -193,14 +193,6 @@ fn embedded_qml_assets() -> &'static [EmbeddedQmlAsset] {
             contents: include_str!("../../../UI/qmldir"),
         },
         EmbeddedQmlAsset {
-            relative_path: "components/AnalysisStrip.qml",
-            contents: include_str!("../../../UI/components/AnalysisStrip.qml"),
-        },
-        EmbeddedQmlAsset {
-            relative_path: "components/MarkerBlock.qml",
-            contents: include_str!("../../../UI/components/MarkerBlock.qml"),
-        },
-        EmbeddedQmlAsset {
             relative_path: "components/MarkerInspector.qml",
             contents: include_str!("../../../UI/components/MarkerInspector.qml"),
         },
@@ -217,28 +209,12 @@ fn embedded_qml_assets() -> &'static [EmbeddedQmlAsset] {
             contents: include_str!("../../../UI/components/StatusFooter.qml"),
         },
         EmbeddedQmlAsset {
-            relative_path: "components/TimelineLane.qml",
-            contents: include_str!("../../../UI/components/TimelineLane.qml"),
-        },
-        EmbeddedQmlAsset {
-            relative_path: "components/TimelineRuler.qml",
-            contents: include_str!("../../../UI/components/TimelineRuler.qml"),
-        },
-        EmbeddedQmlAsset {
             relative_path: "components/TimelineView.qml",
             contents: include_str!("../../../UI/components/TimelineView.qml"),
         },
         EmbeddedQmlAsset {
-            relative_path: "components/TrackRow.qml",
-            contents: include_str!("../../../UI/components/TrackRow.qml"),
-        },
-        EmbeddedQmlAsset {
             relative_path: "components/TransformBar.qml",
             contents: include_str!("../../../UI/components/TransformBar.qml"),
-        },
-        EmbeddedQmlAsset {
-            relative_path: "components/WaveformStrip.qml",
-            contents: include_str!("../../../UI/components/WaveformStrip.qml"),
         },
     ]
 }
@@ -280,7 +256,14 @@ mod tests {
         assert!(asset_names.contains(&"Main.qml"));
         assert!(asset_names.contains(&"AppRuntime.qml"));
         assert!(asset_names.contains(&"components/TimelineView.qml"));
-        assert!(asset_names.contains(&"components/WaveformStrip.qml"));
+        assert!(!asset_names.contains(&"components/MarkerBlock.qml"));
+        assert!(!asset_names.contains(&"components/TimelineNavigationSurface.qml"));
+        assert!(!asset_names.contains(&"components/TimelineRuler.qml"));
+        assert!(!asset_names.contains(&"components/TimelineLane.qml"));
+        assert!(!asset_names.contains(&"components/TrackRow.qml"));
+        assert!(!asset_names.contains(&"components/LegacyTimelineView.qml"));
+        assert!(!asset_names.contains(&"components/WaveformStrip.qml"));
+        assert!(!asset_names.contains(&"components/AnalysisStrip.qml"));
     }
 
     #[test]

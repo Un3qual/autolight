@@ -13,7 +13,7 @@ use super::markers::round6;
 use super::runnable_transform_ids;
 
 const MAX_FIXED_INTERVAL_MARKERS: usize = 100_000;
-const DEFAULT_WAVEFORM_BUCKETS: usize = 512;
+const DEFAULT_WAVEFORM_BUCKETS: usize = 4_096;
 
 pub(super) fn job_registry() -> JobRegistry {
     let mut registry = JobRegistry::default();
@@ -149,5 +149,33 @@ fn waveform_error_to_run_error(error: WaveformError) -> TransformRunError {
     match error {
         WaveformError::Cancelled => TransformRunError::Cancelled,
         error => TransformRunError::Failed(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{waveform_bucket_param, DEFAULT_WAVEFORM_BUCKETS};
+    use autolight_analysis::waveform::MAX_WAVEFORM_LOD_BUCKETS;
+    use autolight_core::project::JsonObject;
+
+    #[test]
+    fn waveform_bucket_param_defaults_to_high_resolution_lod_base() {
+        let params = JsonObject::new();
+
+        assert_eq!(waveform_bucket_param(&params).unwrap(), 4_096);
+        assert_eq!(DEFAULT_WAVEFORM_BUCKETS, 4_096);
+    }
+
+    #[test]
+    fn waveform_bucket_param_clamps_to_high_resolution_lod_ceiling() {
+        let mut params = JsonObject::new();
+        params.insert("buckets".to_string(), json!(usize::MAX));
+
+        assert_eq!(
+            waveform_bucket_param(&params).unwrap(),
+            MAX_WAVEFORM_LOD_BUCKETS
+        );
     }
 }
