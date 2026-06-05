@@ -35,41 +35,28 @@ void addRectVertices(QSGGeometry::Point2D* vertices, int offset, const RectSpec&
   vertices[offset + 5].set(left, bottom);
 }
 
-int childCount(QSGNode* root)
+QSGNode* appendContainerNode(QSGNode* root)
 {
-  int count = 0;
-  for (QSGNode* child = root->firstChild(); child != nullptr; child = child->nextSibling()) {
-    ++count;
-  }
-  return count;
+  auto* node = new QSGNode();
+  root->appendChildNode(node);
+  return node;
 }
 
-QSGNode* childNodeAt(QSGNode* root, int targetIndex)
+QSGNode* ensureGeometryRoot(QSGNode* root)
 {
-  int index = 0;
-  for (QSGNode* child = root->firstChild(); child != nullptr; child = child->nextSibling()) {
-    if (index == targetIndex) {
-      return child;
-    }
-    ++index;
+  if (QSGNode* geometryRoot = root->firstChild()) {
+    return geometryRoot;
   }
-  return nullptr;
+  return appendContainerNode(root);
 }
 
-QSGNode* ensureContainerNode(QSGNode* root, int index)
+QSGNode* ensureTextRoot(QSGNode* root)
 {
-  if (QSGNode* existing = childNodeAt(root, index)) {
-    return existing;
+  QSGNode* geometryRoot = ensureGeometryRoot(root);
+  if (QSGNode* textRoot = geometryRoot->nextSibling()) {
+    return textRoot;
   }
-  while (childCount(root) <= index) {
-    root->appendChildNode(new QSGNode());
-  }
-  return childNodeAt(root, index);
-}
-
-QSGGeometryNode* geometryChildAt(QSGNode* root, int targetIndex)
-{
-  return static_cast<QSGGeometryNode*>(childNodeAt(root, targetIndex));
+  return appendContainerNode(root);
 }
 
 QSGGeometryNode* createBandNode()
@@ -85,20 +72,23 @@ QSGGeometryNode* createBandNode()
   return node;
 }
 
-QSGGeometryNode* ensureBandNode(QSGNode* root, int index)
+QSGGeometryNode* nextBandNode(QSGNode* root, QSGNode*& nextChild)
 {
-  if (auto* existing = geometryChildAt(root, index)) {
-    return existing;
+  if (nextChild != nullptr) {
+    auto* node = static_cast<QSGGeometryNode*>(nextChild);
+    nextChild = nextChild->nextSibling();
+    return node;
   }
   auto* node = createBandNode();
   root->appendChildNode(node);
   return node;
 }
 
-void trimChildNodes(QSGNode* root, int targetCount)
+void trimChildNodesFrom(QSGNode* root, QSGNode* firstObsolete)
 {
-  while (childCount(root) > targetCount) {
-    QSGNode* child = root->lastChild();
+  while (firstObsolete != nullptr) {
+    QSGNode* child = firstObsolete;
+    firstObsolete = firstObsolete->nextSibling();
     root->removeChildNode(child);
     delete child;
   }
@@ -139,15 +129,12 @@ public:
   QString key;
 };
 
-TextTextureNode* textChildAt(QSGNode* root, int targetIndex)
+TextTextureNode* nextTextNode(QSGNode* root, QSGNode*& nextChild)
 {
-  return static_cast<TextTextureNode*>(childNodeAt(root, targetIndex));
-}
-
-TextTextureNode* ensureTextNode(QSGNode* root, int index)
-{
-  if (auto* existing = textChildAt(root, index)) {
-    return existing;
+  if (nextChild != nullptr) {
+    auto* node = static_cast<TextTextureNode*>(nextChild);
+    nextChild = nextChild->nextSibling();
+    return node;
   }
   auto* node = new TextTextureNode();
   node->setOwnsTexture(true);
@@ -188,7 +175,11 @@ bool updateTextNode(TextTextureNode* node, const TextSpec& spec, QQuickWindow* w
   painter.drawText(QRectF(0.0, 0.0, spec.rect.width(), spec.rect.height()), Qt::AlignLeft | Qt::AlignVCenter, elided);
   painter.end();
 
-  node->setTexture(window->createTextureFromImage(image));
+  auto* texture = window->createTextureFromImage(image);
+  if (texture == nullptr) {
+    return false;
+  }
+  node->setTexture(texture);
   node->setOwnsTexture(true);
   node->key = key;
   node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
@@ -202,15 +193,16 @@ void updateTextNodes(
   SceneGraphUpdateStats& stats)
 {
   if (window == nullptr) {
-    trimChildNodes(root, 0);
+    trimChildNodesFrom(root, root->firstChild());
     return;
   }
+  QSGNode* nextTextChild = root->firstChild();
   for (int index = 0; index < texts.size(); ++index) {
-    if (updateTextNode(ensureTextNode(root, index), texts[index], window)) {
+    if (updateTextNode(nextTextNode(root, nextTextChild), texts[index], window)) {
       ++stats.textTexturesCreated;
     }
   }
-  trimChildNodes(root, texts.size());
+  trimChildNodesFrom(root, nextTextChild);
 }
 
 } // namespace
@@ -221,18 +213,19 @@ QSGNode* updateTimelineSceneGraph(
   QQuickWindow* window,
   SceneGraphUpdateStats* stats)
 {
-  QSGNode* geometryRoot = ensureContainerNode(root, 0);
-  QSGNode* textRoot = ensureContainerNode(root, 1);
+  QSGNode* geometryRoot = ensureGeometryRoot(root);
+  QSGNode* textRoot = ensureTextRoot(root);
 
+  QSGNode* nextBandChild = geometryRoot->firstChild();
   for (int index = 0; index < frame.bands.size(); ++index) {
-    updateBandNode(ensureBandNode(geometryRoot, index), frame.bands[index]);
+    updateBandNode(nextBandNode(geometryRoot, nextBandChild), frame.bands[index]);
   }
-  trimChildNodes(geometryRoot, frame.bands.size());
+  trimChildNodesFrom(geometryRoot, nextBandChild);
 
   SceneGraphUpdateStats localStats;
   SceneGraphUpdateStats& effectiveStats = stats != nullptr ? *stats : localStats;
   updateTextNodes(textRoot, frame.texts, window, effectiveStats);
-  trimChildNodes(root, 2);
+  trimChildNodesFrom(root, textRoot->nextSibling());
   return root;
 }
 

@@ -2198,6 +2198,53 @@ fn native_timeline_disclosure_chrome_uses_resolved_selection() {
 }
 
 #[test]
+fn native_timeline_scene_graph_reconciles_nodes_linearly_and_retries_failed_textures() {
+    let scene_graph_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/scene_graph_nodes.cpp"),
+    )
+    .unwrap();
+
+    assert!(scene_graph_cpp.contains("QSGGeometryNode* nextBandNode"));
+    assert!(scene_graph_cpp.contains("TextTextureNode* nextTextNode"));
+    assert!(scene_graph_cpp.contains("QSGNode* nextBandChild = geometryRoot->firstChild();"));
+    assert!(scene_graph_cpp.contains("QSGNode* nextTextChild = root->firstChild();"));
+    assert!(scene_graph_cpp.contains("trimChildNodesFrom(geometryRoot, nextBandChild);"));
+    assert!(scene_graph_cpp.contains("trimChildNodesFrom(root, nextTextChild);"));
+    assert!(!scene_graph_cpp.contains("childNodeAt"));
+    assert!(!scene_graph_cpp.contains("ensureBandNode(geometryRoot, index)"));
+    assert!(!scene_graph_cpp.contains("ensureTextNode(root, index)"));
+    assert!(scene_graph_cpp.contains("auto* texture = window->createTextureFromImage(image);"));
+    assert!(scene_graph_cpp.contains("if (texture == nullptr)"));
+    assert!(
+        scene_graph_cpp.find("if (texture == nullptr)").unwrap()
+            < scene_graph_cpp.find("node->key = key;").unwrap()
+    );
+}
+
+#[test]
+fn native_timeline_parser_skips_invalid_track_entries() {
+    let snapshot_parser_cpp = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/timeline_scene/scene_snapshot_parser.cpp"),
+    )
+    .unwrap();
+
+    assert!(snapshot_parser_cpp.contains("if (!trackValue.isObject())"));
+    assert!(snapshot_parser_cpp.contains(
+        "const QString trackId = trackObject.value(QStringLiteral(\"trackId\")).toString().trimmed();"
+    ));
+    assert!(snapshot_parser_cpp.contains("if (trackId.isEmpty())"));
+    assert!(snapshot_parser_cpp.contains("track.trackId = trackId;"));
+    assert!(
+        snapshot_parser_cpp.find("if (trackId.isEmpty())").unwrap()
+            < snapshot_parser_cpp
+                .find("snapshot.tracks.push_back(track);")
+                .unwrap()
+    );
+}
+
+#[test]
 fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

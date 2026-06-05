@@ -360,7 +360,7 @@ git commit -m "Split native timeline scene item internals"
 - [x] **Step 1: Add tests for budgeted LOD counts**
 
 Actual implementation note: budget enforcement stayed in `autolight-analysis` after frame count is
-known. `waveform_bucket_param` tests only preserve default/clamp behavior; `maxBytes` is parsed by a
+known. `waveform_bucket_param` tests only preserve default/clamp behavior; `max_bytes` is parsed by a
 separate helper.
 
 In `crates/autolight-analysis/src/waveform.rs` tests, add:
@@ -383,7 +383,7 @@ In `crates/autolight-qt/src/app_controller/jobs.rs` tests, add:
 fn waveform_bucket_param_clamps_to_memory_budget_and_max_lod() {
     let params = serde_json::json!({
         "buckets": MAX_WAVEFORM_LOD_BUCKETS * 2,
-        "maxBytes": 1024 * 1024
+        "max_bytes": 1024 * 1024
     });
 
     let buckets = waveform_bucket_param(&params).unwrap();

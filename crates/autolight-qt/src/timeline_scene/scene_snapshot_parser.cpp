@@ -55,9 +55,16 @@ SceneSnapshot parseTimelineSceneSnapshot(const QString& sceneSnapshotJson)
   const QJsonArray tracks = root.value(QStringLiteral("tracks")).toArray();
   snapshot.tracks.reserve(tracks.size());
   for (const QJsonValue& trackValue : tracks) {
+    if (!trackValue.isObject()) {
+      continue;
+    }
     const QJsonObject trackObject = trackValue.toObject();
+    const QString trackId = trackObject.value(QStringLiteral("trackId")).toString().trimmed();
+    if (trackId.isEmpty()) {
+      continue;
+    }
     TrackSpec track;
-    track.trackId = trackObject.value(QStringLiteral("trackId")).toString();
+    track.trackId = trackId;
     track.name = trackObject.value(QStringLiteral("name")).toString(track.trackId);
     track.trackType = trackObject.value(QStringLiteral("trackType")).toString();
     track.resultState = trackObject.value(QStringLiteral("resultState")).toString();

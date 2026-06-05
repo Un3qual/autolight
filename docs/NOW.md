@@ -57,8 +57,8 @@ live in `scene_frame_builder.{h,cpp}`, QSG node/text texture maintenance lives i
 `autolight-analysis` after the WAV frame count is known. The budgeted count helper clamps the
 requested base when needed, keeps nonzero LOD counts for nonempty inputs, and estimates loaded
 `WaveformSample` storage for both `levels` and the legacy duplicate `payload.samples`. The
-`waveform.summary` job now parses optional positive integer `maxBytes` separately from `buckets` and
-passes it to the new builder while preserving default bucket behavior when `maxBytes` is absent.
+`waveform.summary` job now parses optional positive integer `max_bytes` separately from `buckets`
+and passes it to the new builder while preserving default bucket behavior when `max_bytes` is absent.
 
 **Task 4 Verification:** New budget tests first failed on missing
 `waveform_level_bucket_counts_for_budget`, the max-bytes builder, and `waveform_max_bytes_param`.
@@ -69,9 +69,9 @@ Focused checks then passed:
 and `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_bucket_param`.
 
 **Task 4 Quality Follow-Up:** Completed 2026-06-05. Documented and tested the explicit
-best-effort floor for tiny positive `maxBytes` budgets: nonempty payloads still produce one
+best-effort floor for tiny positive `max_bytes` budgets: nonempty payloads still produce one
 bucket/level, which means two loaded `WaveformSample` slots once the legacy `payload.samples`
-duplicate is counted. Added a queue-backed `waveform.summary` runner regression proving `maxBytes`
+duplicate is counted. Added a queue-backed `waveform.summary` runner regression proving `max_bytes`
 params produce a budgeted waveform artifact through the real job path.
 
 **Task 5:** Completed 2026-06-05. Fenced the reference-only Python timeline geometry path with
@@ -123,6 +123,11 @@ DeepSource Rust and Python checks passed on the pushed head. CodeAnt then surfac
 scene consistency issue: disclosure chrome read raw `track.selected` while label/lane chrome used
 the resolved `selectedTrackIndex` state. `appendTrackTreeChrome` now receives the resolved selected
 row state, and `native_timeline_disclosure_chrome_uses_resolved_selection` locks that contract.
+The follow-up bot refresh also found valid native scene hardening items: scene graph node
+reconciliation is now sibling-cursor based rather than indexed linear lookup, text texture cache keys
+only update after non-null texture creation, malformed/idless track entries are skipped at the native
+scene parser boundary, and `max_bytes` is the canonical waveform budget parameter with `maxBytes`
+accepted only as a compatibility alias.
 Diffray's remaining suggestions were analyzed as already covered by the hardening batch or manual
 gates: frame-builder benchmarking remains a future perf harness item, queued counter notification is
 covered by the atomic/queued update shape and local tests, waveform budget edge cases are covered,
@@ -133,7 +138,10 @@ and the scene layout constants are still intentionally local renderer constants.
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_cpp_is_split_into_focused_units`;
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-analysis -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_disclosure_chrome_uses_resolved_selection`;
-`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 165 tests;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_graph_reconciles_nodes_linearly_and_retries_failed_textures`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_parser_skips_invalid_track_entries`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_max_bytes_param`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 168 tests;
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
 `cargo fmt --all -- --check`; and `git diff --check`.
 

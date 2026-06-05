@@ -149,19 +149,19 @@ fn waveform_bucket_param(params: &JsonObject) -> Result<usize, TransformRunError
 }
 
 fn waveform_max_bytes_param(params: &JsonObject) -> Result<Option<usize>, TransformRunError> {
-    let Some(value) = params.get("maxBytes") else {
+    let Some(value) = params.get("max_bytes").or_else(|| params.get("maxBytes")) else {
         return Ok(None);
     };
     let Some(raw) = value.as_u64() else {
         return Err(TransformRunError::Failed(
-            "maxBytes must be a positive integer".to_string(),
+            "max_bytes must be a positive integer".to_string(),
         ));
     };
     let max_bytes = usize::try_from(raw)
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| {
-            TransformRunError::Failed("maxBytes must be a positive integer".to_string())
+            TransformRunError::Failed("max_bytes must be a positive integer".to_string())
         })?;
     Ok(Some(max_bytes))
 }
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn waveform_bucket_param_keeps_default_when_only_max_bytes_is_present() {
         let mut params = JsonObject::new();
-        params.insert("maxBytes".to_string(), json!(1_024));
+        params.insert("max_bytes".to_string(), json!(1_024));
 
         assert_eq!(
             waveform_bucket_param(&params).unwrap(),
@@ -223,7 +223,7 @@ mod tests {
     fn waveform_bucket_param_keeps_lod_clamp_separate_from_memory_budget() {
         let mut params = JsonObject::new();
         params.insert("buckets".to_string(), json!(MAX_WAVEFORM_LOD_BUCKETS * 2));
-        params.insert("maxBytes".to_string(), json!(1_024));
+        params.insert("max_bytes".to_string(), json!(1_024));
 
         assert_eq!(
             waveform_bucket_param(&params).unwrap(),
@@ -241,6 +241,14 @@ mod tests {
     #[test]
     fn waveform_max_bytes_param_accepts_positive_unsigned_integer() {
         let mut params = JsonObject::new();
+        params.insert("max_bytes".to_string(), json!(1_048_576));
+
+        assert_eq!(waveform_max_bytes_param(&params).unwrap(), Some(1_048_576));
+    }
+
+    #[test]
+    fn waveform_max_bytes_param_accepts_legacy_camel_case_alias() {
+        let mut params = JsonObject::new();
         params.insert("maxBytes".to_string(), json!(1_048_576));
 
         assert_eq!(waveform_max_bytes_param(&params).unwrap(), Some(1_048_576));
@@ -256,7 +264,7 @@ mod tests {
             serde_json::from_str("18446744073709551616").unwrap(),
         ] {
             let mut params = JsonObject::new();
-            params.insert("maxBytes".to_string(), value);
+            params.insert("max_bytes".to_string(), value);
 
             assert!(waveform_max_bytes_param(&params).is_err());
         }
@@ -342,7 +350,7 @@ mod tests {
                 transform_params: object(json!({
                     "audio_path": audio_path.to_string_lossy(),
                     "buckets": buckets,
-                    "maxBytes": max_bytes,
+                    "max_bytes": max_bytes,
                 })),
                 transform_version: "1".to_string(),
                 output_schema: "artifact.waveform.v1".to_string(),
