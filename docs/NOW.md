@@ -156,6 +156,23 @@ pass recorded in `docs/manual-testing/native-timeline-risk-hardening.md`.
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`;
 and `git diff --check`.
 
+**Waveform Clip Follow-Up:** Completed 2026-06-05. Fixed the native scene bug where horizontally
+scrolled waveform, analysis, marker, ruler, and playhead geometry could be clipped against the full
+item bounds and draw over the track-information column. Moving timeline primitives now use a
+lane-aware clip helper that clamps their left edge to `timelineLaneOriginX()`, while static label
+chrome continues to render in the label column. The regression
+`native_timeline_scene_clips_scrolled_content_to_lane_origin` locks the contract.
+
+**Waveform Clip Follow-Up Verification:** Passed:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_clips_scrolled_content_to_lane_origin`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked` with 171 tests;
+`cargo fmt --all -- --check`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy -p autolight-qt --all-targets --all-features --locked -- -D warnings`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke`;
+and `git diff --check`.
+
 **PR #15 Bot Follow-Up Verification:** Passed:
 `cargo test -p autolight-analysis --locked waveform_level_counts_`;
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_cpp_is_split_into_focused_units`;

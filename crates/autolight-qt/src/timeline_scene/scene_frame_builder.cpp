@@ -77,6 +77,35 @@ void appendClippedRect(
     });
 }
 
+void appendLaneClippedRect(
+  QVector<BandSpec>& bands,
+  const QColor& color,
+  double x,
+  double y,
+  double width,
+  double height,
+  double boundsWidth,
+  double boundsHeight)
+{
+  const double laneLeft = timelineLaneOriginX();
+  const double left = std::max(laneLeft, x);
+  const double top = std::max(0.0, y);
+  const double right = std::min(boundsWidth, x + width);
+  const double bottom = std::min(boundsHeight, y + height);
+  if (right <= left || bottom <= top) {
+    return;
+  }
+  appendRect(
+    bands,
+    color,
+    RectSpec{
+      static_cast<float>(left),
+      static_cast<float>(top),
+      static_cast<float>(right - left),
+      static_cast<float>(bottom - top),
+    });
+}
+
 void appendText(
   QVector<TextSpec>& texts,
   const QString& text,
@@ -358,7 +387,7 @@ void appendTimelineGridLines(
     const double ratio = tickSeconds / majorStepSeconds;
     const bool major = sameDouble(ratio, std::round(ratio));
     const double x = originX + timelineSecondsToX(tickSeconds, scrollSeconds, pixelsPerSecond);
-    appendClippedRect(
+    appendLaneClippedRect(
       bands,
       major ? majorGrid : minorGrid,
       x,
@@ -395,7 +424,7 @@ void appendRulerTicks(
     const double tickHeight = major ? 18.0 : 9.0;
     const double tickWidth = major ? 1.5 : 1.0;
     const double x = originX + timelineSecondsToX(tickSeconds, scrollSeconds, pixelsPerSecond);
-    appendClippedRect(
+    appendLaneClippedRect(
       bands,
       major ? majorTick : minorTick,
       x,
@@ -437,7 +466,7 @@ void appendAnalysisPreview(
     const double sampleWidth = std::max(1.0, nextX - sampleX);
     const double sampleHeight = energy ? std::max(1.0, sample.intensity * stripHeight) : stripHeight;
     const QColor sampleColor = energy ? QColor(QStringLiteral("#facc15")) : sample.color;
-    appendClippedRect(
+    appendLaneClippedRect(
       bands,
       withAlpha(sampleColor, energy ? 170 : 150),
       originX + sampleX,
@@ -605,7 +634,7 @@ SceneFrameSpec buildTimelineSceneFrame(
       const double sampleWidth = std::max(1.0, nextX - sampleX);
       const double peakHeight = std::max(1.0, sample.peak * waveformScaleY);
       const double rmsHeight = std::max(1.0, sample.rms * waveformScaleY);
-      appendClippedRect(
+      appendLaneClippedRect(
         bands,
         QColor(QStringLiteral("#1d4ed8")),
         originX + sampleX,
@@ -614,7 +643,7 @@ SceneFrameSpec buildTimelineSceneFrame(
         peakHeight * 2.0,
         width,
         height);
-      appendClippedRect(
+      appendLaneClippedRect(
         bands,
         QColor(QStringLiteral("#60a5fa")),
         originX + sampleX,
@@ -640,7 +669,7 @@ SceneFrameSpec buildTimelineSceneFrame(
       const QRectF markerRect = timelineMarkerRectForTrack(marker, y, rowHeight, scrollSeconds, pixelsPerSecond);
       QColor markerFill = marker.color;
       markerFill.setAlpha(marker.selected ? 230 : 155);
-      appendClippedRect(
+      appendLaneClippedRect(
         bands,
         markerFill,
         markerRect.x(),
@@ -649,7 +678,7 @@ SceneFrameSpec buildTimelineSceneFrame(
         markerRect.height(),
         width,
         height);
-      appendClippedRect(
+      appendLaneClippedRect(
         bands,
         withAlpha(marker.color, marker.selected ? 230 : 140),
         markerRect.x(),
@@ -663,8 +692,8 @@ SceneFrameSpec buildTimelineSceneFrame(
 
   const double playheadX = originX
     + timelineSecondsToX(playbackPositionSeconds, scrollSeconds, pixelsPerSecond);
-  appendClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0, 0.0, 2.0, height, width, height);
-  appendClippedRect(bands, withAlpha(playhead, 245), playheadX - 5.0, 0.0, 10.0, 5.0, width, height);
+  appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0, 0.0, 2.0, height, width, height);
+  appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 5.0, 0.0, 10.0, 5.0, width, height);
 
   return frame;
 }

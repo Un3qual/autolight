@@ -3071,6 +3071,27 @@ fn timeline_scene_item_draws_track_labels_and_offsets_timeline_content() {
 }
 
 #[test]
+fn native_timeline_scene_clips_scrolled_content_to_lane_origin() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("void appendLaneClippedRect("));
+    assert!(scene_sources.contains("const double laneLeft = timelineLaneOriginX();"));
+    assert!(scene_sources.contains("const double left = std::max(laneLeft, x);"));
+    assert!(scene_sources.contains(
+        "appendLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#1d4ed8\"))"
+    ));
+    assert!(scene_sources.contains(
+        "appendLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#60a5fa\"))"
+    ));
+    assert!(
+        scene_sources.contains("appendLaneClippedRect(\n      bands,\n      withAlpha(sampleColor")
+    );
+    assert!(scene_sources.contains("appendLaneClippedRect(\n        bands,\n        markerFill"));
+    assert!(scene_sources
+        .contains("appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0"));
+}
+
+#[test]
 fn timeline_scene_item_draws_track_tree_indentation_and_disclosure() {
     let timeline_view_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
