@@ -46,6 +46,6 @@ git diff --check
 
 ## Handoff
 
-PR #14 follow-through is complete for the latest fetched bot feedback. The branch should be pushed and the three new Codex bot threads should be replied to/resolved after this docs update is committed.
+PR #14 follow-through is complete for the latest fetched bot feedback. The branch was pushed, all three new Codex bot threads were replied to and resolved, and the post-reply thread refresh reported zero unresolved review threads.
 
-Next: after push and thread replies, refresh PR #14 thread state and bot/check status again. Current external status before this pass: diffray failed with an infrastructure-style review failure and no annotations; DeepSource Rust/Python passed and CodeRabbit skipped review.
+Next: monitor PR #14 for any new bot feedback on the latest head. Current external status caveat: diffray failed with an infrastructure-style "Review task failed. Please try again" message and no annotations; DeepSource Rust/Python passed, CodeRabbit skipped review, and cubic is neutral due the plan review limit.
