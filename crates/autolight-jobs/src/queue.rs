@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolight_core::cache::{
     cache_entry_for_bytes, invalid_cache_refs, mark_invalid_cache_refs_stale,
-    track_dependency_hash, track_dependency_inputs, upsert_cache_entry, CacheError,
+    restore_valid_cache_ref_tracks, track_dependency_hash, track_dependency_inputs,
+    upsert_cache_entry, CacheError,
 };
 use autolight_core::graph::{find_track, mark_dependents_stale};
 use autolight_core::project::{
@@ -474,6 +475,7 @@ impl LocalJobQueue {
             }
         }
         mark_invalid_cache_refs_stale(project, &invalid);
+        restore_valid_cache_ref_tracks(project);
         invalid
     }
 
@@ -1395,7 +1397,20 @@ mod tests {
         let mut entry = cache_entry("cache_recovered", "stem");
         entry.validation_status = CacheValidationStatus::Invalid;
         project.cache_entries.push(entry);
+        project
+            .tracks
+            .push(generated_child("track_downstream", "track_generated"));
         let mut queue = LocalJobQueue::new(registry_with_noop("test.noop"));
+
+        assert_eq!(
+            queue.refresh_cache_validity(&mut project, |_| false),
+            ["cache_recovered"]
+        );
+        assert_eq!(track_state(&project, "track_generated"), ResultState::Stale);
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Stale
+        );
 
         let invalid = queue.refresh_cache_validity(&mut project, |_| true);
 
@@ -1404,6 +1419,16 @@ mod tests {
             project.cache_entries[0].validation_status,
             CacheValidationStatus::Valid
         );
+        assert_eq!(
+            track_state(&project, "track_generated"),
+            ResultState::Complete
+        );
+        assert_eq!(
+            track_state(&project, "track_downstream"),
+            ResultState::Complete
+        );
+        assert!(track_by_id(&project, "track_generated").error.is_empty());
+        assert!(track_by_id(&project, "track_downstream").error.is_empty());
     }
 
     #[test]

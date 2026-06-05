@@ -12,7 +12,13 @@ pub(super) type SharedJobProgress = Arc<Mutex<BTreeMap<String, f64>>>;
 
 pub(super) struct JobWorker {
     job_id: String,
-    handle: JoinHandle<JobWorkerResult>,
+    handle: JobWorkerHandle,
+}
+
+enum JobWorkerHandle {
+    Thread(JoinHandle<JobWorkerResult>),
+    #[cfg(test)]
+    Ready(Box<JobWorkerResult>),
 }
 
 impl JobWorker {
@@ -21,13 +27,21 @@ impl JobWorker {
     }
 
     pub(super) fn is_finished(&self) -> bool {
-        self.handle.is_finished()
+        match &self.handle {
+            JobWorkerHandle::Thread(handle) => handle.is_finished(),
+            #[cfg(test)]
+            JobWorkerHandle::Ready(_) => true,
+        }
     }
 
     pub(super) fn join(self) -> Result<JobWorkerResult, String> {
-        self.handle
-            .join()
-            .map_err(|_| format!("job worker panicked: {}", self.job_id))
+        match self.handle {
+            JobWorkerHandle::Thread(handle) => handle
+                .join()
+                .map_err(|_| format!("job worker panicked: {}", self.job_id)),
+            #[cfg(test)]
+            JobWorkerHandle::Ready(result) => Ok(*result),
+        }
     }
 }
 
@@ -47,36 +61,78 @@ pub(super) fn new_shared_job_progress() -> SharedJobProgress {
 }
 
 pub(super) fn spawn_job_worker(
-    mut project: ProjectDocument,
+    project: ProjectDocument,
     job_id: String,
     artifact_dir: Option<PathBuf>,
     token: TransformCancellationToken,
     progress: SharedJobProgress,
 ) -> JobWorker {
     let worker_job_id = job_id.clone();
-    let handle = thread::spawn(move || {
-        let progress_reporter = progress_reporter(Arc::clone(&progress));
-        let mut queue = LocalJobQueue::new(job_registry());
-        let run_result = queue.run_detached_job_with_artifact_dir(
-            &mut project,
-            &job_id,
-            artifact_dir.as_deref(),
-            token,
-            Some(progress_reporter),
-        );
-        let error = run_result.err().map(|error| error.to_string());
-        match result_from_project(&project, &job_id, artifact_dir.clone(), error.clone()) {
-            Some(result) => result,
-            None => fallback_failed_worker_result(
-                job_id,
-                artifact_dir,
-                error.unwrap_or_else(|| "job disappeared while running".to_string()),
-            ),
-        }
-    });
+    let handle =
+        thread::spawn(move || run_job_worker(project, job_id, artifact_dir, token, progress));
     JobWorker {
         job_id: worker_job_id,
-        handle,
+        handle: JobWorkerHandle::Thread(handle),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn ready_job_worker_for_run(
+    project: ProjectDocument,
+    job_id: String,
+    artifact_dir: Option<PathBuf>,
+    token: TransformCancellationToken,
+    progress: SharedJobProgress,
+) -> JobWorker {
+    let worker_job_id = job_id.clone();
+    let result = run_job_worker(project, job_id, artifact_dir, token, progress);
+    JobWorker {
+        job_id: worker_job_id,
+        handle: JobWorkerHandle::Ready(Box::new(result)),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn ready_failed_job_worker(
+    job_id: String,
+    artifact_dir: Option<PathBuf>,
+    error: impl Into<String>,
+) -> JobWorker {
+    let worker_job_id = job_id.clone();
+    JobWorker {
+        job_id: worker_job_id,
+        handle: JobWorkerHandle::Ready(Box::new(fallback_failed_worker_result(
+            job_id,
+            artifact_dir,
+            error,
+        ))),
+    }
+}
+
+fn run_job_worker(
+    mut project: ProjectDocument,
+    job_id: String,
+    artifact_dir: Option<PathBuf>,
+    token: TransformCancellationToken,
+    progress: SharedJobProgress,
+) -> JobWorkerResult {
+    let progress_reporter = progress_reporter(Arc::clone(&progress));
+    let mut queue = LocalJobQueue::new(job_registry());
+    let run_result = queue.run_detached_job_with_artifact_dir(
+        &mut project,
+        &job_id,
+        artifact_dir.as_deref(),
+        token,
+        Some(progress_reporter),
+    );
+    let error = run_result.err().map(|error| error.to_string());
+    match result_from_project(&project, &job_id, artifact_dir.clone(), error.clone()) {
+        Some(result) => result,
+        None => fallback_failed_worker_result(
+            job_id,
+            artifact_dir,
+            error.unwrap_or_else(|| "job disappeared while running".to_string()),
+        ),
     }
 }
 

@@ -21,7 +21,7 @@ use autolight_core::project::{
     ResultState, Track, TrackType,
 };
 use autolight_core::transforms::TransformRegistry;
-use autolight_jobs::queue::LocalJobQueue;
+use autolight_jobs::queue::{LocalJobQueue, TransformCancellationToken};
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use serde_json::{json, Value};
@@ -70,6 +70,17 @@ const SMOKE_PROJECT_NAME: &str = "Autolight Rust Smoke";
 const SNAP_THRESHOLD_PIXELS: f64 = 10.0;
 static NEXT_DEMO_TEMP_DIR: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(test)]
+type JobWorkerFactory = Box<
+    dyn FnMut(
+        ProjectDocument,
+        String,
+        Option<PathBuf>,
+        TransformCancellationToken,
+        SharedJobProgress,
+    ) -> JobWorker,
+>;
+
 pub struct AppControllerState {
     project_name: QString,
     project_path: QString,
@@ -113,6 +124,8 @@ pub struct AppControllerState {
     job_queue: LocalJobQueue,
     job_workers: Vec<JobWorker>,
     job_progress: SharedJobProgress,
+    #[cfg(test)]
+    job_worker_factory: Option<JobWorkerFactory>,
     next_track_number: u64,
     next_asset_number: u64,
     selected_marker_ids: Vec<String>,
@@ -177,6 +190,8 @@ impl Default for AppControllerState {
             job_queue: LocalJobQueue::new(job_registry()),
             job_workers: Vec::default(),
             job_progress: new_shared_job_progress(),
+            #[cfg(test)]
+            job_worker_factory: None,
             next_track_number: 1,
             next_asset_number: 1,
             selected_marker_ids: Vec::default(),
@@ -606,19 +621,27 @@ impl AppControllerState {
                 return String::default();
             }
         };
-        let artifact_dir = self.current_artifact_dir();
-        let worker = spawn_job_worker(
-            self.project.clone(),
-            job_id.clone(),
-            artifact_dir,
-            token,
-            self.job_progress.clone(),
-        );
+        let worker = self.spawn_job_worker_state(job_id.clone(), token);
         self.job_workers.push(worker);
         self.mark_project_mutation_dirty();
         self.last_error = QString::default();
         self.refresh_view_state();
         job_id
+    }
+
+    fn spawn_job_worker_state(
+        &mut self,
+        job_id: String,
+        token: TransformCancellationToken,
+    ) -> JobWorker {
+        let project = self.project.clone();
+        let artifact_dir = self.current_artifact_dir();
+        let progress = self.job_progress.clone();
+        #[cfg(test)]
+        if let Some(factory) = self.job_worker_factory.as_mut() {
+            return factory(project, job_id, artifact_dir, token, progress);
+        }
+        spawn_job_worker(project, job_id, artifact_dir, token, progress)
     }
 
     fn poll_job_workers_state(&mut self) -> i32 {
@@ -1133,12 +1156,15 @@ impl AppControllerState {
     }
 
     fn refresh_cache_status_state(&mut self) -> Vec<String> {
+        let project_before_refresh = self.project.clone();
         let invalid_refs = self.validate_cache_artifact_state();
+        if self.project != project_before_refresh {
+            self.mark_project_mutation_dirty();
+        }
         if invalid_refs.is_empty() {
             self.last_error = QString::default();
         } else {
             self.set_error(format!("invalid cache artifacts: {}", invalid_refs.len()));
-            self.mark_project_mutation_dirty();
         }
         self.refresh_view_state();
         invalid_refs
@@ -1480,6 +1506,9 @@ impl AppControllerState {
             track.track_type == TrackType::Generated
                 && track.result_state != ResultState::Running
                 && latest_active_job_id(&self.project, &selected_track_id).is_none()
+                && self
+                    .job_queue
+                    .has_runner(&track.transform_id, &track.transform_version)
                 && track_inputs_are_complete(&self.project, track)
         });
         self.selected_track_has_running_job =
@@ -1487,8 +1516,8 @@ impl AppControllerState {
         self.selected_track_is_editable =
             selected_track.is_some_and(|track| track.track_type == TrackType::Editable);
         self.selected_track_can_play = self
-            .source_audio_asset_for_track_id(&selected_track_id)
-            .is_some_and(|asset| asset.import_status == ImportStatus::Online);
+            .playback_source_for_track_id(&selected_track_id)
+            .is_ok();
         self.selected_marker_ids_json = QString::from(&json_string(&self.selected_marker_ids));
         self.selected_track_markers_json =
             QString::from(&json_string(&self.selected_track_marker_payloads()));

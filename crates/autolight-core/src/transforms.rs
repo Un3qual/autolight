@@ -266,14 +266,22 @@ pub fn parent_has_audio_context(project: &ProjectDocument, parent_track_id: &str
     };
     match track.track_type {
         TrackType::Source => source_track_has_online_asset(project, parent_track_id),
-        TrackType::Generated => track_has_valid_audio_artifact(project, track),
+        TrackType::Generated => {
+            track_has_valid_audio_artifact(project, track)
+                || (track.output_schema == "markers.v1"
+                    && track.result_state == ResultState::Complete
+                    && source_audio_context_is_online(project, parent_track_id))
+        }
         TrackType::Editable => {
             track_has_valid_audio_artifact(project, track)
-                || source_track_id_for_context(project, parent_track_id).is_some_and(
-                    |source_track_id| source_track_has_online_asset(project, &source_track_id),
-                )
+                || source_audio_context_is_online(project, parent_track_id)
         }
     }
+}
+
+fn source_audio_context_is_online(project: &ProjectDocument, parent_track_id: &str) -> bool {
+    source_track_id_for_context(project, parent_track_id)
+        .is_some_and(|source_track_id| source_track_has_online_asset(project, &source_track_id))
 }
 
 fn source_track_has_online_asset(project: &ProjectDocument, source_track_id: &str) -> bool {
@@ -448,7 +456,7 @@ mod tests {
 
         assert!(parent_has_audio_context(&project, "track_source"));
         assert!(parent_has_audio_context(&project, "track_stem"));
-        assert!(!parent_has_audio_context(&project, "track_markers"));
+        assert!(parent_has_audio_context(&project, "track_markers"));
 
         project.audio_assets[0].import_status = ImportStatus::Offline;
         assert!(!parent_has_audio_context(&project, "track_markers"));

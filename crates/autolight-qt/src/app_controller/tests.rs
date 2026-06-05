@@ -1,6 +1,8 @@
+use std::sync::mpsc;
+
 use serde_json::Value;
 
-use super::job_worker::JobWorkerResult;
+use super::job_worker::{ready_failed_job_worker, ready_job_worker_for_run, JobWorkerResult};
 use super::project_io::cache_entry_path_is_safe;
 use super::{path_from_qml, AppControllerState, SMOKE_PROJECT_NAME, WAVE_SUBFORMAT_PCM};
 use crate::timeline_renderer::cache::AnalysisRenderRequest;
@@ -133,8 +135,11 @@ fn controller_run_track_completes_fixed_interval_markers() {
 }
 
 #[test]
-fn controller_submit_track_returns_before_worker_poll_commits_job() {
-    let mut state = AppControllerState::default();
+fn controller_submit_track_commits_controlled_worker_result_on_poll() {
+    let mut state = AppControllerState {
+        job_worker_factory: Some(Box::new(ready_job_worker_for_run)),
+        ..Default::default()
+    };
     state.load_demo_project_state();
     let track_id = state.add_transform_track_state(
         "track_source",
@@ -156,18 +161,7 @@ fn controller_submit_track_returns_before_worker_poll_commits_job() {
         .iter()
         .any(|run| run.id == job_id && run.state == ResultState::Pending));
 
-    for _ in 0..100 {
-        if state.poll_job_workers_state() > 0
-            && state
-                .project
-                .job_runs
-                .iter()
-                .any(|run| run.id == job_id && run.state == ResultState::Complete)
-        {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+    assert!(state.poll_job_workers_state() > 0);
 
     let track = state
         .project
@@ -386,7 +380,16 @@ fn controller_async_worker_join_error_finalizes_active_job() {
 
 #[test]
 fn controller_reset_cancels_and_drains_running_workers() {
-    let mut state = AppControllerState::default();
+    let (worker_joined_tx, worker_joined_rx) = mpsc::channel();
+    let mut state = AppControllerState {
+        job_worker_factory: Some(Box::new(
+            move |_project, job_id, artifact_dir, _token, _progress| {
+                worker_joined_tx.send(job_id.clone()).unwrap();
+                ready_failed_job_worker(job_id, artifact_dir, "test worker held until reset")
+            },
+        )),
+        ..Default::default()
+    };
     state.load_demo_project_state();
     let track_id = state.add_transform_track_state(
         "track_source",
@@ -398,6 +401,7 @@ fn controller_reset_cancels_and_drains_running_workers() {
 
     state.reset_job_runtime_state();
 
+    assert_eq!(worker_joined_rx.recv().unwrap(), job_id);
     assert!(state.job_workers.is_empty());
     assert_eq!(
         state
@@ -861,6 +865,20 @@ fn controller_demo_waveform_can_be_selected_and_rerun() {
 }
 
 #[test]
+fn controller_demo_runnerless_generated_tracks_cannot_rerun() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+
+    for track_id in ["track_drums", "track_drum_energy"] {
+        state.select_track_state(track_id);
+        assert!(
+            !state.selected_track_can_rerun,
+            "{track_id} should not expose rerun without a Rust runner"
+        );
+    }
+}
+
+#[test]
 fn controller_non_history_mutation_invalidates_snapshot_undo() {
     let root = test_dir("undo-non-history");
     let audio_path = root.join("song.wav");
@@ -890,17 +908,22 @@ fn controller_non_history_mutation_invalidates_snapshot_undo() {
 }
 
 #[test]
-fn controller_rejects_audio_transform_for_generated_marker_parent_without_audio_artifact() {
+fn controller_accepts_audio_transform_for_generated_marker_parent_with_source_audio() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
 
     let track_id = state.add_transform_track_state("track_beats", "waveform.summary", "1", "{}");
 
-    assert!(track_id.is_empty());
-    assert!(state
-        .last_error
-        .to_string()
-        .contains("parent track has no valid audio artifact"));
+    assert!(!track_id.is_empty());
+    let track = state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == track_id)
+        .unwrap();
+    assert_eq!(track.input_track_ids, ["track_beats"]);
+    assert_eq!(track.transform_id, "waveform.summary");
+    assert!(state.last_error.to_string().is_empty());
 }
 
 #[test]
@@ -1028,6 +1051,15 @@ fn controller_refresh_cache_status_restores_recovered_artifact_validity() {
         .find(|track| track.id == "track_drums")
         .unwrap()
         .cache_refs = vec![entry.id.clone()];
+    let drums = state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_drums")
+        .unwrap();
+    drums.result_state = ResultState::Stale;
+    drums.error = format!("cache artifact missing or invalid: {}", entry.id);
+    state.mark_clean();
 
     let invalid = state.refresh_cache_status_state();
 
@@ -1042,6 +1074,15 @@ fn controller_refresh_cache_status_restores_recovered_artifact_validity() {
             .validation_status,
         CacheValidationStatus::Valid
     );
+    let drums = state
+        .project
+        .tracks
+        .iter()
+        .find(|track| track.id == "track_drums")
+        .unwrap();
+    assert_eq!(drums.result_state, ResultState::Complete);
+    assert!(drums.error.is_empty());
+    assert!(state.is_dirty);
 }
 
 #[test]
@@ -1942,6 +1983,54 @@ fn controller_playback_state_transitions_from_selected_track() {
     state.stop_playback_state();
     assert!(!state.playback_is_playing);
     assert_eq!(state.playback_position_seconds, 0.0);
+}
+
+#[test]
+fn controller_playback_uses_selected_audio_artifact_for_complete_generated_track() {
+    let root = test_dir("playback-generated-artifact");
+    let project_path = root.join("show.autolight");
+    let source_path = root.join("source.wav");
+    let stem_payload_path = root.join("stem.wav");
+    write_test_wav(&source_path, 8_000, 1, 16_000);
+    write_test_wav(&stem_payload_path, 8_000, 1, 4_000);
+    let stem_payload = std::fs::read(&stem_payload_path).unwrap();
+    let mut stem_entry =
+        cache_entry_for_bytes("stem", "stem-hash", &stem_payload, "1", "test").unwrap();
+    let stem_artifact_path = root.join(&stem_entry.path);
+    std::fs::create_dir_all(stem_artifact_path.parent().unwrap()).unwrap();
+    std::fs::write(&stem_artifact_path, &stem_payload).unwrap();
+    let mut state = AppControllerState {
+        project_path: cxx_qt_lib::QString::from(project_path.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    let source_track_id = state.import_audio_state(source_path.to_str().unwrap());
+    stem_entry.validation_status = CacheValidationStatus::Valid;
+    let stem_cache_ref = stem_entry.id.clone();
+    state.project.cache_entries.push(stem_entry);
+    state.project.tracks.push(Track {
+        id: "track_stem".to_string(),
+        track_type: TrackType::Generated,
+        name: "Stem".to_string(),
+        input_track_ids: vec![source_track_id],
+        transform_id: "test.stem".to_string(),
+        transform_params: serde_json::Map::default(),
+        transform_version: "1".to_string(),
+        output_schema: "artifact.stem.v1".to_string(),
+        dependency_hash: "stem-hash".to_string(),
+        result_state: ResultState::Complete,
+        cache_refs: vec![stem_cache_ref],
+        provenance: serde_json::Map::default(),
+        error: String::default(),
+    });
+    state.select_track_state("track_stem");
+
+    assert!(state.selected_track_can_play);
+    assert!(state.play_selected_track_state());
+    assert_eq!(
+        state.playback_source_path.to_string(),
+        stem_artifact_path.to_string_lossy()
+    );
+    assert_eq!(state.playback_duration_seconds, 0.5);
 }
 
 #[test]

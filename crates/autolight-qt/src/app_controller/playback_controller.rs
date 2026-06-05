@@ -1,9 +1,11 @@
 use std::path::Path;
 
 use autolight_core::graph::{find_track, source_track_id_for_context};
-use autolight_core::project::{AudioAsset, ImportStatus};
+use autolight_core::project::{AudioAsset, CacheValidationStatus, ImportStatus, ResultState};
 use cxx_qt_lib::QString;
 
+use super::audio::inspect_wav_file;
+use super::project_io::cache_entry_path_is_safe;
 use super::{finite_non_negative, AppControllerState};
 
 #[derive(Clone, Debug)]
@@ -122,21 +124,16 @@ impl AppControllerState {
 
     pub(super) fn play_selected_track_state(&mut self) -> bool {
         let selected_track_id = self.selected_track_id.to_string();
-        let Some(asset) = self
-            .source_audio_asset_for_track_id(&selected_track_id)
-            .cloned()
-        else {
-            self.set_error("selected track has no source audio");
-            self.refresh_selected_state();
-            return false;
+        let source = match self.playback_source_for_track_id(&selected_track_id) {
+            Ok(source) => source,
+            Err(error) => {
+                self.set_error(error);
+                self.refresh_selected_state();
+                return false;
+            }
         };
-        if asset.import_status != ImportStatus::Online {
-            self.set_error(format!("source audio is {}", asset.import_status));
-            self.refresh_selected_state();
-            return false;
-        }
-        if self.playback.source_path_string() != asset.path
-            && !self.load_playback_source(&asset.path, asset.duration)
+        if self.playback.source_path_string() != source.path
+            && !self.load_playback_source(&source.path, source.duration_seconds)
         {
             self.set_error(self.playback_last_error.to_string());
             self.refresh_selected_state();
@@ -147,6 +144,70 @@ impl AppControllerState {
         self.last_error = QString::default();
         self.refresh_selected_state();
         true
+    }
+
+    pub(super) fn playback_source_for_track_id(
+        &self,
+        track_id: &str,
+    ) -> Result<PlaybackSource, String> {
+        if let Some(source) = self.selected_audio_artifact_playback_source(track_id)? {
+            return Ok(source);
+        }
+        let Some(asset) = self.source_audio_asset_for_track_id(track_id) else {
+            return Err("selected track has no source audio".to_string());
+        };
+        if asset.import_status != ImportStatus::Online {
+            return Err(format!("source audio is {}", asset.import_status));
+        }
+        Ok(PlaybackSource {
+            path: asset.path.clone(),
+            duration_seconds: asset.duration,
+        })
+    }
+
+    fn selected_audio_artifact_playback_source(
+        &self,
+        track_id: &str,
+    ) -> Result<Option<PlaybackSource>, String> {
+        let Some(track) = find_track(&self.project, track_id) else {
+            return Ok(None);
+        };
+        if track.result_state != ResultState::Complete {
+            return Ok(None);
+        }
+        let mut selected_audio_entry = None;
+        for cache_ref in &track.cache_refs {
+            let Some(entry) = self.project.cache_entries.iter().find(|entry| {
+                entry.id == *cache_ref
+                    && entry.validation_status == CacheValidationStatus::Valid
+                    && matches!(entry.artifact_kind.as_str(), "audio" | "stem")
+            }) else {
+                continue;
+            };
+            selected_audio_entry = Some(entry);
+            break;
+        }
+        let Some(entry) = selected_audio_entry else {
+            return Ok(None);
+        };
+        if !cache_entry_path_is_safe(Path::new(&entry.path)) {
+            return Err(format!("audio artifact path is unsafe: {}", entry.path));
+        }
+        let Some(artifact_dir) = self.current_artifact_dir() else {
+            return Err("project path is required before playing audio artifact".to_string());
+        };
+        let artifact_path = artifact_dir.join(&entry.path);
+        if !artifact_path.is_file() {
+            return Err(format!(
+                "audio artifact missing: {}",
+                artifact_path.display()
+            ));
+        }
+        let inspection = inspect_wav_file(&artifact_path)?;
+        Ok(Some(PlaybackSource {
+            path: artifact_path.to_string_lossy().to_string(),
+            duration_seconds: inspection.metadata.duration,
+        }))
     }
 
     pub(super) fn play_loaded_playback_state(&mut self) -> bool {
@@ -235,4 +296,9 @@ impl AppControllerState {
         self.playback.unload();
         self.sync_playback_bridge_state();
     }
+}
+
+pub(super) struct PlaybackSource {
+    path: String,
+    duration_seconds: f64,
 }

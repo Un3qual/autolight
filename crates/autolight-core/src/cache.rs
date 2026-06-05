@@ -190,6 +190,60 @@ pub fn mark_invalid_cache_refs_stale(project: &mut ProjectDocument, invalid_refs
     }
 }
 
+pub fn restore_valid_cache_ref_tracks(project: &mut ProjectDocument) -> usize {
+    let valid_cache_refs = project
+        .cache_entries
+        .iter()
+        .filter(|entry| entry.validation_status == CacheValidationStatus::Valid)
+        .map(|entry| entry.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut restored = 0;
+
+    loop {
+        let complete_track_ids = project
+            .tracks
+            .iter()
+            .filter(|track| track.result_state == ResultState::Complete)
+            .map(|track| track.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut changed = false;
+
+        for track in &mut project.tracks {
+            if track.result_state != ResultState::Stale || !is_cache_artifact_error(&track.error) {
+                continue;
+            }
+            if !track
+                .cache_refs
+                .iter()
+                .all(|cache_ref| valid_cache_refs.contains(cache_ref))
+            {
+                continue;
+            }
+            if !track
+                .input_track_ids
+                .iter()
+                .all(|track_id| complete_track_ids.contains(track_id))
+            {
+                continue;
+            }
+            track.result_state = ResultState::Complete;
+            track.error.clear();
+            restored += 1;
+            changed = true;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    restored
+}
+
+fn is_cache_artifact_error(error: &str) -> bool {
+    error.starts_with("cache artifact missing or invalid")
+}
+
 fn sha256_hex(payload: &[u8]) -> String {
     let digest = Sha256::digest(payload);
     let mut output = String::with_capacity(digest.len() * 2);
