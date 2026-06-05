@@ -3032,8 +3032,9 @@ fn native_timeline_scene_clips_scrolled_content_to_lane_origin() {
     let scene_sources = native_timeline_scene_sources();
 
     assert!(scene_sources.contains("void appendLaneClippedRect("));
+    assert!(scene_sources.contains("QRectF timelineLaneClippedRect("));
     assert!(scene_sources.contains("const double laneLeft = timelineLaneOriginX();"));
-    assert!(scene_sources.contains("const double left = std::max(laneLeft, x);"));
+    assert!(scene_sources.contains("const double left = std::max(laneLeft, rect.x());"));
     assert!(scene_sources.contains(
         "appendLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#1d4ed8\"))"
     ));
@@ -3046,6 +3047,26 @@ fn native_timeline_scene_clips_scrolled_content_to_lane_origin() {
     assert!(scene_sources.contains("appendLaneClippedRect(\n        bands,\n        markerFill"));
     assert!(scene_sources
         .contains("appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0"));
+}
+
+#[test]
+fn native_timeline_marker_hit_tests_are_clipped_to_visible_lane() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let scene_dir = manifest_dir.join("src/timeline_scene");
+    let scene_item_cpp =
+        std::fs::read_to_string(scene_dir.join("timeline_scene_item.cpp")).unwrap();
+    let frame_builder_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_frame_builder.cpp")).unwrap();
+    let frame_builder_h = std::fs::read_to_string(scene_dir.join("scene_frame_builder.h")).unwrap();
+
+    assert!(frame_builder_h.contains("QRectF timelineLaneClippedRect("));
+    assert!(frame_builder_cpp.contains("QRectF timelineLaneClippedRect("));
+    assert!(frame_builder_cpp.contains("const QRectF clipped = timelineLaneClippedRect("));
+    assert!(scene_item_cpp.contains("const QRectF visibleMarkerRect = timelineLaneClippedRect("));
+    assert!(scene_item_cpp.contains("visibleMarkerRect.contains(event->position())"));
+    assert!(!scene_item_cpp.contains(
+        "timelineMarkerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond)\n             .contains(event->position())"
+    ));
 }
 
 #[test]
@@ -3515,11 +3536,12 @@ fn qml_app_runtime_refreshes_native_timeline_scene_snapshot_after_model_changes(
     .unwrap();
 
     assert!(adapter_qml.contains(
-        "property string timelineSceneSnapshotJson: nativeController.timelineSceneSnapshotJson"
+        "readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson"
     ));
     assert!(adapter_qml.contains("function reloadTimelineSceneSnapshot()"));
-    assert!(adapter_qml
-        .contains("timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"));
+    assert!(adapter_qml.contains(
+        "projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"
+    ));
     assert!(adapter_qml.contains(
         "function reloadModels() {\n        reloadProjectState()\n        reloadPlaybackState()\n        reloadSelectionModels()\n        reloadViewportState()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n        reloadTransformModel()"
     ));
@@ -3536,12 +3558,12 @@ fn qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes() {
     .unwrap();
 
     assert!(adapter_qml.contains("function reloadProjectState()"));
-    assert!(adapter_qml.contains("projectName = nativeController.projectName"));
-    assert!(adapter_qml.contains("lastError = nativeController.lastError"));
-    assert!(adapter_qml.contains("projectPath = nativeController.projectPath"));
-    assert!(adapter_qml.contains("isDirty = nativeController.isDirty"));
-    assert!(adapter_qml.contains("canUndo = nativeController.canUndo"));
-    assert!(adapter_qml.contains("canRedo = nativeController.canRedo"));
+    assert!(adapter_qml.contains("projectStateMirror.projectName = nativeController.projectName"));
+    assert!(adapter_qml.contains("projectStateMirror.lastError = nativeController.lastError"));
+    assert!(adapter_qml.contains("projectStateMirror.projectPath = nativeController.projectPath"));
+    assert!(adapter_qml.contains("projectStateMirror.isDirty = nativeController.isDirty"));
+    assert!(adapter_qml.contains("projectStateMirror.canUndo = nativeController.canUndo"));
+    assert!(adapter_qml.contains("projectStateMirror.canRedo = nativeController.canRedo"));
     assert!(adapter_qml.contains("function reloadPlaybackState()"));
     assert!(adapter_qml.contains("playback.sourcePath = nativeController.playbackSourcePath"));
     assert!(adapter_qml
@@ -3557,6 +3579,43 @@ fn qml_app_runtime_mirrors_native_qproperties_after_invokable_refreshes() {
     );
     assert!(!adapter_qml
         .contains("readonly property string sourcePath: nativeController.playbackSourcePath"));
+}
+
+#[test]
+fn qml_app_runtime_keeps_public_native_state_mirrors_readonly() {
+    let adapter_qml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
+    )
+    .unwrap();
+
+    assert!(adapter_qml.contains("QtObject {\n        id: projectStateMirror"));
+    assert!(adapter_qml
+        .contains("readonly property string projectName: projectStateMirror.projectName"));
+    assert!(
+        adapter_qml.contains("readonly property string lastError: projectStateMirror.lastError")
+    );
+    assert!(adapter_qml.contains(
+        "readonly property string timelineRowsJson: projectStateMirror.timelineRowsJson"
+    ));
+    assert!(adapter_qml.contains(
+        "readonly property string transformSpecsJson: projectStateMirror.transformSpecsJson"
+    ));
+    assert!(adapter_qml
+        .contains("readonly property string projectPath: projectStateMirror.projectPath"));
+    assert!(adapter_qml.contains("readonly property bool isDirty: projectStateMirror.isDirty"));
+    assert!(adapter_qml.contains("readonly property bool canUndo: projectStateMirror.canUndo"));
+    assert!(adapter_qml.contains("readonly property bool canRedo: projectStateMirror.canRedo"));
+    assert!(adapter_qml.contains(
+        "readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson"
+    ));
+    assert!(adapter_qml.contains("projectStateMirror.projectName = nativeController.projectName"));
+    assert!(adapter_qml.contains(
+        "projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson"
+    ));
+    assert!(
+        !adapter_qml.contains("\n    property string projectName: nativeController.projectName")
+    );
+    assert!(!adapter_qml.contains("\n    property bool isDirty: nativeController.isDirty"));
 }
 
 #[test]

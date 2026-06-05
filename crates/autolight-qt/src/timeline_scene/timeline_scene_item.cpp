@@ -331,9 +331,9 @@ void TimelineSceneItem::mousePressEvent(QMouseEvent* event)
   const double rowHeight = std::min(kRowHeight, height() - rowY);
   for (int markerIndex = static_cast<int>(track.markers.size()) - 1; markerIndex >= 0; --markerIndex) {
     const MarkerSpec& marker = track.markers[markerIndex];
-    if (!marker.markerId.isEmpty()
-        && timelineMarkerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond)
-             .contains(event->position())) {
+    const QRectF markerRect = timelineMarkerRectForTrack(marker, rowY, rowHeight, scrollSeconds, pixelsPerSecond);
+    const QRectF visibleMarkerRect = timelineLaneClippedRect(markerRect, width(), height());
+    if (!marker.markerId.isEmpty() && visibleMarkerRect.contains(event->position())) {
       emit markerClicked(trackId, marker.markerId, timelineAdditiveSelection(event->modifiers()));
       event->accept();
       return;

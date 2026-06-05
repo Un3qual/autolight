@@ -2,55 +2,51 @@
 
 Updated: 2026-06-05
 
-## Active Batch: Rust-Only Codebase Cleanup
+## Active Batch: PR 15 Review-Bot Follow-Through
 
 **Status:** complete
 
-**Goal:** Declutter the stacked Rust PR by removing the superseded runtime surface and historical migration notes now that the app is Rust/CXX-Qt only.
+**Goal:** Pull current PR #15 bot feedback, fix actionable findings, analyze diffray risk areas, push, then reply to relevant review threads.
 
 ## Scope
 
-- Remove the superseded runtime package, app entry points, dependency files, notebooks, screenshot helper, and old runtime tests.
-- Remove legacy QML timeline components that are not bundled by the Rust app.
-- Remove historical migration plan/spec documents that no longer drive execution.
-- Simplify `Main.qml` so it always loads the Rust timeline view.
-- Keep the active dispatcher docs, manual timeline hardening notes, fixtures, Rust crates, and current QML components.
+- Fetched current PR #15 review threads, top-level bot comments, and check status from GitHub.
+- Fixed the unresolved Codex thread by clipping marker hit tests to the same visible timeline lane geometry used for rendering.
+- Addressed Greptile's AppRuntime mutability concern by restoring readonly public native state mirrors backed by refreshable internal state.
+- Analyzed diffray's scene graph, counter notification, waveform budget, QML refresh, benchmark, and constants suggestions.
+- Left non-defect diffray suggestions as evidence-backed non-actions: current tests cover the risky paths, and benchmark/user-facing policy docs are not required for this review fix.
 
 ## Target Paths
 
-- `.gitignore`
-- `AGENTS.md`
-- `README.md`
-- `UI/Main.qml`
-- `UI/components/`
+- `UI/AppRuntime.qml`
 - `crates/autolight-qt/src/app_controller/tests.rs`
-- `crates/autolight-core/src/transforms.rs`
+- `crates/autolight-qt/src/timeline_scene/scene_frame_builder.h`
+- `crates/autolight-qt/src/timeline_scene/scene_frame_builder.cpp`
+- `crates/autolight-qt/src/timeline_scene/timeline_scene_item.cpp`
 - `docs/NOW.md`
-- `docs/PROCESS.md`
-- `docs/ROADMAP.md`
-- removed runtime, notebook, test, dependency, and historical docs paths
 
 ## Verification
 
 Passed:
 
 ```bash
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked repo_surface_is_rust_only_after_port_cleanup
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked current_docs_describe_rust_only_runtime
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_native_scrub_omits_label_width_with_rust_only_runtime
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_marker_hit_tests_are_clipped_to_visible_lane
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime_keeps_public_native_state_mirrors_readonly
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_max_bytes_param
+cargo test -p autolight-analysis --locked waveform_level_counts
+cargo test -p autolight-analysis --locked waveform_payload_build
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-app --locked embedded_qml_bundle_contains_runtime_and_components
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked active_rust_timeline_removes_legacy_geometry_invokables
+QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_exposes_native_timing_counters_for_manual_profiling
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked waveform_projection
 cargo fmt --all -- --check
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D clippy::perf
-QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
 git diff --check
 ```
 
-`cargo fmt --all -- --check` initially found only rustfmt wrapping in the new docs-surface test; `cargo fmt --all` applied it and the check then passed. The offscreen smoke loaded `UI/Main.qml` with `Autolight.Qt AppController` and emitted only known host audio/font warnings. The stale-reference `rg` check returned no matches.
-
 ## Handoff
 
-Next: push this cleanup commit to the stacked PR branch and watch PR checks.
+Next: commit, push `codex/native-timeline-risk-hardening`, refresh PR #15 bot state, and reply to any threads that remain actionable.

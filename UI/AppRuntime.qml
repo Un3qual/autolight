@@ -8,18 +8,30 @@ QtObject {
     id: appRuntime
 
     property var nativeController: AppController {}
-    property string projectName: nativeController.projectName
-    property string lastError: nativeController.lastError
-    property string timelineRowsJson: nativeController.timelineRowsJson
-    property string timelineSceneSnapshotJson: nativeController.timelineSceneSnapshotJson
-    property string transformSpecsJson: nativeController.transformSpecsJson
+    readonly property var __projectStateMirror: QtObject {
+        id: projectStateMirror
+        property string projectName: nativeController.projectName
+        property string lastError: nativeController.lastError
+        property string timelineRowsJson: nativeController.timelineRowsJson
+        property string timelineSceneSnapshotJson: nativeController.timelineSceneSnapshotJson
+        property string transformSpecsJson: nativeController.transformSpecsJson
+        property string projectPath: nativeController.projectPath
+        property bool isDirty: nativeController.isDirty
+        property bool canUndo: nativeController.canUndo
+        property bool canRedo: nativeController.canRedo
+    }
+    readonly property string projectName: projectStateMirror.projectName
+    readonly property string lastError: projectStateMirror.lastError
+    readonly property string timelineRowsJson: projectStateMirror.timelineRowsJson
+    readonly property string timelineSceneSnapshotJson: projectStateMirror.timelineSceneSnapshotJson
+    readonly property string transformSpecsJson: projectStateMirror.transformSpecsJson
     readonly property string selectedMarkerIdsJson: nativeController.selectedMarkerIdsJson
     readonly property string selectedTrackMarkersJson: nativeController.selectedTrackMarkersJson
     readonly property string markerColorOptionsJson: nativeController.markerColorOptionsJson
-    property string projectPath: nativeController.projectPath
-    property bool isDirty: nativeController.isDirty
-    property bool canUndo: nativeController.canUndo
-    property bool canRedo: nativeController.canRedo
+    readonly property string projectPath: projectStateMirror.projectPath
+    readonly property bool isDirty: projectStateMirror.isDirty
+    readonly property bool canUndo: projectStateMirror.canUndo
+    readonly property bool canRedo: projectStateMirror.canRedo
     property string selectedTrackId: nativeController.selectedTrackId
     property bool selectedTrackCanPlay: nativeController.selectedTrackCanPlay
     property bool selectedTrackCanRerun: nativeController.selectedTrackCanRerun
@@ -123,14 +135,14 @@ QtObject {
     }
 
     function reloadProjectState() {
-        projectName = nativeController.projectName
-        lastError = nativeController.lastError
-        timelineRowsJson = nativeController.timelineRowsJson
-        transformSpecsJson = nativeController.transformSpecsJson
-        projectPath = nativeController.projectPath
-        isDirty = nativeController.isDirty
-        canUndo = nativeController.canUndo
-        canRedo = nativeController.canRedo
+        projectStateMirror.projectName = nativeController.projectName
+        projectStateMirror.lastError = nativeController.lastError
+        projectStateMirror.timelineRowsJson = nativeController.timelineRowsJson
+        projectStateMirror.transformSpecsJson = nativeController.transformSpecsJson
+        projectStateMirror.projectPath = nativeController.projectPath
+        projectStateMirror.isDirty = nativeController.isDirty
+        projectStateMirror.canUndo = nativeController.canUndo
+        projectStateMirror.canRedo = nativeController.canRedo
     }
 
     function reloadPlaybackState() {
@@ -160,7 +172,7 @@ QtObject {
     }
 
     function reloadTimelineSceneSnapshot() {
-        timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson
+        projectStateMirror.timelineSceneSnapshotJson = nativeController.timelineSceneSnapshotJson
     }
 
     function parseJsonArray(payload) {

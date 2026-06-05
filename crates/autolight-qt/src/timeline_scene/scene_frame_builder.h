@@ -48,6 +48,7 @@ struct SceneFrameSpec
 
 double timelineLaneOriginX();
 double timelineLaneWidth(double width);
+QRectF timelineLaneClippedRect(const QRectF& rect, double boundsWidth, double boundsHeight);
 double timelineSecondsToX(double seconds, double scrollSeconds, double pixelsPerSecond);
 int timelineFirstVisibleTrackIndex(double trackScrollPixels);
 double timelineVisibleTrackY(int trackIndex, double trackScrollPixels);

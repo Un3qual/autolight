@@ -87,22 +87,18 @@ void appendLaneClippedRect(
   double boundsWidth,
   double boundsHeight)
 {
-  const double laneLeft = timelineLaneOriginX();
-  const double left = std::max(laneLeft, x);
-  const double top = std::max(0.0, y);
-  const double right = std::min(boundsWidth, x + width);
-  const double bottom = std::min(boundsHeight, y + height);
-  if (right <= left || bottom <= top) {
+  const QRectF clipped = timelineLaneClippedRect(QRectF(x, y, width, height), boundsWidth, boundsHeight);
+  if (clipped.isEmpty()) {
     return;
   }
   appendRect(
     bands,
     color,
     RectSpec{
-      static_cast<float>(left),
-      static_cast<float>(top),
-      static_cast<float>(right - left),
-      static_cast<float>(bottom - top),
+      static_cast<float>(clipped.x()),
+      static_cast<float>(clipped.y()),
+      static_cast<float>(clipped.width()),
+      static_cast<float>(clipped.height()),
     });
 }
 
@@ -488,6 +484,19 @@ double timelineLaneOriginX()
 double timelineLaneWidth(double width)
 {
   return std::max(0.0, width - timelineLaneOriginX());
+}
+
+QRectF timelineLaneClippedRect(const QRectF& rect, double boundsWidth, double boundsHeight)
+{
+  const double laneLeft = timelineLaneOriginX();
+  const double left = std::max(laneLeft, rect.x());
+  const double top = std::max(0.0, rect.y());
+  const double right = std::min(boundsWidth, rect.x() + rect.width());
+  const double bottom = std::min(boundsHeight, rect.y() + rect.height());
+  if (right <= left || bottom <= top) {
+    return QRectF();
+  }
+  return QRectF(left, top, right - left, bottom - top);
 }
 
 double timelineSecondsToX(double seconds, double scrollSeconds, double pixelsPerSecond)
