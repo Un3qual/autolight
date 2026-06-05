@@ -10,7 +10,9 @@
 #include <atomic>
 #include <memory>
 
+namespace autolight::qt::timeline_scene {
 struct TimelineSceneSnapshotData;
+}
 
 class TimelineSceneItem : public QQuickItem
 {
@@ -98,5 +100,5 @@ private:
   std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};
   std::atomic<qulonglong> m_textTextureCreateCount{0};
   std::atomic_bool m_scenePerfCountersNotifyQueued{false};
-  std::unique_ptr<TimelineSceneSnapshotData> m_snapshot;
+  std::unique_ptr<autolight::qt::timeline_scene::TimelineSceneSnapshotData> m_snapshot;
 };

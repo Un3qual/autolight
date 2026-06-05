@@ -8,6 +8,14 @@ fn main() {
         .cpp_file(CppFile::from("src/timeline_renderer/scene_graph.h").compile(false))
         .cpp_file("src/timeline_renderer/scene_graph.cpp")
         .cpp_file(CppFile::from("src/timeline_scene/timeline_scene_item.h").compile(false))
+        .cpp_file(CppFile::from("src/timeline_scene/scene_snapshot_parser.h").compile(false))
+        .cpp_file(CppFile::from("src/timeline_scene/scene_frame_builder.h").compile(false))
+        .cpp_file(CppFile::from("src/timeline_scene/scene_graph_nodes.h").compile(false))
+        .cpp_file(CppFile::from("src/timeline_scene/timeline_input.h").compile(false))
+        .cpp_file("src/timeline_scene/scene_snapshot_parser.cpp")
+        .cpp_file("src/timeline_scene/scene_frame_builder.cpp")
+        .cpp_file("src/timeline_scene/scene_graph_nodes.cpp")
+        .cpp_file("src/timeline_scene/timeline_input.cpp")
         .cpp_file("src/timeline_scene/timeline_scene_item.cpp")
         .build();
 }

@@ -2150,6 +2150,30 @@ fn qml_track_rows_show_track_selection_and_allow_lane_selection() {
     assert!(lane_qml.contains("signal clicked(real x)"));
 }
 
+fn native_timeline_scene_sources() -> String {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let files = [
+        "timeline_scene_item.h",
+        "timeline_scene_item.cpp",
+        "scene_snapshot_parser.h",
+        "scene_snapshot_parser.cpp",
+        "scene_frame_builder.h",
+        "scene_frame_builder.cpp",
+        "scene_graph_nodes.h",
+        "scene_graph_nodes.cpp",
+        "timeline_input.h",
+        "timeline_input.cpp",
+    ];
+    let mut sources = String::new();
+    for file in files {
+        sources.push_str(
+            &std::fs::read_to_string(manifest_dir.join("src/timeline_scene").join(file)).unwrap(),
+        );
+        sources.push('\n');
+    }
+    sources
+}
+
 #[test]
 fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
     let timeline_qml = std::fs::read_to_string(
@@ -2167,19 +2191,22 @@ fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
             .join("src/timeline_scene/timeline_scene_item.cpp"),
     )
     .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
     assert!(scene_header.contains("void wheelEvent(QWheelEvent* event) override;"));
     assert!(scene_header.contains("void viewportScrollRequested(double pixelDelta);"));
     assert!(scene_header.contains("void viewportZoomRequested(double factor, double anchorX);"));
     assert!(scene_cpp.contains("void TimelineSceneItem::wheelEvent(QWheelEvent* event)"));
-    assert!(scene_cpp.contains("event->pixelDelta()"));
-    assert!(scene_cpp.contains("event->angleDelta()"));
-    assert!(scene_cpp.contains("Qt::ShiftModifier"));
-    assert!(scene_cpp.contains("Qt::ControlModifier"));
-    assert!(scene_cpp.contains("Qt::MetaModifier"));
+    assert!(scene_sources.contains("event.pixelDelta()"));
+    assert!(scene_sources.contains("event.angleDelta()"));
+    assert!(scene_sources.contains("Qt::ShiftModifier"));
+    assert!(scene_sources.contains("Qt::ControlModifier"));
+    assert!(scene_sources.contains("Qt::MetaModifier"));
+    assert!(scene_cpp.contains("timelineHorizontalScrollDelta(*event)"));
+    assert!(scene_cpp.contains("timelineZoomFactor(*event)"));
     assert!(scene_cpp.contains("emit viewportScrollRequested(scrollDelta);"));
     assert!(scene_cpp.contains(
-        "emit viewportZoomRequested(factor, std::max(0.0, event->position().x() - laneOriginX()));"
+        "emit viewportZoomRequested(zoomFactor, timelineZoomAnchorX(event->position().x()));"
     ));
     assert!(timeline_qml.contains("onViewportScrollRequested"));
     assert!(
@@ -2194,17 +2221,39 @@ fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
 }
 
 #[test]
-fn native_timeline_trackpad_scroll_uses_natural_horizontal_direction() {
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+fn native_timeline_scene_cpp_is_split_into_focused_units() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let build_rs = std::fs::read_to_string(manifest_dir.join("build.rs")).unwrap();
+    let scene_cpp =
+        std::fs::read_to_string(manifest_dir.join("src/timeline_scene/timeline_scene_item.cpp"))
+            .unwrap();
+    let required_files = [
+        "scene_snapshot_parser.cpp",
+        "scene_frame_builder.cpp",
+        "scene_graph_nodes.cpp",
+        "timeline_input.cpp",
+    ];
 
-    assert!(scene_cpp.contains("scrollDelta = -static_cast<double>(pixelDelta.x());"));
-    assert!(scene_cpp.contains("-static_cast<double>(angleDelta.x())"));
-    assert!(scene_cpp.contains("kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch"));
-    assert!(scene_cpp.contains("scrollDelta = -static_cast<double>(pixelDelta.y());"));
+    for file in required_files {
+        assert!(
+            build_rs.contains(file),
+            "{file} must be compiled by cxx-qt-build"
+        );
+    }
+    assert!(
+        scene_cpp.lines().count() < 650,
+        "timeline_scene_item.cpp should stay as the QQuickItem shell"
+    );
+}
+
+#[test]
+fn native_timeline_trackpad_scroll_uses_natural_horizontal_direction() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("scrollDelta = -static_cast<double>(pixelDelta.x());"));
+    assert!(scene_sources.contains("-static_cast<double>(angleDelta.x())"));
+    assert!(scene_sources.contains("kWheelAngleUnitsPerNotch * kScrollPixelsPerNotch"));
+    assert!(scene_sources.contains("scrollDelta = -static_cast<double>(pixelDelta.y());"));
 }
 
 #[test]
@@ -2240,11 +2289,7 @@ fn qml_timeline_exposes_log_zoom_fit_follow_and_playhead_handle() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
     let adapter_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/AppRuntime.qml"),
     )
@@ -2266,9 +2311,9 @@ fn qml_timeline_exposes_log_zoom_fit_follow_and_playhead_handle() {
     assert!(!main_qml.contains("to: 240"));
     assert!(timeline_qml.contains("playbackPositionSeconds:"));
     assert!(timeline_qml.contains("onScrubRequested"));
-    assert!(scene_cpp.contains("appendRulerTicks"));
-    assert!(scene_cpp.contains("playheadX"));
-    assert!(scene_cpp.contains("emit scrubRequested(seconds);"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("playheadX"));
+    assert!(scene_sources.contains("emit scrubRequested(timelineSecondsForPosition("));
 }
 
 #[test]
@@ -2308,11 +2353,7 @@ fn qml_timeline_polish_uses_editor_controls_badges_and_tick_marks() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
     assert!(main_qml.contains("id: timelineControlBand"));
     assert!(main_qml.contains("import QtQuick.Controls.Basic as Basic"));
@@ -2325,12 +2366,12 @@ fn qml_timeline_polish_uses_editor_controls_badges_and_tick_marks() {
     assert!(main_qml.contains("text: \"SCROLL\""));
 
     assert!(timeline_qml.contains("TimelineSceneItem"));
-    assert!(scene_cpp.contains("rulerBackground"));
-    assert!(scene_cpp.contains("appendRulerTicks"));
-    assert!(scene_cpp.contains("selectionStripe"));
-    assert!(scene_cpp.contains("selectionOutline"));
-    assert!(scene_cpp.contains("laneEven"));
-    assert!(scene_cpp.contains("laneOdd"));
+    assert!(scene_sources.contains("rulerBackground"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("selectionStripe"));
+    assert!(scene_sources.contains("selectionOutline"));
+    assert!(scene_sources.contains("laneEven"));
+    assert!(scene_sources.contains("laneOdd"));
 
     assert!(playback_qml.contains("import QtQuick.Controls.Basic as Basic"));
     assert!(playback_qml.contains("id: playPauseButton"));
@@ -2349,11 +2390,7 @@ fn qml_timeline_uses_native_scene_waveform_refs_not_qml_waveform_geometry() {
     state.load_demo_project_state();
     let parsed: serde_json::Value =
         serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
     assert!(timeline_qml.contains("TimelineSceneItem"));
     assert!(timeline_qml.contains("sceneSnapshotJson:"));
@@ -2369,9 +2406,9 @@ fn qml_timeline_uses_native_scene_waveform_refs_not_qml_waveform_geometry() {
         .any(|track| track["waveformPreview"]
             .as_array()
             .is_some_and(|samples| !samples.is_empty())));
-    assert!(scene_cpp.contains("waveformPreview"));
-    assert!(scene_cpp.contains("WaveformSampleSpec"));
-    assert!(scene_cpp.contains("waveformCenterY"));
+    assert!(scene_sources.contains("waveformPreview"));
+    assert!(scene_sources.contains("WaveformSampleSpec"));
+    assert!(scene_sources.contains("waveformCenterY"));
     assert!(!timeline_qml.contains("TimelineWaveformItem"));
     assert!(!timeline_qml.contains("renderTimelineWaveform"));
     assert!(!timeline_qml.contains("geometryJson"));
@@ -2393,11 +2430,7 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
     state.load_demo_project_state();
     let parsed: serde_json::Value =
         serde_json::from_str(&state.timeline_scene_snapshot_json_state()).unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
     assert!(timeline_qml.contains("TimelineSceneItem"));
     assert!(timeline_qml.contains("sceneSnapshotJson:"));
@@ -2415,9 +2448,9 @@ fn qml_timeline_uses_native_scene_analysis_refs_not_qml_analysis_geometry() {
         .any(|track| track["analysisPreviews"]
             .as_array()
             .is_some_and(|previews| !previews.is_empty())));
-    assert!(scene_cpp.contains("AnalysisPreviewSpec"));
-    assert!(scene_cpp.contains("analysisPreviews"));
-    assert!(scene_cpp.contains("appendAnalysisPreview"));
+    assert!(scene_sources.contains("AnalysisPreviewSpec"));
+    assert!(scene_sources.contains("analysisPreviews"));
+    assert!(scene_sources.contains("appendAnalysisPreview"));
     assert!(!timeline_qml.contains("TimelineAnalysisItem"));
     assert!(!timeline_qml.contains("renderTimelineAnalysis"));
     assert!(!timeline_qml.contains("geometryJson"));
@@ -2469,11 +2502,12 @@ fn native_timeline_viewport_changes_do_not_reparse_scene_snapshot() {
         "void TimelineSceneItem::setPlaybackPositionSeconds",
     ];
 
-    assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
-    assert!(!update_paint_node.contains("parseSnapshot("));
+    assert!(scene_cpp
+        .contains("m_snapshot->snapshot = parseTimelineSceneSnapshot(m_sceneSnapshotJson);"));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
     for setter in viewport_setters {
         assert!(
-            !cpp_method_body(&scene_cpp, setter).contains("parseSnapshot("),
+            !cpp_method_body(&scene_cpp, setter).contains("parseTimelineSceneSnapshot("),
             "{setter} must not parse scene snapshots"
         );
     }
@@ -2561,7 +2595,7 @@ fn qml_timeline_scroll_updates_native_viewport_without_per_frame_geometry_regene
     assert!(!timeline_qml.contains("renderTimelineWaveform("));
     assert!(!timeline_qml.contains("renderTimelineAnalysis("));
     assert!(!timeline_qml.contains("geometryJson"));
-    assert!(!update_paint_node.contains("parseSnapshot("));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
 }
 
 #[test]
@@ -2726,6 +2760,7 @@ fn timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_re
             .join("src/timeline_scene/timeline_scene_item.cpp"),
     )
     .unwrap();
+    let scene_sources = native_timeline_scene_sources();
     let update_paint_node_start = scene_cpp
         .find("QSGNode* TimelineSceneItem::updatePaintNode")
         .unwrap();
@@ -2745,23 +2780,24 @@ fn timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_re
     assert!(scene_header.contains("void scrubRequested(double seconds);"));
     assert!(scene_header.contains("void mouseMoveEvent(QMouseEvent* event) override;"));
     assert!(scene_header.contains("void mouseReleaseEvent(QMouseEvent* event) override;"));
-    assert!(scene_cpp.contains("appendRulerTicks"));
-    assert!(scene_cpp.contains("QString markerId;"));
-    assert!(scene_cpp.contains("marker.selected"));
-    assert!(scene_cpp.contains("markerRectForTrack"));
+    assert!(scene_sources.contains("appendRulerTicks"));
+    assert!(scene_sources.contains("QString markerId;"));
+    assert!(scene_sources.contains("marker.selected"));
+    assert!(scene_sources.contains("timelineMarkerRectForTrack"));
     assert!(scene_cpp
-        .contains("emit markerClicked(trackId, marker.markerId, additiveSelection(*event));"));
-    assert!(scene_cpp.contains("emit scrubRequested(secondsForPosition("));
+        .contains("emit markerClicked(trackId, marker.markerId, timelineAdditiveSelection(event->modifiers()));"));
+    assert!(scene_cpp.contains("emit scrubRequested(timelineSecondsForPosition("));
     assert!(scene_cpp.contains("event->position().x()"));
     assert!(scene_cpp.contains("m_scrubbingRuler"));
-    assert!(scene_cpp.contains("selectionStripe"));
-    assert!(scene_cpp.contains("playhead"));
-    assert!(scene_cpp.contains("kWheelAngleToDeltaFactor"));
-    assert!(scene_cpp.contains("kZoomSensitivityBase"));
-    assert!(scene_cpp.contains("kWheelAngleUnitsPerNotch"));
-    assert!(scene_cpp.contains("kScrollPixelsPerNotch"));
-    assert!(scene_cpp.contains("m_snapshot->snapshot = parseSnapshot(m_sceneSnapshotJson);"));
-    assert!(!update_paint_node.contains("parseSnapshot("));
+    assert!(scene_sources.contains("selectionStripe"));
+    assert!(scene_sources.contains("playhead"));
+    assert!(scene_sources.contains("kWheelAngleToDeltaFactor"));
+    assert!(scene_sources.contains("kZoomSensitivityBase"));
+    assert!(scene_sources.contains("kWheelAngleUnitsPerNotch"));
+    assert!(scene_sources.contains("kScrollPixelsPerNotch"));
+    assert!(scene_cpp
+        .contains("m_snapshot->snapshot = parseTimelineSceneSnapshot(m_sceneSnapshotJson);"));
+    assert!(!update_paint_node.contains("parseTimelineSceneSnapshot("));
 }
 
 #[test]
@@ -2881,20 +2917,16 @@ fn timeline_scene_item_draws_track_labels_and_offsets_timeline_content() {
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
-    assert!(scene_cpp.contains("constexpr double kLabelWidth = 280.0;"));
-    assert!(scene_cpp.contains("QString name;"));
-    assert!(scene_cpp.contains(
+    assert!(scene_sources.contains("constexpr double kLabelWidth = 280.0;"));
+    assert!(scene_sources.contains("QString name;"));
+    assert!(scene_sources.contains(
         "track.name = trackObject.value(QStringLiteral(\"name\")).toString(track.trackId);"
     ));
-    assert!(scene_cpp.contains("QSGSimpleTextureNode"));
-    assert!(scene_cpp.contains("appendTrackLabel"));
-    assert!(scene_cpp.contains("laneOriginX()"));
+    assert!(scene_sources.contains("QSGSimpleTextureNode"));
+    assert!(scene_sources.contains("appendTrackLabel"));
+    assert!(scene_sources.contains("timelineLaneOriginX()"));
     assert!(timeline_view_qml.contains(
         "Math.max(0, width - timelineRoot.timelineLabelWidth - timelineRoot.timelineLeftPadding)"
     ));
@@ -2913,27 +2945,25 @@ fn timeline_scene_item_draws_track_tree_indentation_and_disclosure() {
             .join("src/timeline_scene/timeline_scene_item.h"),
     )
     .unwrap();
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
-    assert!(scene_cpp.contains("int depth = 0;"));
-    assert!(scene_cpp.contains("bool hasChildren = false;"));
-    assert!(scene_cpp.contains(
+    assert!(scene_sources.contains("int depth = 0;"));
+    assert!(scene_sources.contains("bool hasChildren = false;"));
+    assert!(scene_sources.contains(
         "track.depth = std::max(0, trackObject.value(QStringLiteral(\"depth\")).toInt(0));"
     ));
-    assert!(scene_cpp.contains(
+    assert!(scene_sources.contains(
         "track.hasChildren = trackObject.value(QStringLiteral(\"hasChildren\")).toBool(false);"
     ));
-    assert!(scene_cpp.contains("treeIndentForDepth(track.depth)"));
-    assert!(scene_cpp.contains("appendTrackTreeChrome"));
-    assert!(scene_cpp.contains("track.expanded ? QStringLiteral(\"v\") : QStringLiteral(\">\")"));
+    assert!(scene_sources.contains("treeIndentForDepth(track.depth)"));
+    assert!(scene_sources.contains("appendTrackTreeChrome"));
+    assert!(
+        scene_sources.contains("track.expanded ? QStringLiteral(\"v\") : QStringLiteral(\">\")")
+    );
     assert!(
         scene_header.contains("void trackExpansionToggled(const QString& trackId, bool expanded);")
     );
-    assert!(scene_cpp.contains("emit trackExpansionToggled(trackId, !track.expanded);"));
+    assert!(scene_sources.contains("emit trackExpansionToggled(trackId, !track.expanded);"));
     assert!(timeline_view_qml.contains("onTrackExpansionToggled"));
     assert!(timeline_view_qml
         .contains("timelineRoot.appController.set_track_expanded(trackId, expanded)"));
@@ -2941,17 +2971,13 @@ fn timeline_scene_item_draws_track_tree_indentation_and_disclosure() {
 
 #[test]
 fn timeline_scene_item_draws_visible_lane_rows_even_without_waveform_or_markers() {
-    let scene_cpp = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/timeline_scene/timeline_scene_item.cpp"),
-    )
-    .unwrap();
+    let scene_sources = native_timeline_scene_sources();
 
-    assert!(scene_cpp.contains("appendTrackLaneChrome"));
-    assert!(scene_cpp.contains("laneRowBackground"));
-    assert!(scene_cpp.contains("laneRowBorder"));
-    assert!(scene_cpp.contains("laneCenterGuide"));
-    assert!(scene_cpp.contains("appendTimelineGridLines"));
+    assert!(scene_sources.contains("appendTrackLaneChrome"));
+    assert!(scene_sources.contains("laneRowBackground"));
+    assert!(scene_sources.contains("laneRowBorder"));
+    assert!(scene_sources.contains("laneCenterGuide"));
+    assert!(scene_sources.contains("appendTimelineGridLines"));
 }
 
 #[test]

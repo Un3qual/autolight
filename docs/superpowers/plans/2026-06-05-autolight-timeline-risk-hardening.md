@@ -233,7 +233,7 @@ git commit -m "Add native timeline scene timing counters"
 - Create: `crates/autolight-qt/src/timeline_scene/timeline_input.cpp`
 - Modify: `crates/autolight-qt/src/app_controller/tests.rs`
 
-- [ ] **Step 1: Add a file-size and compile-registration regression**
+- [x] **Step 1: Add a file-size and compile-registration regression**
 
 Add:
 
@@ -263,7 +263,7 @@ fn native_timeline_scene_cpp_is_split_into_focused_units() {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -273,7 +273,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_
 
 Expected: fail until the split is done.
 
-- [ ] **Step 3: Extract data types and parser**
+- [x] **Step 3: Extract data types and parser**
 
 Move `MarkerSpec`, `WaveformSampleSpec`, `AnalysisSampleSpec`, `TrackSpec`, `SceneSnapshot`, `finiteJsonNumber`, `parseColor`, `parseSnapshot`, and related parser-only helpers into `scene_snapshot_parser.h/.cpp`. Keep the API narrow:
 
@@ -281,7 +281,7 @@ Move `MarkerSpec`, `WaveformSampleSpec`, `AnalysisSampleSpec`, `TrackSpec`, `Sce
 SceneSnapshot parseTimelineSceneSnapshot(const QString& sceneSnapshotJson);
 ```
 
-- [ ] **Step 4: Extract frame building**
+- [x] **Step 4: Extract frame building**
 
 Move `RectSpec`, `BandSpec`, `TextSpec`, `SceneFrameSpec`, `appendRulerTicks`, label building, row/lane/waveform/analysis/marker drawing specification, `secondsToX`, `rowIndexForY`, `markerRectForTrack`, and `buildSceneFrame` into `scene_frame_builder.h/.cpp`. Keep the API:
 
@@ -298,7 +298,7 @@ SceneFrameSpec buildTimelineSceneFrame(
   double height);
 ```
 
-- [ ] **Step 5: Extract QSG node updating**
+- [x] **Step 5: Extract QSG node updating**
 
 Move `TextTextureNode`, `updateTextNode`, `updateTextNodes`, `updateBandNode`, `trimChildNodes`, and `updateRootNode` into `scene_graph_nodes.h/.cpp`. Return a small stats struct so Task 2 counters keep working:
 
@@ -314,7 +314,7 @@ QSGNode* updateTimelineSceneGraph(
   SceneGraphUpdateStats* stats);
 ```
 
-- [ ] **Step 6: Extract input math**
+- [x] **Step 6: Extract input math**
 
 Move wheel constants, lane origin helpers, scrub second conversion, modifier handling, and row hit-testing helpers into `timeline_input.h/.cpp`. Keep event methods in `TimelineSceneItem`, but delegate pure calculations to functions that can be unit-tested later:
 
@@ -325,11 +325,11 @@ double timelineVerticalScrollDelta(const QWheelEvent& event);
 double timelineZoomFactor(const QWheelEvent& event);
 ```
 
-- [ ] **Step 7: Register new C++ files**
+- [x] **Step 7: Register new C++ files**
 
 Update `crates/autolight-qt/build.rs` so CXX-Qt compiles all new `.cpp` files next to `timeline_scene_item.cpp` and `scene_graph.cpp`.
 
-- [ ] **Step 8: Run focused and full Qt tests**
+- [x] **Step 8: Run focused and full Qt tests**
 
 Run:
 
@@ -341,7 +341,7 @@ QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_tim
 
 Expected: all pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 

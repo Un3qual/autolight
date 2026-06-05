@@ -10,7 +10,7 @@ Updated: 2026-06-05
 
 ## Planned Follow-Up Batch: Native Timeline Risk Hardening
 
-**Status:** in progress, Task 2 complete
+**Status:** in progress, Task 3 complete
 
 **Goal:** Close the remaining diffray risk areas that are not already fixed: native scene profiling, scene-item file decomposition, explicit waveform memory budgeting, legacy/reference path fencing, and the real-window macOS gesture/playback gate.
 
@@ -38,7 +38,22 @@ counter `Q_PROPERTY` contract, then passed after implementation. Final focused c
 atomic storage and queue `scenePerfCountersChanged()` back to the QObject thread instead of emitting
 from `updatePaintNode`.
 
-**Next Task:** Split `timeline_scene_item.cpp` by responsibility.
+**Task 3:** Completed 2026-06-05. Split `timeline_scene_item.cpp` by responsibility while preserving
+the Task 2 atomic render counters and queued `scenePerfCountersChanged()` notification. Parser/data
+types now live in `scene_snapshot_parser.{h,cpp}`, frame construction and timeline geometry helpers
+live in `scene_frame_builder.{h,cpp}`, QSG node/text texture maintenance lives in
+`scene_graph_nodes.{h,cpp}`, and wheel/input math lives in `timeline_input.{h,cpp}`. The item shell is
+416 lines and keeps property state, snapshot assignment, `updatePaintNode`, and event dispatch.
+
+**Task 3 Verification:** The new regression
+`native_timeline_scene_cpp_is_split_into_focused_units` first failed on missing
+`scene_snapshot_parser.cpp` build registration, then passed after the split. Focused checks passed:
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_cpp_is_split_into_focused_units`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_`;
+`QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_timeline_`;
+`cargo fmt --all -- --check`; and `git diff --check`.
+
+**Next Task:** Add waveform memory budgeting.
 
 ## Batch Plan
 
