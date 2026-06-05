@@ -4,6 +4,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QMetaObject>
 #include <QtCore/QRectF>
 #include <QtCore/QSize>
 #include <QtCore/QVector>
@@ -156,6 +157,18 @@ qulonglong elapsedMicros(const QElapsedTimer& timer)
     return 0;
   }
   return static_cast<qulonglong>((elapsedNanos + 999) / 1000);
+}
+
+bool updateAtomicMax(std::atomic<qulonglong>& value, qulonglong candidate)
+{
+  qulonglong current = value.load(std::memory_order_relaxed);
+  while (candidate > current) {
+    if (value.compare_exchange_weak(
+          current, candidate, std::memory_order_relaxed, std::memory_order_relaxed)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 double laneOriginX()
@@ -1274,12 +1287,32 @@ qulonglong TimelineSceneItem::worstSceneSnapshotParseMicros() const
 
 qulonglong TimelineSceneItem::worstSceneGraphUpdateMicros() const
 {
-  return m_worstSceneGraphUpdateMicros;
+  return m_worstSceneGraphUpdateMicros.load(std::memory_order_relaxed);
 }
 
 qulonglong TimelineSceneItem::textTextureCreateCount() const
 {
-  return m_textTextureCreateCount;
+  return m_textTextureCreateCount.load(std::memory_order_relaxed);
+}
+
+void TimelineSceneItem::queueScenePerfCountersChanged()
+{
+  bool expected = false;
+  if (!m_scenePerfCountersNotifyQueued.compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return;
+  }
+
+  const bool queued = QMetaObject::invokeMethod(
+    this,
+    [this]() {
+      m_scenePerfCountersNotifyQueued.store(false, std::memory_order_release);
+      emit scenePerfCountersChanged();
+    },
+    Qt::QueuedConnection);
+  if (!queued) {
+    m_scenePerfCountersNotifyQueued.store(false, std::memory_order_release);
+  }
 }
 
 QSGNode* TimelineSceneItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
@@ -1315,16 +1348,13 @@ QSGNode* TimelineSceneItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeDat
   QSGNode* updatedRoot = updateRootNode(root, frame, window(), stats);
   const qulonglong graphMicros = elapsedMicros(graphTimer);
   bool perfCountersChanged = false;
-  if (graphMicros > m_worstSceneGraphUpdateMicros) {
-    m_worstSceneGraphUpdateMicros = graphMicros;
-    perfCountersChanged = true;
-  }
+  perfCountersChanged = updateAtomicMax(m_worstSceneGraphUpdateMicros, graphMicros);
   if (stats.textTextureCreateCount > 0) {
-    m_textTextureCreateCount += stats.textTextureCreateCount;
+    m_textTextureCreateCount.fetch_add(stats.textTextureCreateCount, std::memory_order_relaxed);
     perfCountersChanged = true;
   }
   if (perfCountersChanged) {
-    emit scenePerfCountersChanged();
+    queueScenePerfCountersChanged();
   }
   return updatedRoot;
 }

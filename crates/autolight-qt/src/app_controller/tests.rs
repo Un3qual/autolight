@@ -2509,13 +2509,29 @@ fn timeline_scene_item_exposes_native_timing_counters_for_manual_profiling() {
     assert!(scene_header.contains("qulonglong worstSceneGraphUpdateMicros() const;"));
     assert!(scene_header.contains("qulonglong textTextureCreateCount() const;"));
     assert!(scene_header.contains("void scenePerfCountersChanged();"));
+    assert!(scene_header.contains("#include <atomic>"));
     assert!(scene_header.contains("qulonglong m_sceneSnapshotParseCount = 0;"));
     assert!(scene_header.contains("qulonglong m_worstSceneSnapshotParseMicros = 0;"));
-    assert!(scene_header.contains("qulonglong m_worstSceneGraphUpdateMicros = 0;"));
-    assert!(scene_header.contains("qulonglong m_textTextureCreateCount = 0;"));
+    assert!(scene_header.contains("std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};"));
+    assert!(scene_header.contains("std::atomic<qulonglong> m_textTextureCreateCount{0};"));
     assert!(scene_cpp.contains("QElapsedTimer"));
+    assert!(scene_cpp.contains("QMetaObject::invokeMethod"));
+    assert!(scene_cpp.contains("Qt::QueuedConnection"));
     assert!(scene_cpp.contains("m_sceneSnapshotParseCount"));
     assert!(scene_cpp.contains("m_textTextureCreateCount"));
+
+    let update_paint_node = {
+        let update_paint_node_start = scene_cpp
+            .find("QSGNode* TimelineSceneItem::updatePaintNode")
+            .unwrap();
+        &scene_cpp[update_paint_node_start
+            ..scene_cpp[update_paint_node_start..]
+                .find("void TimelineSceneItem::mousePressEvent")
+                .unwrap()
+                + update_paint_node_start]
+    };
+    assert!(update_paint_node.contains("queueScenePerfCountersChanged();"));
+    assert!(!update_paint_node.contains("emit scenePerfCountersChanged();"));
 }
 
 #[test]

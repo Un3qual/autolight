@@ -7,6 +7,7 @@
 #include <QtQuick/QSGNode>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <memory>
 
 struct TimelineSceneSnapshotData;
@@ -82,6 +83,8 @@ protected:
   void wheelEvent(QWheelEvent* event) override;
 
 private:
+  void queueScenePerfCountersChanged();
+
   QString m_sceneSnapshotJson;
   double m_viewportScrollSeconds = 0.0;
   double m_viewportPixelsPerSecond = 100.0;
@@ -92,7 +95,8 @@ private:
   bool m_scrubbingRuler = false;
   qulonglong m_sceneSnapshotParseCount = 0;
   qulonglong m_worstSceneSnapshotParseMicros = 0;
-  qulonglong m_worstSceneGraphUpdateMicros = 0;
-  qulonglong m_textTextureCreateCount = 0;
+  std::atomic<qulonglong> m_worstSceneGraphUpdateMicros{0};
+  std::atomic<qulonglong> m_textTextureCreateCount{0};
+  std::atomic_bool m_scenePerfCountersNotifyQueued{false};
   std::unique_ptr<TimelineSceneSnapshotData> m_snapshot;
 };

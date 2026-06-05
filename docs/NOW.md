@@ -34,6 +34,10 @@ counter `Q_PROPERTY` contract, then passed after implementation. Final focused c
 `QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_item_draws_ruler_markers_selection_and_playhead_without_qml_repeaters`;
 `cargo fmt --all -- --check`; and `git diff --check`.
 
+**Task 2 Threading Follow-Up:** Completed 2026-06-05. The render-thread-updated counters now use
+atomic storage and queue `scenePerfCountersChanged()` back to the QObject thread instead of emitting
+from `updatePaintNode`.
+
 **Next Task:** Split `timeline_scene_item.cpp` by responsibility.
 
 ## Batch Plan
