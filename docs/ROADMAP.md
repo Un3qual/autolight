@@ -4,7 +4,7 @@ This is the ordered execution queue. `docs/NOW.md` owns the current batch; this 
 
 ## Direction
 
-Forward app work targets Rust/CXX-Qt. Qt Quick/QML remains the UI layer. The Python/PySide implementation is a reference app and parity source.
+Forward app work targets Rust/CXX-Qt. Qt Quick/QML remains the UI layer, and Rust is the only checked-in application runtime.
 
 ## Ready Queue
 
@@ -54,7 +54,7 @@ Expose Rust controller state, transform/timeline model surfaces, and the narrow 
 
 **Status:** complete
 
-Bind existing QML workflows to the Rust controller and models while preserving the Python reference path until parity gates pass.
+Bind existing QML workflows to the Rust controller and models.
 
 ### 9. Rust Marker And Tree Controller Actions
 
@@ -72,7 +72,7 @@ Wire file open/save/import and playback transport through the Rust controller.
 
 **Status:** complete
 
-Make the Rust binary the primary run path after the parity gates pass. Keep Python only as an archived/reference implementation until a later cleanup removes it.
+Make the Rust binary the run path after the parity gates pass and remove the superseded runtime surface.
 
 ## Parking Lot
 

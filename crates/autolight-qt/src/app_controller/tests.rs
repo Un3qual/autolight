@@ -2125,29 +2125,24 @@ fn controller_snapped_single_marker_move_clamps_at_timeline_start() {
 }
 
 #[test]
-fn qml_track_rows_show_track_selection_and_allow_lane_selection() {
-    let track_row_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
-    )
-    .unwrap();
-    let lane_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
-    )
-    .unwrap();
+fn qml_runtime_has_no_legacy_track_row_or_lane_components() {
+    let ui_components =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components");
+    let timeline_qml = std::fs::read_to_string(ui_components.join("TimelineView.qml")).unwrap();
 
-    assert!(track_row_qml.contains(
-        "readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId"
-    ));
-    assert!(track_row_qml.contains("id: selectedTrackStripe"));
-    assert!(track_row_qml.contains("visible: root.rowSelected"));
-    assert!(track_row_qml.contains("border.width: root.rowSelected ? 2 : 1"));
-    assert!(track_row_qml.contains("onClicked: root.trackSelected(root.trackId)"));
-    assert!(lane_qml.contains(
-        "readonly property bool rowSelected: root.appController.selectedTrackId === root.trackId"
-    ));
-    assert!(lane_qml.contains("border.width: root.rowSelected ? 2 : 1"));
-    assert!(lane_qml.contains("signal clicked(real x)"));
+    for removed_component in [
+        "TrackRow.qml",
+        "TimelineLane.qml",
+        "MarkerBlock.qml",
+        "TimelineRuler.qml",
+        "TimelineNavigationSurface.qml",
+        "LegacyTimelineView.qml",
+    ] {
+        assert!(!ui_components.join(removed_component).exists());
+    }
+    assert!(timeline_qml.contains("TimelineSceneItem"));
+    assert!(!timeline_qml.contains("TrackRow"));
+    assert!(!timeline_qml.contains("TimelineLane"));
 }
 
 fn native_timeline_scene_sources() -> String {
@@ -2525,24 +2520,14 @@ fn qml_timeline_uses_native_scene_waveform_refs_not_qml_waveform_geometry() {
 }
 
 #[test]
-fn active_rust_timeline_does_not_use_legacy_geometry_invokables() {
+fn active_rust_timeline_removes_legacy_geometry_invokables() {
     let timeline_view_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../UI/components/TimelineView.qml"),
     )
     .unwrap();
-    let legacy_view_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/LegacyTimelineView.qml"),
-    )
-    .unwrap();
-    let lane_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
-    )
-    .unwrap();
-    let reference_only_comment =
-        "Reference-only Python timeline path. The Rust runtime uses TimelineSceneItem";
+    let ui_components =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components");
 
     assert!(timeline_view_qml.contains("TimelineSceneItem"));
     assert!(!timeline_view_qml.contains("renderTimelineWaveform"));
@@ -2550,10 +2535,8 @@ fn active_rust_timeline_does_not_use_legacy_geometry_invokables() {
     assert!(!timeline_view_qml.contains("TimelineWaveformItem"));
     assert!(!timeline_view_qml.contains("TimelineAnalysisItem"));
     assert!(!timeline_view_qml.contains("geometryJson"));
-    assert!(legacy_view_qml.contains("TrackRow"));
-    assert!(legacy_view_qml.contains(reference_only_comment));
-    assert!(lane_qml.contains("renderTimelineWaveform"));
-    assert!(lane_qml.contains(reference_only_comment));
+    assert!(!ui_components.join("LegacyTimelineView.qml").exists());
+    assert!(!ui_components.join("TimelineLane.qml").exists());
 }
 
 #[test]
@@ -2968,7 +2951,7 @@ fn qml_native_timeline_keeps_vertical_scroll_and_visible_track_range_current() {
 }
 
 #[test]
-fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarded() {
+fn qml_timeline_native_scrub_omits_label_width_with_rust_only_runtime() {
     let main_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/Main.qml"),
     )
@@ -2976,25 +2959,6 @@ fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarde
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../UI/components/TimelineView.qml"),
-    )
-    .unwrap();
-    let legacy_lane_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineLane.qml"),
-    )
-    .unwrap();
-    let legacy_analysis_item_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineAnalysisItem.qml"),
-    )
-    .unwrap();
-    let navigation_surface_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../UI/components/TimelineNavigationSurface.qml"),
-    )
-    .unwrap();
-    let track_row_qml = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../UI/components/TrackRow.qml"),
     )
     .unwrap();
 
@@ -3014,16 +2978,9 @@ fn qml_timeline_native_scrub_omits_label_width_and_reference_controls_are_guarde
     assert!(
         timeline_qml.contains("typeof timelineRoot.appController.set_timeline_visible_track_range")
     );
-    assert!(legacy_lane_qml.contains("allowScrub: true"));
-    assert!(legacy_lane_qml.contains("onScrubRequested: function(x, laneWidth)"));
-    assert!(legacy_analysis_item_qml.contains("Canvas"));
-    assert!(legacy_analysis_item_qml.contains("JSON.parse(root.geometryJson)"));
-    assert!(legacy_analysis_item_qml.contains("context.fillRect"));
-    assert!(navigation_surface_qml.contains("property bool pinchActive"));
-    assert!(navigation_surface_qml.contains("property bool scrubActive"));
-    assert!(navigation_surface_qml.contains("function finishWheelNavigationQuietPeriod()"));
-    assert!(navigation_surface_qml.contains("wheelNavigationQuietTimer.stop()"));
-    assert!(track_row_qml.contains("onScrubRequested: function(x, laneWidth)"));
+    assert!(!main_qml.contains("pythonReferenceMode"));
+    assert!(!main_qml.contains("LegacyTimelineView"));
+    assert!(main_qml.contains("source: \"components/TimelineView.qml\""));
 }
 
 #[test]
@@ -3532,7 +3489,9 @@ fn qml_app_runtime_uses_controller_models_and_actions() {
     assert!(adapter_qml.contains("function version_at(index)"));
 
     assert!(adapter_qml.contains("nativeController.timelineSceneSnapshotJson"));
-    assert!(main_qml.contains("source: root.pythonReferenceMode ? \"components/LegacyTimelineView.qml\" : \"components/TimelineView.qml\""));
+    assert!(main_qml.contains("source: \"components/TimelineView.qml\""));
+    assert!(!main_qml.contains("pythonReferenceMode"));
+    assert!(!main_qml.contains("LegacyTimelineView.qml"));
     let timeline_qml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../UI/components/TimelineView.qml"),
@@ -3612,11 +3571,48 @@ fn qml_main_initializes_rust_runtime_demo_after_runtime_is_owned() {
     .unwrap();
 
     assert!(main_qml.contains("function initializeRustRuntime()"));
-    assert!(main_qml.contains("if (!root.pythonReferenceMode)"));
     assert!(main_qml.contains("root.controller.start_default_project()"));
+    assert!(!main_qml.contains("pythonReferenceMode"));
     assert!(main_qml.contains("Component.onCompleted: root.initializeRustRuntime()"));
     assert!(adapter_qml.contains("function start_default_project()"));
     assert!(!adapter_qml.contains("Component.onCompleted: load_demo_project()"));
+}
+
+#[test]
+fn repo_surface_is_rust_only_after_port_cleanup() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    for removed_path in [
+        ".python-version",
+        "autolight",
+        "tests",
+        "main.py",
+        "hello_qt.py",
+        "pyproject.toml",
+        "uv.lock",
+        "scripts/check_qml_screenshot.py",
+        "notebook",
+        "docs/superpowers",
+    ] {
+        assert!(!repo_root.join(removed_path).exists());
+    }
+}
+
+#[test]
+fn current_docs_describe_rust_only_runtime() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for doc_path in [
+        "README.md",
+        "AGENTS.md",
+        "docs/PROCESS.md",
+        "docs/ROADMAP.md",
+    ] {
+        let text = std::fs::read_to_string(repo_root.join(doc_path)).unwrap();
+        assert!(!text.contains("Python"));
+        assert!(!text.contains("PySide"));
+        assert!(!text.contains("uv run"));
+        assert!(!text.contains("reference implementation"));
+    }
 }
 
 fn json_array(payload: &str) -> Vec<Value> {
