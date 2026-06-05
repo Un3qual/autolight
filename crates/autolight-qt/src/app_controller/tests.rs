@@ -2224,9 +2224,15 @@ fn qml_timeline_supports_wheel_scroll_and_anchor_zoom_without_model_reload() {
 fn native_timeline_scene_cpp_is_split_into_focused_units() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let build_rs = std::fs::read_to_string(manifest_dir.join("build.rs")).unwrap();
-    let scene_cpp =
-        std::fs::read_to_string(manifest_dir.join("src/timeline_scene/timeline_scene_item.cpp"))
-            .unwrap();
+    let scene_dir = manifest_dir.join("src/timeline_scene");
+    let scene_cpp = std::fs::read_to_string(scene_dir.join("timeline_scene_item.cpp")).unwrap();
+    let snapshot_parser_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_snapshot_parser.cpp")).unwrap();
+    let frame_builder_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_frame_builder.cpp")).unwrap();
+    let scene_graph_nodes_cpp =
+        std::fs::read_to_string(scene_dir.join("scene_graph_nodes.cpp")).unwrap();
+    let timeline_input_cpp = std::fs::read_to_string(scene_dir.join("timeline_input.cpp")).unwrap();
     let required_files = [
         "scene_snapshot_parser.cpp",
         "scene_frame_builder.cpp",
@@ -2244,6 +2250,15 @@ fn native_timeline_scene_cpp_is_split_into_focused_units() {
         scene_cpp.lines().count() < 650,
         "timeline_scene_item.cpp should stay as the QQuickItem shell"
     );
+    assert!(!scene_cpp.contains("QJsonDocument"));
+    assert!(!scene_cpp.contains("QSGSimpleTextureNode"));
+    assert!(!scene_cpp.contains("QPainter painter"));
+    assert!(!scene_cpp.contains("void appendRulerTicks"));
+    assert!(snapshot_parser_cpp.contains("parseTimelineSceneSnapshot"));
+    assert!(frame_builder_cpp.contains("buildTimelineSceneFrame"));
+    assert!(scene_graph_nodes_cpp.contains("updateTimelineSceneGraph"));
+    assert!(timeline_input_cpp.contains("timelineHorizontalScrollDelta"));
+    assert!(timeline_input_cpp.contains("timelineZoomFactor"));
 }
 
 #[test]
