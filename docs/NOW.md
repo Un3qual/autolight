@@ -2,7 +2,7 @@
 
 Updated: 2026-06-05
 
-## Active Batch: PR 14 Review-Bot Follow-Through
+## Active Batch: PR 14 Review-Bot Follow-Through Refresh
 
 **Status:** complete
 
@@ -10,23 +10,22 @@ Updated: 2026-06-05
 
 ## Scope
 
-- Pulled `codex/native-timeline-navigation` to PR #14 head `59a2cda`, including the merged PR #15 native timeline risk-hardening commits and Python runtime removal.
+- Pulled `codex/native-timeline-navigation`; PR #14 was already current at `e02807d`.
 - Fetched PR #14 review threads, top-level bot comments, stale/outdated duplicate threads, and review summaries from GitHub.
-- Fixed the still-actionable Codex review findings: fractional vertical track scrolling now applies sub-row offsets to row placement and hit testing; editable markers expose native body-drag and right-handle resize signals wired to the existing Rust marker edit commands; marker labels survive native snapshot parsing and render inside sufficiently wide cue blocks; ruler header/track-label clicks no longer seek; visible track ranges refresh when height or track count changes even if the clamped scroll value is unchanged; and the scroll slider now marks user navigation so playback follow does not immediately snap it back.
-- Verified the stale marker lane-clipping duplicate was already fixed by `timelineLaneClippedRect` and the existing `native_timeline_marker_hit_tests_are_clipped_to_visible_lane` regression.
-- One requested 5.5 xhigh QML subagent could not start because that model was at capacity; the QML comments were analyzed and fixed locally instead of using a lower model.
+- Found three new unresolved Codex bot threads.
+- Fixed the cache-only waveform finding by allowing the native scene snapshot to build waveform previews from validated cache-backed `waveformRef` payloads when inline `waveform_payload` provenance is absent, without marking the project dirty or reintroducing QML waveform rendering.
+- Fixed the scrolled-row clipping finding by adding row-viewport and row-lane clip helpers that keep row backgrounds, labels, tree chrome, waveform bodies, analysis previews, and marker bodies below the ruler while leaving intentional ruler/playhead drawing paths intact.
+- Analyzed the QML mirror snapshot finding with a 5.5 xhigh subagent and verified it was not valid as stated: marker selection, marker move/resize, and track expansion already call `reloadModels()` or `reloadTimelineSceneSnapshot()`. Strengthened the source contract test for those mutation wrappers instead of changing production QML.
+- Used two 5.5 xhigh subagents for independent review-thread analysis: one for cache-backed waveforms and one for QML snapshot refresh.
 
 ## Target Paths
 
-- `UI/Main.qml`
-- `UI/components/TimelineView.qml`
 - `crates/autolight-qt/src/app_controller/tests.rs`
 - `crates/autolight-qt/src/timeline_scene/scene_frame_builder.h`
 - `crates/autolight-qt/src/timeline_scene/scene_frame_builder.cpp`
-- `crates/autolight-qt/src/timeline_scene/scene_snapshot_parser.h`
-- `crates/autolight-qt/src/timeline_scene/scene_snapshot_parser.cpp`
-- `crates/autolight-qt/src/timeline_scene/timeline_scene_item.h`
-- `crates/autolight-qt/src/timeline_scene/timeline_scene_item.cpp`
+- `crates/autolight-qt/src/timeline_scene/model.rs`
+- `crates/autolight-qt/src/timeline_scene/mod.rs`
+- `crates/autolight-qt/src/app_controller/timeline_controller.rs`
 - `docs/NOW.md`
 
 ## Verification
@@ -34,9 +33,9 @@ Updated: 2026-06-05
 Passed:
 
 ```bash
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_native_timeline_refreshes_visible_range_when_scroll_value_is_unchanged
-QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_main_marks_scroll_slider_changes_as_user_navigation
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked timeline_scene_snapshot_uses_cache_backed_waveform_ref_without_inline_payload
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked native_timeline_scene_clips_scrolled_rows_below_ruler
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked qml_app_runtime_refreshes_native_timeline_scene_snapshot_after_model_changes
 cargo fmt --all -- --check
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked
 QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
@@ -47,6 +46,6 @@ git diff --check
 
 ## Handoff
 
-PR #14 follow-through is complete for the fetched bot feedback. The branch was pushed, all seven unresolved Codex bot threads were replied to and resolved, and the final thread refresh reported zero unresolved review threads.
+PR #14 follow-through is complete for the latest fetched bot feedback. The branch should be pushed and the three new Codex bot threads should be replied to/resolved after this docs update is committed.
 
-Next: monitor PR #14 for any new bot feedback on the latest head. Current external status caveat: diffray's check failed with an infrastructure-style "Review task failed. Please try again" message and no annotations; DeepSource Rust/Python passed and CodeRabbit skipped review.
+Next: after push and thread replies, refresh PR #14 thread state and bot/check status again. Current external status before this pass: diffray failed with an infrastructure-style review failure and no annotations; DeepSource Rust/Python passed and CodeRabbit skipped review.

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use autolight_core::cache::cache_entry_matches_payload;
 use autolight_core::project::{ResultState, TrackType};
 use cxx_qt_lib::QString;
 use serde_json::{json, Value};
@@ -7,7 +8,7 @@ use serde_json::{json, Value};
 use crate::timeline_model::{
     timeline_rows_for_project_with_state, timeline_track_ids_for_project_with_state,
 };
-use crate::timeline_scene::scene_snapshot_from_project_rows;
+use crate::timeline_scene::scene_snapshot_from_project_rows_with_waveform_payloads;
 use crate::transform_model::transform_specs_json;
 
 use super::{
@@ -484,11 +485,14 @@ impl AppControllerState {
             }
         }
         let duration_seconds = self.project_timeline_duration_seconds();
-        let scene_snapshot = scene_snapshot_from_project_rows(
+        let scene_snapshot = scene_snapshot_from_project_rows_with_waveform_payloads(
             &self.project,
             &timeline_rows,
             duration_seconds,
             &self.selected_track_id.to_string(),
+            |row, reference| {
+                self.waveform_payload_for_scene_ref(&row.track_id, &reference.cache_ref)
+            },
         );
         match serde_json::to_string(&scene_snapshot) {
             Ok(snapshot_json) => {
@@ -504,6 +508,22 @@ impl AppControllerState {
         self.timeline.set_duration(duration_seconds);
         self.refresh_visible_track_ids();
         self.refresh_selected_state();
+    }
+
+    fn waveform_payload_for_scene_ref(&self, track_id: &str, cache_ref: &str) -> Option<Value> {
+        if !self.track_owns_valid_cache_ref(track_id, cache_ref, "waveform") {
+            return None;
+        }
+        let entry = self
+            .project
+            .cache_entries
+            .iter()
+            .find(|entry| entry.id == cache_ref)?;
+        let bytes = self.cache_entry_payload_bytes(entry).ok()?;
+        if !cache_entry_matches_payload(entry, &bytes).unwrap_or(false) {
+            return None;
+        }
+        serde_json::from_slice(&bytes).ok()
     }
 
     pub(super) fn capture_timeline_ui_state(&mut self) {

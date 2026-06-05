@@ -102,6 +102,56 @@ void appendLaneClippedRect(
     });
 }
 
+void appendRowViewportClippedRect(
+  QVector<BandSpec>& bands,
+  const QColor& color,
+  double x,
+  double y,
+  double width,
+  double height,
+  double boundsWidth,
+  double boundsHeight)
+{
+  const QRectF clipped = timelineRowViewportClippedRect(QRectF(x, y, width, height), boundsWidth, boundsHeight);
+  if (clipped.isEmpty()) {
+    return;
+  }
+  appendRect(
+    bands,
+    color,
+    RectSpec{
+      static_cast<float>(clipped.x()),
+      static_cast<float>(clipped.y()),
+      static_cast<float>(clipped.width()),
+      static_cast<float>(clipped.height()),
+    });
+}
+
+void appendRowLaneClippedRect(
+  QVector<BandSpec>& bands,
+  const QColor& color,
+  double x,
+  double y,
+  double width,
+  double height,
+  double boundsWidth,
+  double boundsHeight)
+{
+  const QRectF clipped = timelineRowLaneClippedRect(QRectF(x, y, width, height), boundsWidth, boundsHeight);
+  if (clipped.isEmpty()) {
+    return;
+  }
+  appendRect(
+    bands,
+    color,
+    RectSpec{
+      static_cast<float>(clipped.x()),
+      static_cast<float>(clipped.y()),
+      static_cast<float>(clipped.width()),
+      static_cast<float>(clipped.height()),
+    });
+}
+
 void appendText(
   QVector<TextSpec>& texts,
   const QString& text,
@@ -131,12 +181,43 @@ void appendText(
   texts.push_back(spec);
 }
 
+void appendRowViewportText(
+  QVector<TextSpec>& texts,
+  const QString& text,
+  const QColor& color,
+  double x,
+  double y,
+  double width,
+  double height,
+  int pixelSize,
+  bool bold,
+  double boundsWidth,
+  double boundsHeight)
+{
+  const QRectF clipped = timelineRowViewportClippedRect(QRectF(x, y, width, height), boundsWidth, boundsHeight);
+  if (clipped.isEmpty()) {
+    return;
+  }
+  appendText(
+    texts,
+    text,
+    color,
+    clipped.x(),
+    clipped.y(),
+    clipped.width(),
+    clipped.height(),
+    pixelSize,
+    bold);
+}
+
 void appendTrackLabel(
   QVector<TextSpec>& texts,
   const TrackSpec& track,
   double y,
   double rowHeight,
-  bool selected)
+  bool selected,
+  double width,
+  double height)
 {
   const QColor titleColor = selected
     ? QColor(QStringLiteral("#f8fafc"))
@@ -161,7 +242,7 @@ void appendTrackLabel(
   const double titleX = 14.0 + indent + disclosureWidth;
   if (track.hasChildren) {
     const QRectF disclosureRect = timelineDisclosureRectForTrack(track, y);
-    appendText(
+    appendRowViewportText(
       texts,
       track.expanded ? QStringLiteral("v") : QStringLiteral(">"),
       metaColor,
@@ -170,9 +251,11 @@ void appendTrackLabel(
       disclosureRect.width(),
       disclosureRect.height(),
       13,
-      true);
+      true,
+      width,
+      height);
   }
-  appendText(
+  appendRowViewportText(
     texts,
     title,
     titleColor,
@@ -181,8 +264,10 @@ void appendTrackLabel(
     kLabelWidth - titleX - 14.0,
     22.0,
     14,
-    selected);
-  appendText(
+    selected,
+    width,
+    height);
+  appendRowViewportText(
     texts,
     meta,
     metaColor,
@@ -191,7 +276,9 @@ void appendTrackLabel(
     kLabelWidth - titleX - 14.0,
     18.0,
     11,
-    false);
+    false,
+    width,
+    height);
 }
 
 void appendTrackTreeChrome(
@@ -208,14 +295,14 @@ void appendTrackTreeChrome(
   const QColor disclosureBorder(selected ? QStringLiteral("#7dd3fc") : QStringLiteral("#475569"));
   for (int depth = 1; depth <= track.depth; ++depth) {
     const double x = 21.0 + treeIndentForDepth(depth - 1);
-    appendClippedRect(bands, treeGuide, x, y + 9.0, 1.0, rowHeight - 18.0, width, height);
+    appendRowViewportClippedRect(bands, treeGuide, x, y + 9.0, 1.0, rowHeight - 18.0, width, height);
   }
   if (!track.hasChildren) {
     return;
   }
 
   const QRectF disclosureRect = timelineDisclosureRectForTrack(track, y);
-  appendClippedRect(
+  appendRowViewportClippedRect(
     bands,
     disclosureFill,
     disclosureRect.x(),
@@ -224,7 +311,7 @@ void appendTrackTreeChrome(
     disclosureRect.height(),
     width,
     height);
-  appendClippedRect(
+  appendRowViewportClippedRect(
     bands,
     disclosureBorder,
     disclosureRect.x(),
@@ -233,7 +320,7 @@ void appendTrackTreeChrome(
     1.0,
     width,
     height);
-  appendClippedRect(
+  appendRowViewportClippedRect(
     bands,
     disclosureBorder,
     disclosureRect.x(),
@@ -242,7 +329,7 @@ void appendTrackTreeChrome(
     1.0,
     width,
     height);
-  appendClippedRect(
+  appendRowViewportClippedRect(
     bands,
     disclosureBorder,
     disclosureRect.x(),
@@ -251,7 +338,7 @@ void appendTrackTreeChrome(
     disclosureRect.height(),
     width,
     height);
-  appendClippedRect(
+  appendRowViewportClippedRect(
     bands,
     disclosureBorder,
     disclosureRect.x() + disclosureRect.width() - 1.0,
@@ -287,8 +374,8 @@ void appendTrackLaneChrome(
   const double chromeWidth = std::max(0.0, width - originX);
   const double centerY = chromeTop + chromeHeight / 2.0;
 
-  appendClippedRect(bands, laneGutter, kLabelWidth, y, originX - kLabelWidth, rowHeight, width, height);
-  appendClippedRect(
+  appendRowViewportClippedRect(bands, laneGutter, kLabelWidth, y, originX - kLabelWidth, rowHeight, width, height);
+  appendRowLaneClippedRect(
     bands,
     selected ? withAlpha(laneRowBackground, 245) : laneRowBackground,
     originX,
@@ -297,7 +384,7 @@ void appendTrackLaneChrome(
     chromeHeight,
     width,
     height);
-  appendClippedRect(
+  appendRowLaneClippedRect(
     bands,
     selected ? withAlpha(laneRowBorder, 220) : withAlpha(laneRowBorder, 135),
     originX,
@@ -306,7 +393,7 @@ void appendTrackLaneChrome(
     selected ? 1.5 : 1.0,
     width,
     height);
-  appendClippedRect(
+  appendRowLaneClippedRect(
     bands,
     selected ? withAlpha(laneRowBorder, 220) : withAlpha(laneRowBorder, 125),
     originX,
@@ -315,7 +402,7 @@ void appendTrackLaneChrome(
     selected ? 1.5 : 1.0,
     width,
     height);
-  appendClippedRect(
+  appendRowLaneClippedRect(
     bands,
     selected ? withAlpha(laneRowBorder, 220) : withAlpha(laneRowBorder, 115),
     originX,
@@ -324,7 +411,7 @@ void appendTrackLaneChrome(
     chromeHeight,
     width,
     height);
-  appendClippedRect(bands, laneCenterGuide, originX, centerY, chromeWidth, 1.0, width, height);
+  appendRowLaneClippedRect(bands, laneCenterGuide, originX, centerY, chromeWidth, 1.0, width, height);
 }
 
 int resolvedSelectedTrackIndex(const SceneSnapshot& snapshot, int requestedIndex)
@@ -383,7 +470,7 @@ void appendTimelineGridLines(
     const double ratio = tickSeconds / majorStepSeconds;
     const bool major = sameDouble(ratio, std::round(ratio));
     const double x = originX + timelineSecondsToX(tickSeconds, scrollSeconds, pixelsPerSecond);
-    appendLaneClippedRect(
+    appendRowLaneClippedRect(
       bands,
       major ? majorGrid : minorGrid,
       x,
@@ -462,7 +549,7 @@ void appendAnalysisPreview(
     const double sampleWidth = std::max(1.0, nextX - sampleX);
     const double sampleHeight = energy ? std::max(1.0, sample.intensity * stripHeight) : stripHeight;
     const QColor sampleColor = energy ? QColor(QStringLiteral("#facc15")) : sample.color;
-    appendLaneClippedRect(
+    appendRowLaneClippedRect(
       bands,
       withAlpha(sampleColor, energy ? 170 : 150),
       originX + sampleX,
@@ -491,6 +578,31 @@ QRectF timelineLaneClippedRect(const QRectF& rect, double boundsWidth, double bo
   const double laneLeft = timelineLaneOriginX();
   const double left = std::max(laneLeft, rect.x());
   const double top = std::max(0.0, rect.y());
+  const double right = std::min(boundsWidth, rect.x() + rect.width());
+  const double bottom = std::min(boundsHeight, rect.y() + rect.height());
+  if (right <= left || bottom <= top) {
+    return QRectF();
+  }
+  return QRectF(left, top, right - left, bottom - top);
+}
+
+QRectF timelineRowViewportClippedRect(const QRectF& rect, double boundsWidth, double boundsHeight)
+{
+  const double left = std::max(0.0, rect.x());
+  const double top = std::max(kRulerHeight, rect.y());
+  const double right = std::min(boundsWidth, rect.x() + rect.width());
+  const double bottom = std::min(boundsHeight, rect.y() + rect.height());
+  if (right <= left || bottom <= top) {
+    return QRectF();
+  }
+  return QRectF(left, top, right - left, bottom - top);
+}
+
+QRectF timelineRowLaneClippedRect(const QRectF& rect, double boundsWidth, double boundsHeight)
+{
+  const double laneLeft = timelineLaneOriginX();
+  const double left = std::max(laneLeft, rect.x());
+  const double top = std::max(kRulerHeight, rect.y());
   const double right = std::min(boundsWidth, rect.x() + rect.width());
   const double bottom = std::min(boundsHeight, rect.y() + rect.height());
   if (right <= left || bottom <= top) {
@@ -592,7 +704,7 @@ SceneFrameSpec buildTimelineSceneFrame(
     const double rowHeight = std::min(kRowHeight, height - y);
     const QColor laneColor = trackIndex % 2 == 0 ? laneEven : laneOdd;
     const bool selected = trackIndex == selectedIndex;
-    appendClippedRect(
+    appendRowViewportClippedRect(
       bands,
       selected ? selectedLabelBackground : labelBackground,
       0.0,
@@ -601,9 +713,10 @@ SceneFrameSpec buildTimelineSceneFrame(
       rowHeight,
       width,
       height);
-    appendClippedRect(bands, laneColor, kLabelWidth, y, width - kLabelWidth, rowHeight, width, height);
-    appendClippedRect(bands, laneDivider, 0.0, y + rowHeight - 1.0, width, 1.0, width, height);
-    appendClippedRect(bands, rulerEdge, kLabelWidth - 1.0, y, 1.0, rowHeight, width, height);
+    appendRowViewportClippedRect(
+      bands, laneColor, kLabelWidth, y, width - kLabelWidth, rowHeight, width, height);
+    appendRowViewportClippedRect(bands, laneDivider, 0.0, y + rowHeight - 1.0, width, 1.0, width, height);
+    appendRowViewportClippedRect(bands, rulerEdge, kLabelWidth - 1.0, y, 1.0, rowHeight, width, height);
     appendTrackLaneChrome(bands, selected, trackIndex, y, rowHeight, originX, width, height);
     appendTimelineGridLines(
       bands,
@@ -617,17 +730,19 @@ SceneFrameSpec buildTimelineSceneFrame(
       height);
 
     if (selected) {
-      appendClippedRect(
+      appendRowViewportClippedRect(
         bands, withAlpha(selectionStripe, 230), 0.0, y, kSelectionStripeWidth, rowHeight, width, height);
-      appendClippedRect(bands, withAlpha(selectionOutline, 180), 0.0, y, width, 1.0, width, height);
-      appendClippedRect(
+      appendRowViewportClippedRect(
+        bands, withAlpha(selectionOutline, 180), 0.0, y, width, 1.0, width, height);
+      appendRowViewportClippedRect(
         bands, withAlpha(selectionOutline, 180), 0.0, y + rowHeight - 1.0, width, 1.0, width, height);
-      appendClippedRect(bands, withAlpha(selectionOutline, 160), width - 1.0, y, 1.0, rowHeight, width, height);
+      appendRowViewportClippedRect(
+        bands, withAlpha(selectionOutline, 160), width - 1.0, y, 1.0, rowHeight, width, height);
     }
 
     const TrackSpec& track = snapshot.tracks[trackIndex];
     appendTrackTreeChrome(bands, track, selected, y, rowHeight, width, height);
-    appendTrackLabel(texts, track, y, rowHeight, selected);
+    appendTrackLabel(texts, track, y, rowHeight, selected, width, height);
 
     const double waveformTop = y + 12.0;
     const double waveformHeight = std::max(1.0, rowHeight - 24.0);
@@ -643,7 +758,7 @@ SceneFrameSpec buildTimelineSceneFrame(
       const double sampleWidth = std::max(1.0, nextX - sampleX);
       const double peakHeight = std::max(1.0, sample.peak * waveformScaleY);
       const double rmsHeight = std::max(1.0, sample.rms * waveformScaleY);
-      appendLaneClippedRect(
+      appendRowLaneClippedRect(
         bands,
         QColor(QStringLiteral("#1d4ed8")),
         originX + sampleX,
@@ -652,7 +767,7 @@ SceneFrameSpec buildTimelineSceneFrame(
         peakHeight * 2.0,
         width,
         height);
-      appendLaneClippedRect(
+      appendRowLaneClippedRect(
         bands,
         QColor(QStringLiteral("#60a5fa")),
         originX + sampleX,
@@ -676,10 +791,10 @@ SceneFrameSpec buildTimelineSceneFrame(
     }
     for (const MarkerSpec& marker : track.markers) {
       const QRectF markerRect = timelineMarkerRectForTrack(marker, y, rowHeight, scrollSeconds, pixelsPerSecond);
-      const QRectF visibleMarkerRect = timelineLaneClippedRect(markerRect, width, height);
+      const QRectF visibleMarkerRect = timelineRowLaneClippedRect(markerRect, width, height);
       QColor markerFill = marker.color;
       markerFill.setAlpha(marker.selected ? 230 : 155);
-      appendLaneClippedRect(
+      appendRowLaneClippedRect(
         bands,
         markerFill,
         markerRect.x(),
@@ -698,7 +813,7 @@ SceneFrameSpec buildTimelineSceneFrame(
         width,
         height);
       if (!marker.label.isEmpty() && visibleMarkerRect.width() >= kMinimumMarkerLabelWidth) {
-        appendText(
+        appendRowViewportText(
           texts,
           marker.label,
           QColor(QStringLiteral("#111318")),
@@ -707,7 +822,9 @@ SceneFrameSpec buildTimelineSceneFrame(
           std::max(1.0, visibleMarkerRect.width() - 8.0),
           14.0,
           10,
-          true);
+          true,
+          width,
+          height);
       }
     }
   }

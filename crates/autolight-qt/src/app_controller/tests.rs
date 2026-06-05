@@ -2795,6 +2795,37 @@ fn timeline_scene_snapshot_contains_static_tracks_without_waveform_geometry() {
 }
 
 #[test]
+fn timeline_scene_snapshot_uses_cache_backed_waveform_ref_without_inline_payload() {
+    let mut state = AppControllerState::default();
+    state.load_demo_project_state();
+    let waveform_track = state
+        .project
+        .tracks
+        .iter_mut()
+        .find(|track| track.id == "track_waveform")
+        .unwrap();
+    waveform_track.provenance.remove("waveform_payload");
+    waveform_track.provenance.remove("visible_waveform");
+
+    state.refresh_view_state();
+
+    let snapshot_json = state.timeline_scene_snapshot_json_state();
+    let parsed: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    let waveform_track = parsed["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["trackId"] == "track_waveform")
+        .unwrap();
+
+    assert!(waveform_track["waveformRef"].is_object());
+    assert!(waveform_track["waveformPreview"]
+        .as_array()
+        .is_some_and(|samples| !samples.is_empty() && samples.len() <= 4_096));
+    assert!(!state.is_dirty);
+}
+
+#[test]
 fn timeline_scene_snapshot_preserves_track_tree_metadata_for_native_rendering() {
     let mut state = AppControllerState::default();
     state.load_demo_project_state();
@@ -2976,7 +3007,9 @@ fn native_timeline_scene_preserves_marker_labels() {
     assert!(scene_sources.contains(
         "if (!marker.label.isEmpty() && visibleMarkerRect.width() >= kMinimumMarkerLabelWidth)"
     ));
-    assert!(scene_sources.contains("appendText(\n          texts,\n          marker.label"));
+    assert!(
+        scene_sources.contains("appendRowViewportText(\n          texts,\n          marker.label")
+    );
 }
 
 #[test]
@@ -3152,17 +3185,36 @@ fn native_timeline_scene_clips_scrolled_content_to_lane_origin() {
     assert!(scene_sources.contains("const double laneLeft = timelineLaneOriginX();"));
     assert!(scene_sources.contains("const double left = std::max(laneLeft, rect.x());"));
     assert!(scene_sources.contains(
-        "appendLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#1d4ed8\"))"
+        "appendRowLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#1d4ed8\"))"
     ));
     assert!(scene_sources.contains(
-        "appendLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#60a5fa\"))"
+        "appendRowLaneClippedRect(\n        bands,\n        QColor(QStringLiteral(\"#60a5fa\"))"
     ));
-    assert!(
-        scene_sources.contains("appendLaneClippedRect(\n      bands,\n      withAlpha(sampleColor")
-    );
-    assert!(scene_sources.contains("appendLaneClippedRect(\n        bands,\n        markerFill"));
+    assert!(scene_sources
+        .contains("appendRowLaneClippedRect(\n      bands,\n      withAlpha(sampleColor"));
+    assert!(scene_sources.contains("appendRowLaneClippedRect(\n        bands,\n        markerFill"));
     assert!(scene_sources
         .contains("appendLaneClippedRect(bands, withAlpha(playhead, 245), playheadX - 1.0"));
+}
+
+#[test]
+fn native_timeline_scene_clips_scrolled_rows_below_ruler() {
+    let scene_sources = native_timeline_scene_sources();
+
+    assert!(scene_sources.contains("QRectF timelineRowViewportClippedRect("));
+    assert!(scene_sources.contains("QRectF timelineRowLaneClippedRect("));
+    assert!(scene_sources.contains("const double top = std::max(kRulerHeight, rect.y());"));
+    assert!(scene_sources.contains("void appendRowViewportClippedRect("));
+    assert!(scene_sources.contains("void appendRowLaneClippedRect("));
+    assert!(scene_sources.contains("void appendRowViewportText("));
+    assert!(scene_sources.contains("const QRectF clipped = timelineRowViewportClippedRect("));
+    assert!(scene_sources.contains("const QRectF clipped = timelineRowLaneClippedRect("));
+    assert!(scene_sources.contains(
+        "appendRowViewportClippedRect(\n      bands,\n      selected ? selectedLabelBackground : labelBackground"
+    ));
+    assert!(scene_sources.contains(
+        "const QRectF visibleMarkerRect = timelineRowLaneClippedRect(markerRect, width, height);"
+    ));
 }
 
 #[test]
@@ -3663,6 +3715,18 @@ fn qml_app_runtime_refreshes_native_timeline_scene_snapshot_after_model_changes(
     ));
     assert!(adapter_qml.contains(
         "function select_track(trackId) {\n        nativeController.selectTrack(trackId)\n        reloadSelectionModels()\n        reloadTrackModel()\n        reloadTimelineSceneSnapshot()\n    }"
+    ));
+    assert!(adapter_qml.contains(
+        "function set_track_expanded(trackId, expanded) { var changed = nativeController.setTrackExpanded(trackId, expanded); reloadModels(); return changed }"
+    ));
+    assert!(adapter_qml.contains(
+        "function toggle_marker_selection(markerId, extendSelection) { nativeController.toggleMarkerSelection(markerId, extendSelection); reloadModels() }"
+    ));
+    assert!(adapter_qml.contains(
+        "function move_selected_markers(delta, bypass) { var moved = nativeController.moveSelectedMarkers(delta, bypass); reloadModels(); return moved }"
+    ));
+    assert!(adapter_qml.contains(
+        "function resize_marker(markerId, duration) { var resized = nativeController.resizeMarker(markerId, duration); reloadModels(); return resized }"
     ));
 }
 

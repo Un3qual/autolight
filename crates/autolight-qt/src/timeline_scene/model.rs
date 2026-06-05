@@ -108,17 +108,40 @@ pub fn scene_snapshot_from_project_rows(
     duration_seconds: f64,
     selected_track_id: &str,
 ) -> TimelineSceneSnapshot {
+    scene_snapshot_from_project_rows_with_waveform_payloads(
+        project,
+        rows,
+        duration_seconds,
+        selected_track_id,
+        |_, _| None,
+    )
+}
+
+pub fn scene_snapshot_from_project_rows_with_waveform_payloads(
+    project: &ProjectDocument,
+    rows: &[TimelineRow],
+    duration_seconds: f64,
+    selected_track_id: &str,
+    mut waveform_payload_for_ref: impl FnMut(&TimelineRow, &TimelineWaveformRef) -> Option<Value>,
+) -> TimelineSceneSnapshot {
     TimelineSceneSnapshot {
         duration_seconds,
         tracks: rows
             .iter()
             .map(|row| {
                 let track = project.tracks.iter().find(|track| track.id == row.track_id);
-                let waveform_preview = track
-                    .and_then(|track| track.provenance.get("waveform_payload"))
-                    .map_or_else(Vec::new, |payload| {
-                        waveform_preview_from_payload(payload, row.waveform_duration_seconds)
-                    });
+                let waveform_preview = if let Some(payload) =
+                    track.and_then(|track| track.provenance.get("waveform_payload"))
+                {
+                    waveform_preview_from_payload(payload, row.waveform_duration_seconds)
+                } else {
+                    row.waveform_ref
+                        .as_ref()
+                        .and_then(|reference| waveform_payload_for_ref(row, reference))
+                        .map_or_else(Vec::new, |payload| {
+                            waveform_preview_from_payload(&payload, row.waveform_duration_seconds)
+                        })
+                };
                 let analysis_previews = track
                     .map(|track| analysis_previews_from_row(track, row))
                     .unwrap_or_default();
