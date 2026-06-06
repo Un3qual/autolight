@@ -1,13 +1,11 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# macOS metadata
+.DS_Store
 
-# Virtual environments
-.venv
+# Rust build output
+target/
+
+# CXX-Qt/QML language-server local state
+.qmlls.ini
 
 # Test audio files
 audiofiles/

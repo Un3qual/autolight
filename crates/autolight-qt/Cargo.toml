@@ -1,0 +1,21 @@
+[package]
+name = "autolight-qt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+autolight-analysis = { path = "../autolight-analysis" }
+autolight-core = { path = "../autolight-core" }
+autolight-jobs = { path = "../autolight-jobs" }
+cxx.workspace = true
+cxx-qt.workspace = true
+cxx-qt-lib.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+cxx-qt-build = { version = "0.8.1", features = ["link_qt_object_files"] }

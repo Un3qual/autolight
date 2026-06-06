@@ -1,0 +1,179 @@
+{
+  "audio_assets": [
+    {
+      "channels": 2,
+      "duration": 12.5,
+      "fingerprint": "sha256-basic-song",
+      "id": "asset_basic_song",
+      "import_status": "online",
+      "path": "/fixtures/audio/basic-song.wav",
+      "relink_hint": "",
+      "sample_rate": 44100
+    }
+  ],
+  "cache_entries": [
+    {
+      "artifact_kind": "markers",
+      "created_at": "2026-06-04T00:00:00Z",
+      "dependency_hash": "dep_beats",
+      "id": "cache_beats",
+      "path": "cache/markers/cache_beats.json",
+      "payload_digest": "digest_beats",
+      "size_bytes": 128,
+      "transform_version": "1",
+      "validation_status": "valid"
+    }
+  ],
+  "id": "project_basic_graph",
+  "job_runs": [
+    {
+      "completed_at": "2026-06-04T00:00:02Z",
+      "error": "",
+      "id": "job_beats",
+      "parameters_hash": "params_beats",
+      "produced_cache_refs": [
+        "cache_beats"
+      ],
+      "progress": 1.0,
+      "started_at": "2026-06-04T00:00:01Z",
+      "state": "complete",
+      "track_id": "track_beats",
+      "transform_id": "markers.fixed_interval"
+    }
+  ],
+  "markers": [
+    {
+      "category": "timing",
+      "confidence": 0.98,
+      "duration": null,
+      "id": "marker_beat_1",
+      "label": "Beat",
+      "metadata": {
+        "accent": true,
+        "color": "cyan",
+        "unknown_marker_note": {
+          "kept": true
+        }
+      },
+      "source_marker_ids": [],
+      "source_transform": "markers.fixed_interval",
+      "tags": [
+        "downbeat"
+      ],
+      "timestamp": 0.0,
+      "track_id": "track_beats"
+    },
+    {
+      "category": "cue",
+      "confidence": 0.98,
+      "duration": 0.25,
+      "id": "marker_edit_1",
+      "label": "Intro hit",
+      "metadata": {
+        "color": "amber",
+        "created_by": "user"
+      },
+      "source_marker_ids": [
+        "marker_beat_1"
+      ],
+      "source_transform": "markers.fixed_interval",
+      "tags": [
+        "manual"
+      ],
+      "timestamp": 0.0,
+      "track_id": "track_edit"
+    }
+  ],
+  "name": "Basic Graph",
+  "schema_version": 1,
+  "tracks": [
+    {
+      "cache_refs": [],
+      "dependency_hash": "",
+      "error": "",
+      "id": "track_source",
+      "input_track_ids": [],
+      "name": "basic-song",
+      "output_schema": "",
+      "provenance": {
+        "asset_id": "asset_basic_song",
+        "recorded_by": {
+          "unknown": "fixture"
+        }
+      },
+      "result_state": "complete",
+      "transform_id": "",
+      "transform_params": {},
+      "transform_version": "",
+      "type": "source"
+    },
+    {
+      "cache_refs": [
+        "cache_beats"
+      ],
+      "dependency_hash": "dep_beats",
+      "error": "",
+      "id": "track_beats",
+      "input_track_ids": [
+        "track_source"
+      ],
+      "name": "Beat Markers",
+      "output_schema": "markers.v1",
+      "provenance": {
+        "generated_by": "fixture",
+        "visible_markers": {
+          "count": 1
+        }
+      },
+      "result_state": "complete",
+      "transform_id": "markers.fixed_interval",
+      "transform_params": {
+        "duration": 12.5,
+        "interval": 0.5,
+        "unknown_param": {
+          "preserve": true
+        }
+      },
+      "transform_version": "1",
+      "type": "generated"
+    },
+    {
+      "cache_refs": [],
+      "dependency_hash": "",
+      "error": "",
+      "id": "track_edit",
+      "input_track_ids": [
+        "track_beats"
+      ],
+      "name": "Editable Cues",
+      "output_schema": "",
+      "provenance": {
+        "source_marker_ids": [
+          "marker_beat_1"
+        ],
+        "source_track_id": "track_beats"
+      },
+      "result_state": "complete",
+      "transform_id": "",
+      "transform_params": {},
+      "transform_version": "",
+      "type": "editable"
+    }
+  ],
+  "ui_state": {
+    "expanded_track_ids": [
+      "track_source"
+    ],
+    "timeline": {
+      "pixels_per_second": 120.0,
+      "scroll_seconds": 0.0,
+      "selected_track_id": "track_edit"
+    },
+    "unknown_panel": {
+      "columns": [
+        "name",
+        "state"
+      ]
+    }
+  }
+}

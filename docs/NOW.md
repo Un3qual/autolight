@@ -1,75 +1,57 @@
 # Autolight NOW
 
-Updated: 2026-06-03
+Updated: 2026-06-05
 
-## Active Batch: Rust CXX-Qt Smoke Spike
+## Active Batch: PR 13 Review-Bot Follow-Through Refresh
 
-**Status:** ready
+**Status:** complete
 
-**Goal:** Prove that a Rust binary can load the existing Qt Quick/QML shell through CXX-Qt and expose a minimal `AppController`-like object to QML.
+**Goal:** Pull current PR #13 commits, fetch unresolved and new bot feedback including stale/outside-diff/duplicate threads, fix valid findings, push, then reply where needed.
 
-**Why this batch:** The Rust port is locked to CXX-Qt. Nothing else should be ported until the Qt/Rust bridge can launch the current shell in offscreen smoke mode.
+## Scope
+
+- Fast-forwarded `codex/rust-runtime-port` from `befc331` to `6be9f26`.
+- Refreshed PR #13 review threads, flat review comments, and bot status comments from GitHub.
+- Found five actionable unresolved current bot threads plus one stale unresolved DeepSource thread before the first follow-up push.
+- Fixed CodeRabbit's timing-sensitive async worker tests by adding a test-only ready-worker factory and replacing sleep/poll assumptions with deterministic worker results.
+- Fixed Codex's generated-marker audio-parent finding by allowing complete generated `markers.v1` tracks to reuse their online source-audio context for audio-input transforms.
+- Fixed Codex's generated-audio playback finding by preferring the selected track's valid `audio`/`stem` cache artifact before falling back to source audio.
+- Fixed Codex's cache recovery finding by restoring cache-stale tracks and dependents when all cache refs validate again, and marking the controller dirty when Check Cache changes project state.
+- Fixed Codex's runnerless rerun finding by gating selected-track rerun on the Rust job registry.
+- DeepSource's unresolved `create_dir` comment is stale: current `main.rs` uses `DirBuilder::create(&root)` for exclusive temp-root creation and `create_dir_all` only for nested asset parents.
+- After the first push, refreshed the newest review-thread page and found three new CodeRabbit comments.
+- Fixed CodeRabbit's README Qt-install wording by replacing machine-specific wording with a Homebrew example plus generic Qt-distribution guidance.
+- Fixed CodeRabbit's injected-controller startup finding by gating default-project bootstrap to the self-owned `AppRuntime`; injected `appController` instances still get viewport sizing without being reset.
+- CodeRabbit's `TimelineView.qml` native dependency comment is not actionable for this branch: current product direction is Rust/CXX-Qt only, and the QML/native timeline scene is intentionally covered by Rust-only surface tests.
 
 ## Target Paths
 
-- `Cargo.toml`
-- `crates/autolight-qt/Cargo.toml`
-- `crates/autolight-qt/build.rs`
-- `crates/autolight-qt/src/lib.rs`
-- `crates/autolight-qt/src/app_controller.rs`
-- `crates/autolight-app/Cargo.toml`
-- `crates/autolight-app/src/main.rs`
-- `Cargo.lock`
-- `UI/Main.qml` only if a minimal import or context adapter is required
-- `README.md` only for new Rust smoke/run commands if the spike works
-
-## Reference Docs
-
-- Active architecture: `docs/superpowers/specs/2026-06-03-autolight-rust-cxx-qt-port-design.md`
-- Background plan: `docs/superpowers/plans/2026-06-03-autolight-rust-cxx-qt-port.md`, Task 1 only
-- Process rules: `docs/PROCESS.md`
-
-Do not read older Python implementation plans unless the spike needs to understand an exact QML property or startup behavior.
-
-## Implementation Contract
-
-Build the smallest useful spike:
-
-- A Cargo workspace exists.
-- `autolight-app` starts a Qt application.
-- `autolight-qt` registers or exposes a minimal Rust-backed controller.
-- The controller exposes `projectName`, `lastError`, and `newProject()`.
-- Any other controller properties, child objects, or models read during `UI/Main.qml` startup are stubbed with inert values so the existing QML shell can load without runtime binding errors.
-- The Rust binary supports `--smoke`.
-- Offscreen smoke proves the QML root loads and can observe at least one Rust controller value.
-- `Cargo.lock` is created and committed before locked Cargo verification is required.
-
-Do not port project schema, jobs, transforms, timeline models, or analysis in this batch.
+- `README.md`
+- `UI/Main.qml`
+- `crates/autolight-core/src/cache.rs`
+- `crates/autolight-core/src/transforms.rs`
+- `crates/autolight-jobs/src/queue.rs`
+- `crates/autolight-qt/src/app_controller/job_worker.rs`
+- `crates/autolight-qt/src/app_controller/mod.rs`
+- `crates/autolight-qt/src/app_controller/playback_controller.rs`
+- `crates/autolight-qt/src/app_controller/tests.rs`
+- `docs/NOW.md`
 
 ## Verification
 
-Run the commands that exist after the spike is implemented:
+Passed:
 
 ```bash
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test -p autolight-qt --locked
+cargo test -p autolight-jobs --locked jobs_refresh_cache_validity
+cargo test -p autolight-core --locked transforms_audio_parent_compatibility_accepts_source_or_audio_artifact_context
 cargo fmt --all -- --check
-cargo generate-lockfile
-cargo test --workspace --locked
-QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo test --workspace --locked
+QMAKE=/opt/homebrew/opt/qt/bin/qmake cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+QMAKE=/opt/homebrew/opt/qt/bin/qmake QT_QPA_PLATFORM=offscreen cargo run -p autolight-app -- --smoke
 git diff --check
 ```
 
-If CXX-Qt dependencies cannot be fetched because of sandboxed network access, rerun the dependency command with escalation and record the result in the handoff.
+## Handoff
 
-## Completion Update
-
-When this batch is done, update this file:
-
-- Set `Status` to `complete`.
-- Add the exact commands run and whether they passed.
-- Add the next active batch from `docs/ROADMAP.md`.
-
-## Handoff Notes
-
-- Current app entrypoint is Python `main.py`; Rust entrypoint does not exist yet.
-- Existing QML root is `UI/Main.qml`.
-- Python/PySide remains the reference app until Rust parity is reached.
+PR #13 follow-through has no remaining local code/docs work for the latest fetched bot feedback. After the final follow-up is pushed and review-thread replies are posted, the next batch is only to monitor fresh bot reruns or human review; do not start new implementation work unless a fresh actionable thread appears.
